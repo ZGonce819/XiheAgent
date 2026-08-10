@@ -1,0 +1,100 @@
+[project]
+name = "xihe"
+version = "1.0.0"
+description = "Xihe AI Coding Assistant - A powerful AI-powered coding assistant built with FastAPI and LangGraph"
+authors = [
+    { name = "Apolleo", email = "ZGonce819@foxmail.com" }
+]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # Core framework
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "pydantic>=2.0.0",
+    
+    # LangGraph & DeepAgents
+    "deepagents>=0.1.0",
+    "langchain-core>=0.2.0",
+    "langgraph>=0.2.0",
+    "langgraph-checkpoint-redis>=0.1.0",
+    
+    # Database
+    "sqlalchemy>=2.0.0",
+    "pymysql>=1.1.0",
+    "cryptography>=41.0.0",  # Required by pymysql for MySQL 8+ authentication
+    "psycopg[binary]>=3.1.0",
+    "redis>=5.0.0",
+    
+    # HTTP & Utilities
+    "python-multipart>=0.0.6",
+    "httpx>=0.26.0",  # For async HTTP requests (SSRF-safe)
+    "aiofiles>=23.0.0",  # Async file operations
+    "python-dotenv>=1.0.0",  # Environment variable loading
+    
+    # Gitee integration
+    "requests>=2.31.0",  # Gitee API calls
+    
+    # Logging & Monitoring
+    "structlog>=24.0.0",  # Structured logging (optional)
+    
+    # Sandbox
+    "opensandbox>=0.1.0",  # Ali OpenSandbox SDK - Python client library
+    "opensandbox-code-interpreter>=0.1.0",  # Code interpreter backend for sandbox
+    "opensandbox-server>=0.1.0",  # Sandbox server component (enterprise deployment)
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.4.0",
+    "black>=24.1.0",
+    "mypy>=1.8.0",
+    "isort>=5.13.0",
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[project.scripts]
+xihe-start = "xihe.scripts.start_all:main"
+xihe-stop = "xihe.scripts.stop_all:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["xihe"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "ARG", "SIM"]
+ignore = ["E501"]  # Line length handled by ruff automatically
+
+[tool.ruff.lint.isort]
+known-first-party = ["xihe"]
+section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-comma-trailing-commas = false
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = true
+strict_optional = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["xihe*"]
