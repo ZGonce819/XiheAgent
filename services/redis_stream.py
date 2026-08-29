@@ -1,0 +1,142 @@
+"""Redis Stream 事件总线。
+
+可选启用的 SSE 事件分发方案，用于多进程或多实例部署场景。
+
+当 ``USE_REDIS_STREAM=true`` 时，Agent 运行产生的事件会写入 Redis Stream，
+前端 SSE 连接从对应的 consumer group 中读取事件。这样即使 Agent 运行在
+进程 A，前端连接在进程 B，事件也能正确推送。
+
+不启用时（默认），SSE 事件通过 asyncio.Queue 在单进程内直接推送。
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any
+
+from config.app_config import get_settings
+
+logger = logging.getLogger(__name__)
+
+_STREAM_KEY_PREFIX = "xihe:sse:events:"
+_CONSUMER_GROUP = "xihe-dashboard"
+
+_redis_conn: Any = None
+
+
+def _stream_key(thread_id: str) -> str:
+    """生成 thread 对应的 Redis Stream key。"""
+
+    return f"{_STREAM_KEY_PREFIX}{thread_id}"
+
+
+def _get_redis() -> Any:
+    """获取 Redis 连接实例。
+
+    使用与 Checkpoint 相同的 Redis 实例，但切换到 SSE 专用 DB。
+    连接在模块级别缓存，避免每次调用都新建连接。
+    """
+
+    global _redis_conn
+    if _redis_conn is not None:
+        try:
+            _redis_conn.ping()
+            return _redis_conn
+        except Exception:
+            _redis_conn = None
+
+    import redis
+
+    settings = get_settings()
+    _redis_conn = redis.Redis(
+        host=settings.redis_host,
+        port=settings.redis_port,
+        password=settings.redis_password or None,
+        db=settings.redis_stream_db,
+        decode_responses=True,
+        socket_timeout=5,
+        socket_connect_timeout=3,
+        retry_on_timeout=True,
+    )
+    return _redis_conn
+
+
+def ensure_consumer_group(thread_id: str) -> None:
+    """确保 Redis Stream 的 consumer group 已创建。
+
+    首次为某个 thread 推送事件前调用。如果 group 已存在则忽略。
+    """
+
+    r = _get_redis()
+    try:
+        r.xgroup_create(_stream_key(thread_id), _CONSUMER_GROUP, id="0", mkstream=True)
+    except Exception as exc:
+        if "BUSYGROUP" not in str(exc):
+            raise
+        logger.debug("Consumer group 已存在：thread_id=%s", thread_id)
+
+
+def publish_event(thread_id: str, event: str, data: dict[str, Any]) -> None:
+    """把 SSE 事件写入 Redis Stream。
+
+    Args:
+        thread_id: 目标会话 ID。
+        event: SSE 事件名称，例如 ``text_delta``、``thread_done``。
+        data: 事件负载，会被 JSON 序列化后写入。
+    """
+
+    r = _get_redis()
+    payload = json.dumps(data, ensure_ascii=False, default=str)
+    r.xadd(_stream_key(thread_id), {"event": event, "data": payload})
+
+
+def read_events(
+    thread_id: str,
+    *,
+    consumer_name: str = "dashboard",
+    count: int = 50,
+    block_ms: int = 5000,
+) -> list[tuple[str, dict[str, Any]]]:
+    """从 Redis Stream 中读取未消费的 SSE 事件。
+
+    Args:
+        thread_id: 目标会话 ID。
+        consumer_name: 当前消费者名称，用于 consumer group 内的负载均衡。
+        count: 单次最多读取的事件数。
+        block_ms: 无事件时的阻塞等待毫秒数，0 表示不阻塞。
+
+    Returns:
+        事件列表，每项为 ``(event_name, data_dict)`` 元组。
+    """
+
+    ensure_consumer_group(thread_id)
+    r = _get_redis()
+    results = r.xreadgroup(
+        groupname=_CONSUMER_GROUP,
+        consumername=consumer_name,
+        streams={_stream_key(thread_id): ">"},
+        count=count,
+        block=block_ms,
+    )
+    events: list[tuple[str, dict[str, Any]]] = []
+    for _stream_name, messages in results:
+        for message_id, fields in messages:
+            event_name = fields.get("event", "")
+            try:
+                data = json.loads(fields.get("data", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                data = {}
+            events.append((event_name, data))
+            r.xack(_stream_key(thread_id), _CONSUMER_GROUP, message_id)
+    return events
+
+
+def cleanup_stream(thread_id: str) -> None:
+    """删除 thread 对应的 Redis Stream，释放内存。
+
+    在 thread 被删除或确认不再需要实时推送时调用。
+    """
+
+    r = _get_redis()
+    r.delete(_stream_key(thread_id))
