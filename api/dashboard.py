@@ -26,7 +26,14 @@ from agent.runtime import (
     list_tasks,
     run_agent_task,
 )
+from config.app_config import get_settings
 from config.env_config import get_env
+from services.redis_stream import (
+    cleanup_stream,
+    ensure_consumer_group,
+    publish_event,
+    read_events,
+)
 
 dashboard_router = APIRouter(prefix="/dashboard/api")
 
@@ -295,14 +302,16 @@ def _post_streaming_response(
 ) -> StreamingResponse:
     """直接执行本轮 Agent，并把过程事件作为 POST SSE 响应返回。
 
-    新链路：请求体中携带本轮用户输入，后端在同一条 StreamingResponse 中
-    先发送 user_message，再直接运行 Agent。Store 仍会记录任务摘要、PR、
-    run_events 和仓库记忆，但前端实时正文不再依赖 Store 轮询。
+    支持两种事件分发模式：
+    - asyncio.Queue（默认）：单进程内直接推送。
+    - Redis Stream（USE_REDIS_STREAM=true）：通过 Redis Stream 跨进程分发。
     """
     initialize_task_record(repo_url=repo_url, prompt=content, thread_id=thread_id)
     initial_task = get_task(thread_id)
     if initial_task is None:
         raise HTTPException(status_code=500, detail="task was not persisted")
+
+    use_redis = get_settings().use_redis_stream
 
     async def event_iter():
         loop = asyncio.get_running_loop()
@@ -321,7 +330,10 @@ def _post_streaming_response(
                 )
                 if not payload["content"].strip():
                     return
-            enqueue(event, payload)
+            if use_redis:
+                publish_event(thread_id, event, payload)
+            else:
+                enqueue(event, payload)
 
         def worker() -> None:
             try:
@@ -369,16 +381,33 @@ def _post_streaming_response(
             },
         )
 
+        if use_redis:
+            ensure_consumer_group(thread_id)
+
         thread = threading.Thread(
             target=worker, name=f"xihe-stream-{thread_id}", daemon=True
         )
         thread.start()
 
-        while True:
-            event, data = await queue.get()
-            yield _sse_part(event, data)
-            if event == "done":
-                break
+        try:
+            if use_redis:
+                while True:
+                    events = await asyncio.to_thread(
+                        read_events, thread_id, block_ms=5000
+                    )
+                    for event, data in events:
+                        yield _sse_part(event, data)
+                        if event == "done":
+                            return
+            else:
+                while True:
+                    event, data = await queue.get()
+                    yield _sse_part(event, data)
+                    if event == "done":
+                        break
+        finally:
+            if use_redis:
+                cleanup_stream(thread_id)
 
     return StreamingResponse(
         event_iter(),
@@ -418,4 +447,6 @@ def dashboard_delete_thread(thread_id: str) -> None:
     deleted = delete_task(thread_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="thread not found")
+    if get_settings().use_redis_stream:
+        cleanup_stream(thread_id)
     return None

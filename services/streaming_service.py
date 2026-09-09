@@ -25,6 +25,12 @@ from fastapi.responses import StreamingResponse
 from agent.runtime.events import record_event
 from agent.runtime.task_router import get_task, initialize_task_record, run_agent_task
 from config.app_config import get_settings
+from services.redis_stream import (
+    cleanup_stream,
+    ensure_consumer_group,
+    publish_event,
+    read_events,
+)
 from services.thread_service import thread_meta_payload, user_visible_stream_text
 
 logger = logging.getLogger(__name__)
@@ -68,6 +74,7 @@ def build_streaming_response(
         raise HTTPException(status_code=500, detail="task was not persisted")
 
     settings = get_settings()
+    use_redis = settings.use_redis_stream
 
     async def event_iter():
         queue: asyncio.Queue[tuple[str, dict[str, Any]]] = asyncio.Queue()
@@ -86,7 +93,10 @@ def build_streaming_response(
                 )
                 if not payload["content"].strip():
                     return
-            enqueue(event, payload)
+            if use_redis:
+                publish_event(thread_id, event, payload)
+            else:
+                enqueue(event, payload)
 
         def worker() -> None:
             try:
@@ -134,6 +144,9 @@ def build_streaming_response(
             },
         )
 
+        if use_redis:
+            ensure_consumer_group(thread_id)
+
         thread = threading.Thread(
             target=worker,
             name=f"xihe-stream-{thread_id}",
@@ -141,11 +154,25 @@ def build_streaming_response(
         )
         thread.start()
 
-        while True:
-            event, data = await queue.get()
-            yield sse_part(event, data)
-            if event == "done":
-                break
+        try:
+            if use_redis:
+                while True:
+                    events = await asyncio.to_thread(
+                        read_events, thread_id, block_ms=5000
+                    )
+                    for event, data in events:
+                        yield sse_part(event, data)
+                        if event == "done":
+                            return
+            else:
+                while True:
+                    event, data = await queue.get()
+                    yield sse_part(event, data)
+                    if event == "done":
+                        break
+        finally:
+            if use_redis:
+                cleanup_stream(thread_id)
 
     return StreamingResponse(
         event_iter(),

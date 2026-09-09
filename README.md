@@ -5,7 +5,7 @@
 ## 核心特性
 
 - 🤖 **智能 Agent 编排** - 基于 LangGraph + DeepAgents v3，支持复杂任务的自动分解与执行
-- 🔄 **SSE 实时流式输出** - 基于 asyncio.Queue 的实时事件推送，Redis Stream 多进程方案规划中
+- 🔄 **SSE 实时流式输出** - 支持 asyncio.Queue（单进程）或 Redis Stream（多进程部署）事件分发
 - 💾 **三层存储架构** - Redis（Checkpoint）+ MySQL（业务数据）+ PostgreSQL（长期记忆）
 - 🔐 **企业级安全** - 虚拟路径隔离、命令白名单、Git 分支保护、RBAC 权限控制（规划中）
 - 📊 **Gitee 深度集成** - 自动创建 PR、添加 Code Review 评论、同步代码变更
@@ -25,7 +25,7 @@
 | 业务数据存储 | MySQL (pymysql) - Thread/Run/Finding 等 |
 | 长期记忆存储 | PostgreSQL (psycopg) - LangGraph Store |
 | Checkpoint 存储 | Redis (langgraph-checkpoint-redis) |
-| SSE 事件总线 | asyncio.Queue（Redis Stream 规划中） |
+| SSE 事件总线 | asyncio.Queue / Redis Stream（USE_REDIS_STREAM=true 启用） |
 | 代码托管集成 | Gitee API |
 | Python 版本 | >= 3.11 |
 
@@ -238,7 +238,7 @@ PG_USER=postgres
 PG_PASSWORD=postgres
 PG_DATABASE=xihe
 
-# Redis Stream SSE（规划中，当前未接入，默认使用 asyncio.Queue）
+# Redis Stream SSE（设为 true 启用多进程模式，默认使用 asyncio.Queue）
 USE_REDIS_STREAM=false
 REDIS_STREAM_DB=1
 
@@ -379,8 +379,8 @@ xihe/
 ├── services/              # 业务逻辑层
 │   ├── repo_service.py    # 仓库 URL 规范化
 │   ├── thread_service.py  # Thread DTO 组装 + 状态映射
-│   ├── streaming_service.py # SSE 流式编排（asyncio.Queue 模式）
-│   ├── redis_stream.py      # Redis Stream 事件总线（规划中，尚未接入）
+│   ├── streaming_service.py # SSE 流式编排（asyncio.Queue / Redis Stream 双模式）
+│   ├── redis_stream.py      # Redis Stream 事件总线（USE_REDIS_STREAM=true 启用）
 │   └── __init__.py        # 服务导出
 │
 ├── scripts/               # CLI 脚本
