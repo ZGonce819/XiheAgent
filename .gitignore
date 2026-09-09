@@ -64,6 +64,7 @@ ehthumbs.db
 node_modules/
 ui/node_modules/
 ui/dist/
+ui/.output/
 ui/.vite/
 bun.lock
 yarn.lock

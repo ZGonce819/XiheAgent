@@ -1,11 +1,11 @@
-# Xihe (羲和) — AI Coding Assistant
+# XiheAgent (羲和) — AI Coding Assistant
 
-羲和是一个基于 FastAPI + LangGraph + DeepAgents 构建的 AI 编码助手，支持 Gitee 仓库集成、多轮对话、代码审查、自动化任务编排等功能。
+羲和（XiheAgent）是一个基于 FastAPI + LangGraph + DeepAgents 构建的 AI 编码助手，支持 Gitee 仓库集成、多轮对话、代码审查、自动化任务编排等功能。
 
 ## 核心特性
 
 - 🤖 **智能 Agent 编排** - 基于 LangGraph + DeepAgents v3，支持复杂任务的自动分解与执行
-- 🔄 **SSE 实时流式输出** - 支持 Redis Stream 事件总线或 asyncio.Queue，前端实时展示 Agent 思考过程
+- 🔄 **SSE 实时流式输出** - 基于 asyncio.Queue 的实时事件推送，Redis Stream 多进程方案规划中
 - 💾 **三层存储架构** - Redis（Checkpoint）+ MySQL（业务数据）+ PostgreSQL（长期记忆）
 - 🔐 **企业级安全** - 虚拟路径隔离、命令白名单、Git 分支保护、RBAC 权限控制（规划中）
 - 📊 **Gitee 深度集成** - 自动创建 PR、添加 Code Review 评论、同步代码变更
@@ -25,7 +25,7 @@
 | 业务数据存储 | MySQL (pymysql) - Thread/Run/Finding 等 |
 | 长期记忆存储 | PostgreSQL (psycopg) - LangGraph Store |
 | Checkpoint 存储 | Redis (langgraph-checkpoint-redis) |
-| SSE 事件总线 | Redis Stream（可选）或 asyncio.Queue |
+| SSE 事件总线 | asyncio.Queue（Redis Stream 规划中） |
 | 代码托管集成 | Gitee API |
 | Python 版本 | >= 3.11 |
 
@@ -68,7 +68,7 @@ docker run -d --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=postgres -e POST
 #### 手动安装
 
 **Redis**（Windows）：
-- 下载 Redis for Windows: https://github.com/microsoftarchive/redis/releases
+- 下载 Redis for Windows: https://github.com/tporadowski/redis/releases
 - 或使用 WSL2: `sudo apt install redis-server && sudo service redis-server start`
 
 **MySQL**：
@@ -180,7 +180,7 @@ opensandbox-server -h
 docker pull sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:v1.0.2
 ```
 
-#### 7. Xihe 项目启用沙盒
+#### 7. XiheAgent 启用沙盒
 
 在 `.env.local` 中添加：
 ```ini
@@ -195,7 +195,7 @@ SANDBOX_PORT=8080
 pip install -e ".[sandbox]"
 ```
 
-**注意：** 如果不启用沙盒，Xihe 会自动降级使用 `LocalShellBackend`（本地 Shell 执行），适合开发和个人使用场景。
+**注意：** 如果不启用沙盒，XiheAgent 会自动降级使用 `LocalShellBackend`（本地 Shell 执行），适合开发和个人使用场景。
 
 ### 安装 Python 依赖
 
@@ -238,7 +238,7 @@ PG_USER=postgres
 PG_PASSWORD=postgres
 PG_DATABASE=xihe
 
-# Redis Stream SSE（可选，默认使用 asyncio.Queue）
+# Redis Stream SSE（规划中，当前未接入，默认使用 asyncio.Queue）
 USE_REDIS_STREAM=false
 REDIS_STREAM_DB=1
 
@@ -379,8 +379,8 @@ xihe/
 ├── services/              # 业务逻辑层
 │   ├── repo_service.py    # 仓库 URL 规范化
 │   ├── thread_service.py  # Thread DTO 组装 + 状态映射
-│   ├── streaming_service.py # SSE 流式编排（双模式：asyncio.Queue / Redis Stream）
-│   ├── redis_stream.py    # Redis Stream 事件总线（可选启用）
+│   ├── streaming_service.py # SSE 流式编排（asyncio.Queue 模式）
+│   ├── redis_stream.py      # Redis Stream 事件总线（规划中，尚未接入）
 │   └── __init__.py        # 服务导出
 │
 ├── scripts/               # CLI 脚本
