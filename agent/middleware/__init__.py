@@ -3,7 +3,7 @@
 中间件顺序建议：
 1. ``ContextInjectionMiddleware`` — 整轮任务开始前注入仓库级记忆。
 2. ``MessageSanitizeMiddleware`` — 模型调用前清洗历史消息中的不兼容 content block。
-3. ``SanitizeToolInputsMiddleware`` — 工具执行前清洗路径、Gitee URL 等参数。
+3. ``SanitizeToolInputsMiddleware`` — 工具执行前清洗路径、SCM URL 等参数。
 4. ``ModelCallLimitMiddleware`` — 限制模型循环次数（来自 DeepAgents 框架）。
 5. ``ToolErrorMiddleware`` — 把工具异常转成模型可恢复的 ToolMessage。
 """

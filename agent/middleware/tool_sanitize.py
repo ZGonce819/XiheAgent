@@ -4,7 +4,7 @@
 1. 把 Windows 绝对路径直接传给文件工具；
 2. 使用 ``..`` 访问工作区外路径；
 3. 访问 ``.secrets`` 等敏感目录；
-4. 把带 token 的 Gitee URL 传入工具；
+4. 把带 token 的 SCM URL 传入工具；
 5. 把本应为整数的 offset/limit 生成为字符串。
 
 本模块在工具真正执行前统一清洗这些高风险参数。
@@ -28,6 +28,7 @@ from langgraph.types import Command
 
 from backends.local_shell import LocalShellBackend
 from agent.runtime.events import record_event
+from utils.codeup_utils import normalize_codeup_repo_url
 from utils.gitee_utils import mask_token, normalize_gitee_repo_url
 from utils.github_utils import normalize_github_repo_url
 
@@ -36,6 +37,7 @@ logger = logging.getLogger(__name__)
 PATH_ARGUMENTS = {"path", "cwd", "repo_dir", "project_dir", "file_path", "old_path", "new_path"}
 GITEE_URL_ARGUMENTS = {"repo_url"}
 GITHUB_URL_ARGUMENTS = {"repo_url"}
+CODEUP_URL_ARGUMENTS = {"repo_url"}
 READ_FILE_INT_ARGUMENTS = {"offset", "limit"}
 
 
@@ -43,7 +45,7 @@ class ToolInputRejected(ValueError):
     """工具入参被 middleware 拒绝。
 
     这是"可恢复错误"，不是系统异常。返回给模型后，模型应改用工作区相对路径、
-    正确 Gitee 地址或更安全的命令重新调用工具。
+    正确仓库地址或更安全的命令重新调用工具。
     """
 
 
@@ -55,7 +57,7 @@ def _reject_result(error: ToolInputRejected, *, tool_name: str, backend: LocalSh
         "error_type": "ToolInputRejected",
         "error": str(error),
         "workspace": str(backend.workspace.root),
-        "hint": "请改用工作区内相对路径，例如 '.'、'projects' 或 'projects/仓库名'；不要访问 .secrets。仓库地址请使用标准 Gitee HTTPS 地址。",
+        "hint": "请改用工作区内相对路径，例如 '.'、'projects' 或 'projects/仓库名'；不要访问 .secrets。仓库地址请使用标准 HTTPS 地址。",
     }
 
 
@@ -165,10 +167,22 @@ def _sanitize_github_url(value: Any) -> Any:
     return normalize_github_repo_url(text)
 
 
+def _sanitize_codeup_url(value: Any) -> Any:
+    """把 Codeup 地址规范为不带 token 的标准 HTTPS clone_url。"""
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text:
+        return text
+    if "codeup.aliyun.com" not in text.lower():
+        return text
+    return normalize_codeup_repo_url(text)
+
+
 def sanitize_tool_kwargs(tool_name: str, kwargs: dict[str, Any], *, backend: LocalShellBackend) -> dict[str, Any]:
     """根据参数名对工具入参做统一清洗。
 
-    只处理所有工具共享的高风险参数：路径、Gitee URL、GitHub URL。
+    只处理所有工具共享的高风险参数：路径、SCM URL。
     """
     sanitized = dict(kwargs)
     for key in PATH_ARGUMENTS:
@@ -180,6 +194,9 @@ def sanitize_tool_kwargs(tool_name: str, kwargs: dict[str, Any], *, backend: Loc
     for key in GITHUB_URL_ARGUMENTS:
         if key in sanitized:
             sanitized[key] = _sanitize_github_url(sanitized[key])
+    for key in CODEUP_URL_ARGUMENTS:
+        if key in sanitized:
+            sanitized[key] = _sanitize_codeup_url(sanitized[key])
     for key in READ_FILE_INT_ARGUMENTS:
         if key in sanitized:
             sanitized[key] = _coerce_int(sanitized[key])
@@ -190,7 +207,7 @@ def sanitize_tool_kwargs(tool_name: str, kwargs: dict[str, Any], *, backend: Loc
 class SanitizeToolInputsMiddleware(AgentMiddleware):
     """工具入参清洗中间件。
 
-    运行在 DeepAgents 工具调用生命周期里，能同时覆盖自定义 Gitee 工具
+    运行在 DeepAgents 工具调用生命周期里，能同时覆盖自定义 SCM 工具
     和 DeepAgents 原生的文件/命令工具。LocalShellBackend 仍是最终安全边界，
     这里主要负责把常见错误参数转换成 Agent 可恢复的中文反馈。
     """

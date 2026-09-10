@@ -233,7 +233,7 @@ def _tool_call_from_event(event: Any) -> Any | None:
     """尽量从 raw tool_calls event 中提取工具调用对象。
 
     工具事件在不同 DeepAgents 小版本中的字段可能不完全一致；本函数只做保守解析。
-    解析不到时返回 None，具体文件/命令/Gitee 工具仍会通过工具内部 record_event 展示。
+    解析不到时返回 None，具体文件/命令/SCM 工具仍会通过工具内部 record_event 展示。
     """
 
     if not isinstance(event, dict) or event.get("method") != "tool_calls":
@@ -519,7 +519,7 @@ def _consume_raw_event_stream(
        工具步骤和子 Agent 生命周期展示。
 
     如果某个 DeepAgents 小版本没有在 raw event 中暴露 tool_calls，工具内部的 record_event
-    仍然会记录读文件、命令、Gitee 等步骤；但 write_todos 只有 raw tool_calls 可见时才会出现。
+    仍然会记录读文件、命令、SCM 仓库操作等步骤；但 write_todos 只有 raw tool_calls 可见时才会出现。
     """
 
     tool_call_index = 0

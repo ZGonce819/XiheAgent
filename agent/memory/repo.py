@@ -1,7 +1,8 @@
 """仓库级长期记忆管理。
 
-每个 Gitee 仓库拥有独立的记忆文件（``/memories/{owner}/{repo}.md``），
-通过 LangGraph Store（PostgreSQL）持久化。本模块提供：
+每个 SCM 仓库（Gitee / GitHub / Codeup）拥有独立的记忆文件
+（``/memories/{owner}/{repo}.md``），通过 LangGraph Store（PostgreSQL）持久化。
+本模块提供：
 
 - namespace / store key 生成
 - 首次记忆模板构建
@@ -11,12 +12,18 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Final
+from typing import Final, Protocol
 
 from deepagents.backends.utils import create_file_data
 from langgraph.store.base import BaseStore
 
-from utils.gitee_utils import GiteeRepo
+
+class ScmRepo(Protocol):
+    """任意 SCM 平台的仓库信息，只要具备 owner、repo 和 clone_url 即可。"""
+
+    owner: str
+    repo: str
+    clone_url: str
 
 REPO_MEMORY_NAMESPACE_PREFIX: Final[tuple[str, str]] = ("xihe", "repo-memory")
 
@@ -36,10 +43,10 @@ def repo_memory_store_key(owner: str, repo: str) -> str:
     return f"/{owner}/{repo}.md"
 
 
-def repo_project_dir(repo: GiteeRepo) -> str:
-    """根据 Gitee 仓库信息生成固定的本地项目目录。
+def repo_project_dir(repo: ScmRepo) -> str:
+    """根据仓库信息生成固定的本地项目目录。
 
-    只要前端传入 Gitee 仓库地址，后端就可以从 URL 解析出 repo 名称，
+    只要前端传入仓库地址，后端就可以从 URL 解析出 repo 名称，
     并稳定落到 ``projects/<repo>``。本地目录、命令目录和仓库记忆路径
     都由同一个 owner/repo 规则推导，避免多套映射关系互相覆盖。
     """
@@ -49,7 +56,7 @@ def repo_project_dir(repo: GiteeRepo) -> str:
 def build_repo_memory_namespace(owner: str, repo: str) -> tuple[str, ...]:
     """生成仓库级长期记忆的 StoreBackend namespace。
 
-    每个 Gitee 仓库使用独立 namespace，不同仓库的记忆文件路径不同、
+    每个仓库使用独立 namespace，不同仓库的记忆文件路径不同、
     namespace 也不同，双重隔离。
     """
     return (*REPO_MEMORY_NAMESPACE_PREFIX, owner.lower(), repo.lower())
@@ -65,7 +72,7 @@ def _extract_owner_repo_from_namespace(namespace: tuple[str, ...]) -> tuple[str,
     return None
 
 
-def build_initial_repo_memory(*, repo: GiteeRepo, project_dir: str) -> str:
+def build_initial_repo_memory(*, repo: ScmRepo, project_dir: str) -> str:
     """生成首次识别仓库时的记忆文件模板。
 
     不猜测技术栈和启动命令，只写入已确定的仓库地址、本地目录和安全约定。
@@ -123,7 +130,7 @@ def get_repo_memory_item(store: BaseStore, namespace: tuple[str, ...]):
 def ensure_repo_memory_initialized(
     *,
     store: BaseStore,
-    repo: GiteeRepo,
+    repo: ScmRepo,
     project_dir: str,
 ) -> bool:
     """确保当前仓库的记忆文件已存在。

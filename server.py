@@ -40,19 +40,24 @@ from prompt import get_system_prompt
 from tools import (
     add_review_finding,
     fetch_url,
+    get_codeup_merge_request_context,
     get_gitee_pull_request_context,
     get_github_pull_request_context,
     get_review_diff_summary,
     list_review_findings,
     load_default_review_rules,
+    open_codeup_merge_request,
     open_gitee_pull_request,
     open_github_pull_request,
+    publish_codeup_mr_comment,
     publish_gitee_pr_comment,
     publish_github_pr_comment,
     validate_review_finding_location,
     web_search,
 )
-from utils.gitee_utils import parse_gitee_repo_url
+from utils.codeup_utils import CodeupRepo, parse_codeup_repo_url
+from utils.gitee_utils import GiteeRepo, parse_gitee_repo_url
+from utils.github_utils import GitHubRepo, parse_github_repo_url
 
 logger = logging.getLogger(__name__)
 
@@ -149,13 +154,13 @@ def _general_purpose_subagent(model: BaseChatModel) -> SubAgent:
 def _code_reviewer_subagent(model: BaseChatModel) -> SubAgent:
     """构建只读代码审查子 Agent。
 
-    职责：读取规则、读取 Gitee PR 上下文、分析 diff、记录结构化 finding，
+    职责：读取规则、读取 SCM PR/MR 上下文、分析 diff、记录结构化 finding，
     并输出中文审查报告。不允许修改源码或执行 Git 写操作。
     """
     return {
         "name": "code_reviewer",
         "description": (
-            "用于审查 Gitee Pull Request 或本地分支 diff 的子 Agent。"
+            "用于审查 Pull Request / Merge Request 或本地分支 diff 的子 Agent。"
             "它会读取审查规则、PR 上下文和变更文件，记录结构化 finding，"
             "最后输出中文审查报告。"
         ),
@@ -165,10 +170,9 @@ def _code_reviewer_subagent(model: BaseChatModel) -> SubAgent:
             "审查流程：\n"
             "1. 按 code-review skill 先用 read_file 读取工作区规则和仓库规则；"
             "读不到时调用 load_default_review_rules。\n"
-            "2. 如果用户提供 Gitee PR 编号，调用 get_gitee_pull_request_context "
-            "读取 PR 详情、提交、文件和评论。\n"
-            "如果用户提供 GitHub PR 编号，调用 get_github_pull_request_context "
-            "读取 PR 详情、提交、文件和评论。\n"
+            "2. 如果用户提供 PR/MR 编号，根据平台调用对应的上下文获取工具"
+            "（get_gitee_pull_request_context / get_github_pull_request_context / "
+            "get_codeup_merge_request_context）读取详情、提交、文件和评论。\n"
             "3. 调用 get_review_diff_summary 获取本地 diff 摘要和变更行号。\n"
             "4. 只记录会导致真实风险的问题，不记录纯风格偏好。\n"
             "5. finding 必须包含 file、line、severity、title、description。\n"
@@ -181,6 +185,7 @@ def _code_reviewer_subagent(model: BaseChatModel) -> SubAgent:
         ),
         "model": model,
         "tools": [
+            get_codeup_merge_request_context,
             get_gitee_pull_request_context,
             get_github_pull_request_context,
             load_default_review_rules,
@@ -293,14 +298,26 @@ def create_repo_backend(
     )
 
 
+def _parse_repo_url(repo_url: str) -> GiteeRepo | GitHubRepo | CodeupRepo:
+    """根据 URL 域名自动识别 SCM 平台并解析仓库信息。"""
+    from urllib.parse import urlparse
+    parsed = urlparse(repo_url.strip())
+    hostname = (parsed.hostname or "").lower()
+    if hostname in {"codeup.aliyun.com", "www.codeup.aliyun.com"}:
+        return parse_codeup_repo_url(repo_url)
+    if hostname in {"github.com", "www.github.com"}:
+        return parse_github_repo_url(repo_url)
+    return parse_gitee_repo_url(repo_url)
+
+
 def _prepare_repo_backend_context(
     *,
     repo_url: Any,
     backend: BaseSandbox,
 ) -> tuple[Any, list[str] | None, str | None]:
-    """为指定 Gitee 仓库准备 repo 级 Backend 和长期记忆。
+    """为指定仓库准备 repo 级 Backend 和长期记忆。
 
-    如果任务绑定了 Gitee 仓库，将 /memories/ 路径挂到 DeepAgents StoreBackend，
+    如果任务绑定了 SCM 仓库，将 /memories/ 路径挂到 DeepAgents StoreBackend，
     同时读取记忆文件内容返回，避免后续 middleware 重复查询数据库。
 
     Returns:
@@ -309,7 +326,7 @@ def _prepare_repo_backend_context(
     if not isinstance(repo_url, str) or not repo_url.strip():
         return backend, None, None
 
-    repo = parse_gitee_repo_url(repo_url)
+    repo = _parse_repo_url(repo_url)
     langgraph_store = get_langgraph_store()
     project_dir = repo_project_dir(repo)
     ensure_repo_memory_initialized(
@@ -397,6 +414,9 @@ def get_agent(config: RunnableConfig):
             open_github_pull_request,
             publish_github_pr_comment,
             get_github_pull_request_context,
+            open_codeup_merge_request,
+            publish_codeup_mr_comment,
+            get_codeup_merge_request_context,
             load_default_review_rules,
             get_review_diff_summary,
             validate_review_finding_location,

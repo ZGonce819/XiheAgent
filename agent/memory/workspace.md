@@ -6,7 +6,7 @@ Xihe 使用固定的 Windows 本地工作区 `E:\ai_workspace` 执行 Agent 任�
 
 ## 目录语义
 
-- `projects/`：Gitee 仓库克隆目录，真实业务项目通常位于 `projects/仓库名`。
+- `projects/`：SCM 仓库克隆目录（Gitee / GitHub / Codeup），真实业务项目通常位于 `projects/仓库名`。
 - `skills/`：DeepAgents 原生 skill 目录，Agent 运行时通过 `/skills` 虚拟路径读取。
 - `runtimes/`：共享运行环境目录，例如 Python 虚拟环境、Node 或其它课程运行时。
 - `policies/`：编码规范、审查规范、安全规范目录。

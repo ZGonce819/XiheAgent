@@ -9,7 +9,7 @@
 - streaming_runtime: 事件流消费，对接 DeepAgents V3 的原始事件协议。
 - event_handlers: 事件处理器，安全包装任务执行入口。
 - events: 运行步骤事件记录，供前端展示任务进度。
-- repo_mapping: 仓库目录映射，管理 Gitee 仓库到本地工作区的路径关系。
+- repo_mapping: 仓库目录映射，管理仓库到本地工作区的路径关系。
 - _helpers: 内部辅助函数，包含 checkpoint 读取、消息处理等共享逻辑。
 """
 

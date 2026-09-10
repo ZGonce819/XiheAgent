@@ -15,7 +15,6 @@ from agent.graph.checkpoint_history import visible_checkpoint_messages
 from agent.graph.graph import get_checkpointer, get_langgraph_store
 from agent.memory.repo import ensure_repo_memory_initialized, repo_project_dir
 from agent.server import get_agent
-from utils.gitee_utils import parse_gitee_repo_url
 
 logger = logging.getLogger(__name__)
 
@@ -180,7 +179,7 @@ def build_agent_user_content(
     runtime 已经通过 task_kind 做了第一层路由，但模型仍然会看到完整自然语言任务。
     为了降低误操作风险，这里再次把"本轮任务类型"和"允许/禁止的行为"写进用户内容：
 
-    - coding：允许修改代码、运行测试、提交并创建或复用 Gitee Pull Request。
+    - coding：允许修改代码、运行测试、提交并创建或复用 Pull Request / Merge Request。
     - 非 coding：只能读取仓库、分析、回答或生成方案，禁止写文件和提交。
 
     如果是用户确认后的 coding 任务，``approved_plan`` 会作为实施依据一并传入。
@@ -197,7 +196,7 @@ def build_agent_user_content(
             )
         task_instruction = (
             "这是开发实现任务。请按系统开发流程完成任务，"
-            "必要时修改代码、验证，并创建或复用 Gitee Pull Request。"
+            "必要时修改代码、验证，并创建或复用 Pull Request / Merge Request。"
             f"{plan_instruction}"
         )
     else:
@@ -209,7 +208,7 @@ def build_agent_user_content(
     return (
         f"用户可见输入：\n{visible_prompt}\n\n"
         "内部执行上下文：以下内容用于 Agent 判断和执行，不要原样展示为用户输入。\n\n"
-        f"Gitee 仓库地址：{repo_url}\n\n"
+        f"仓库地址：{repo_url}\n\n"
         f"任务类型：{task_kind}\n\n"
         f"用户任务：\n{prompt}\n\n"
         f"{task_instruction}"
@@ -233,7 +232,7 @@ def build_plan_user_content(
 
     if previous_plan and revision_prompt:
         return (
-            f"Gitee 仓库地址：{repo_url}\n\n"
+            f"仓库地址：{repo_url}\n\n"
             f"原始用户需求：\n{prompt}\n\n"
             f"上一版技术方案：\n{previous_plan}\n\n"
             f"用户新的修改要求：\n{revision_prompt}\n\n"
@@ -251,7 +250,7 @@ def build_plan_user_content(
         )
 
     return (
-        f"Gitee 仓库地址：{repo_url}\n\n"
+        f"仓库地址：{repo_url}\n\n"
         f"用户需求：\n{prompt}\n\n"
         "请只生成技术方案，不要修改文件、不要提交、不要 push、不要创建 Pull Request。\n"
         "方案必须使用中文 Markdown，建议包含：\n"

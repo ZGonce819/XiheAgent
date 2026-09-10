@@ -22,9 +22,24 @@ from agent.runtime._helpers import ensure_repo_memory_for_repo
 from agent.runtime.events import record_event
 from backends.local_shell import LocalShellBackend
 from backends.workspace import Workspace
+from urllib.parse import urlparse
+
+from utils.codeup_utils import parse_codeup_repo_url
 from utils.gitee_utils import mask_token, parse_gitee_repo_url
+from utils.github_utils import parse_github_repo_url
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_repo_url(repo_url: str):
+    """根据 URL 域名自动识别 SCM 平台并解析仓库信息。"""
+    parsed = urlparse(repo_url.strip())
+    hostname = (parsed.hostname or "").lower()
+    if hostname in {"codeup.aliyun.com", "www.codeup.aliyun.com"}:
+        return parse_codeup_repo_url(repo_url)
+    if hostname in {"github.com", "www.github.com"}:
+        return parse_github_repo_url(repo_url)
+    return parse_gitee_repo_url(repo_url)
 
 # 工作区根目录，和 backends/local_shell.py 保持一致。
 # 优先从环境变量读取，缺省值用于本地开发。
@@ -128,7 +143,7 @@ def run_pull_only_task(
 ) -> dict[str, Any]:
     """执行只拉取远程代码的轻量任务。
 
-    这个分支不调用大模型，也不创建 PR。它只确保 Gitee 仓库在本地工作区存在，
+    这个分支不调用大模型，也不创建 PR。它只确保仓库在本地工作区存在，
     然后执行 fetch 和 pull，适合用户在前端输入"先把远程代码 pull 一下"的场景。
 
     由于它不需要推理，所以不走 DeepAgent，不消耗模型调用次数。它仍然会初始化
@@ -148,7 +163,7 @@ def run_pull_only_task(
     store.clear_run_events(thread_id)
     run_id = str(uuid.uuid4())
     store.record_run(run_id=run_id, thread_id=thread_id, status="running")
-    repo = parse_gitee_repo_url(repo_url)
+    repo = _parse_repo_url(repo_url)
     workspace = Workspace(_WORKSPACE_ROOT)
     backend = LocalShellBackend(workspace)
     project_dir = repo_project_dir(repo)
@@ -180,7 +195,7 @@ def run_pull_only_task(
         else:
             # 本地还没有对应目录时，直接 clone 到 workspace/projects 下。
             record_event(thread_id, "workspace", "准备本地工作区", status="completed")
-            record_event(thread_id, "sync", "克隆 Gitee 仓库", kind="execute", status="in_progress")
+            record_event(thread_id, "sync", "克隆仓库", kind="execute", status="in_progress")
             clone_result = backend.run(
                 f"git clone {clone_url} {target.name}", cwd="projects", timeout=600,
             )

@@ -19,8 +19,8 @@ from typing import Any
 
 from langgraph.store.base import BaseStore
 
-from agent.memory.repo import build_repo_memory_namespace, get_repo_memory_item, repo_memory_store_key
-from utils.gitee_utils import GiteeRepo, mask_token
+from agent.memory.repo import ScmRepo, build_repo_memory_namespace, get_repo_memory_item, repo_memory_store_key
+from utils.gitee_utils import mask_token
 
 logger = logging.getLogger(__name__)
 
@@ -253,7 +253,7 @@ def build_updated_repo_memory(memory: str, update: RepoMemoryUpdate) -> str:
 def update_repo_memory_from_text(
     *,
     store: BaseStore,
-    repo: GiteeRepo,
+    repo: ScmRepo,
     update: RepoMemoryUpdate,
 ) -> bool:
     """把任务最终输出写回仓库级长期记忆。

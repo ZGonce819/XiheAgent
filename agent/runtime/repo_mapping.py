@@ -1,6 +1,6 @@
 """仓库目录映射。
 
-管理 Gitee 仓库 URL 到本地工作区目录的映射关系。
+管理 SCM 仓库（Gitee / GitHub / Codeup）URL 到本地工作区目录的映射关系。
 Agent 执行任务时需要知道"这个仓库对应本地哪个目录"，本模块负责解析和持久化这个映射。
 
 核心流程：
@@ -26,14 +26,28 @@ from urllib.parse import urlparse
 
 from backends.workspace import Workspace
 from store import LocalMySQLStore
-from utils.gitee_utils import GiteeRepo, parse_gitee_repo_url
+from agent.memory.repo import ScmRepo
+from utils.codeup_utils import parse_codeup_repo_url
+from utils.gitee_utils import parse_gitee_repo_url
+from utils.github_utils import parse_github_repo_url
+
+
+def _parse_repo_url(repo_url: str) -> ScmRepo:
+    """根据 URL 域名自动识别 SCM 平台并解析仓库信息。"""
+    parsed = urlparse(repo_url.strip())
+    hostname = (parsed.hostname or "").lower()
+    if hostname in {"codeup.aliyun.com", "www.codeup.aliyun.com"}:
+        return parse_codeup_repo_url(repo_url)
+    if hostname in {"github.com", "www.github.com"}:
+        return parse_github_repo_url(repo_url)
+    return parse_gitee_repo_url(repo_url)
 
 
 @dataclass(frozen=True)
 class RepoMappingResult:
     """仓库和本地目录的解析结果。"""
 
-    repo: GiteeRepo
+    repo: ScmRepo
     project_dir: str
     local_path: str
     source: str
@@ -41,34 +55,44 @@ class RepoMappingResult:
     remote_matched: bool = False
 
 
-def normalize_gitee_repo_url(repo_url: str) -> str:
-    """把带 token、无 .git、www 域名等形式统一成标准 Gitee clone_url。
+def normalize_repo_url(repo_url: str) -> str:
+    """把带 token、无 .git、www 域名等形式统一成标准 clone_url。
 
     仓库映射表使用这个标准地址作为唯一业务键，避免同一个仓库因为不同写法
     生成多条映射。
     """
 
-    return parse_gitee_repo_url(repo_url).clone_url
+    return _parse_repo_url(repo_url).clone_url
 
 
 def repo_mapping_id(repo_url: str, project_dir: str) -> str:
     """生成稳定映射 ID，便于同一仓库和目录重复 upsert。"""
 
     normalized_project_dir = project_dir.replace("\\", "/")
-    raw = f"{normalize_gitee_repo_url(repo_url)}::{normalized_project_dir}"
+    raw = f"{normalize_repo_url(repo_url)}::{normalized_project_dir}"
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 
 def _candidate_remote_urls(repo_url: str) -> set[str]:
     """生成用于比较 remote origin 的标准化候选 URL。"""
 
-    repo = parse_gitee_repo_url(repo_url)
-    return {
+    repo = _parse_repo_url(repo_url)
+    candidates = {
         repo.clone_url.lower(),
         repo.clone_url.removesuffix(".git").lower(),
-        f"git@gitee.com:{repo.owner}/{repo.repo}.git".lower(),
-        f"git@gitee.com:{repo.owner}/{repo.repo}".lower(),
     }
+    parsed = urlparse(repo.clone_url)
+    hostname = (parsed.hostname or "").lower()
+    if hostname == "gitee.com":
+        candidates.add(f"git@gitee.com:{repo.owner}/{repo.repo}.git".lower())
+        candidates.add(f"git@gitee.com:{repo.owner}/{repo.repo}".lower())
+    elif hostname == "github.com":
+        candidates.add(f"git@github.com:{repo.owner}/{repo.repo}.git".lower())
+        candidates.add(f"git@github.com:{repo.owner}/{repo.repo}".lower())
+    elif hostname == "codeup.aliyun.com":
+        candidates.add(f"git@codeup.aliyun.com:{repo.owner}/{repo.repo}.git".lower())
+        candidates.add(f"git@codeup.aliyun.com:{repo.owner}/{repo.repo}".lower())
+    return candidates
 
 
 def _clean_remote_url(remote_url: str) -> str:
@@ -110,7 +134,7 @@ def _is_nested_projects_dir(project_dir: str) -> bool:
 
 
 def remote_matches_repo(remote_url: str | None, repo_url: str) -> bool:
-    """判断本地 remote origin 是否对应目标 Gitee 仓库。"""
+    """判断本地 remote origin 是否对应目标仓库。"""
 
     if not remote_url:
         return False
@@ -122,7 +146,7 @@ def remote_matches_repo(remote_url: str | None, repo_url: str) -> bool:
 def _save_mapping(
     store: LocalMySQLStore,
     *,
-    repo: GiteeRepo,
+    repo: ScmRepo,
     workspace_path: str,
 ) -> None:
     """统一写入仓库目录映射。
@@ -147,7 +171,7 @@ def discover_repo_mapping(
     workspace: Workspace,
     store: LocalMySQLStore,
 ) -> RepoMappingResult:
-    """解析 Gitee 仓库对应的本地 projects 目录。
+    """解析仓库对应的本地 projects 目录。
 
     顺序：
     1. 读取 MySQL 中已保存的映射。
@@ -156,7 +180,7 @@ def discover_repo_mapping(
     4. 都找不到时返回默认 clone 目录 `projects/仓库名`。
     """
 
-    repo = parse_gitee_repo_url(repo_url)
+    repo = _parse_repo_url(repo_url)
     existing = store.get_mapping_by_repo(repo.clone_url)
     if existing:
         # 第一优先级：相信已经保存过的映射，但必须重新验证。
@@ -253,5 +277,5 @@ def save_clone_mapping(
 ) -> None:
     """clone 或用户手动指定目录成功后保存映射。"""
 
-    repo = parse_gitee_repo_url(repo_url)
+    repo = _parse_repo_url(repo_url)
     _save_mapping(store, repo=repo, workspace_path=project_dir)

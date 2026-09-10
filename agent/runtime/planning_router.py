@@ -4,7 +4,7 @@
 不再保存到独立的 thread_plans 表或 Markdown 文件。
 
 核心流程：
-1. 解析 Gitee 仓库地址并创建/更新 thread 记录。
+1. 解析仓库地址（Gitee / GitHub / Codeup）并创建/更新 thread 记录。
 2. 构建 task_kind=planning 的 DeepAgent（只读模式）。
 3. 通过 streaming_runtime 消费事件流，前端实时展示方案正文。
 4. 方案输出后等待用户确认，确认后才进入 coding 流程。
@@ -17,6 +17,7 @@ import logging
 import uuid
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import urlparse
 
 from agent.graph.graph import get_store
 from agent.runtime._helpers import (
@@ -28,11 +29,24 @@ from agent.runtime._helpers import (
 )
 from agent.runtime.events import record_event
 from agent.runtime.streaming_runtime import run_agent_with_event_stream
+from utils.codeup_utils import parse_codeup_repo_url
 from utils.gitee_utils import mask_token, parse_gitee_repo_url
+from utils.github_utils import parse_github_repo_url
 
 logger = logging.getLogger(__name__)
 
 RuntimeEventSink = Callable[[str, dict[str, Any]], None]
+
+
+def _parse_repo_url(repo_url: str):
+    """根据 URL 域名自动识别 SCM 平台并解析仓库信息。"""
+    parsed = urlparse(repo_url.strip())
+    hostname = (parsed.hostname or "").lower()
+    if hostname in {"codeup.aliyun.com", "www.codeup.aliyun.com"}:
+        return parse_codeup_repo_url(repo_url)
+    if hostname in {"github.com", "www.github.com"}:
+        return parse_github_repo_url(repo_url)
+    return parse_gitee_repo_url(repo_url)
 
 
 def run_plan_response_task(
@@ -60,9 +74,9 @@ def run_plan_response_task(
     store.clear_run_events(thread_id)
     logger.info("开始生成技术方案：thread_id=%s repo_url=%s", thread_id, repo_url)
     record_event(thread_id, "created", "任务已创建", status="completed")
-    record_event(thread_id, "repo", "解析 Gitee 仓库", status="in_progress")
-    repo = parse_gitee_repo_url(repo_url)
-    record_event(thread_id, "repo", "解析 Gitee 仓库", status="completed")
+    record_event(thread_id, "repo", "解析仓库", status="in_progress")
+    repo = _parse_repo_url(repo_url)
+    record_event(thread_id, "repo", "解析仓库", status="completed")
 
     plan_source = prompt
     previous_plan_text: str | None = None
@@ -76,7 +90,7 @@ def run_plan_response_task(
         )
     store.upsert_thread(
         thread_id=thread_id,
-        title=(revision_prompt or prompt)[:80] or f"Gitee: {repo.owner}/{repo.repo}",
+        title=(revision_prompt or prompt)[:80] or f"{repo.owner}/{repo.repo}",
         # user_prompt 只保存本轮用户真实输入，用于 Dashboard user_message 展示。
         # plan_source 是方案生成/后续实施的完整需求，不能混用为前端展示文本。
         user_prompt=revision_prompt or prompt,

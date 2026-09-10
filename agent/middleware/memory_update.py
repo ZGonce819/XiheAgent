@@ -27,11 +27,26 @@ from langgraph.config import get_config
 
 from agent.graph import get_langgraph_store
 from agent.memory.repo_update import RepoMemoryUpdate, update_repo_memory_from_text
+from urllib.parse import urlparse
+
+from utils.codeup_utils import parse_codeup_repo_url
 from utils.gitee_utils import parse_gitee_repo_url
+from utils.github_utils import parse_github_repo_url
 
 logger = logging.getLogger(__name__)
 
 SENSITIVE_MARKERS = (".env", ".secrets", "api_key", "apikey", "private key", "私钥")
+
+
+def _parse_repo_url(repo_url: str):
+    """根据 URL 域名自动识别 SCM 平台并解析仓库信息。"""
+    parsed = urlparse(repo_url.strip())
+    hostname = (parsed.hostname or "").lower()
+    if hostname in {"codeup.aliyun.com", "www.codeup.aliyun.com"}:
+        return parse_codeup_repo_url(repo_url)
+    if hostname in {"github.com", "www.github.com"}:
+        return parse_github_repo_url(repo_url)
+    return parse_gitee_repo_url(repo_url)
 
 
 def _repo_url_from_config() -> str | None:
@@ -111,7 +126,7 @@ class MemoryUpdateMiddleware(AgentMiddleware):
             )
             return None
 
-        repo = parse_gitee_repo_url(repo_url)
+        repo = _parse_repo_url(repo_url)
         update_repo_memory_from_text(
             store=get_langgraph_store(),
             repo=repo,
