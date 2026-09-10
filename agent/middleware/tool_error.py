@@ -36,7 +36,7 @@ from langgraph.types import Command
 from backends.local_shell import LocalShellBackend
 from backends.permissions import WorkspacePermissionError
 from agent.runtime.events import record_event
-from tools.gitee_api import mask_token
+from utils.gitee_utils import mask_token
 
 logger = logging.getLogger(__name__)
 
@@ -156,9 +156,12 @@ def _record_original_tool_error(
         "run_command": ("cmd:{command}:{cwd}", "执行命令", "execute"),
         "open_gitee_pull_request": ("gitee:pr", "创建或复用 Pull Request", "fetch"),
         "publish_gitee_pr_comment": ("gitee:comment", "发布 PR 评论", "fetch"),
+        "get_gitee_pull_request_context": ("gitee:pr-context", "读取 PR 审查上下文", "fetch"),
+        "open_github_pull_request": ("github:pr", "创建或复用 GitHub Pull Request", "fetch"),
+        "publish_github_pr_comment": ("github:comment", "发布 GitHub PR 评论", "fetch"),
+        "get_github_pull_request_context": ("github:pr-context", "读取 GitHub PR 审查上下文", "fetch"),
         "web_search": ("web:search:{query}", "搜索网络", "search"),
         "fetch_url": ("fetch:{url}", "抓取网页", "fetch"),
-        "get_gitee_pull_request_context": ("gitee:pr-context", "读取 PR 审查上下文", "fetch"),
         "load_default_review_rules": ("review:rules", "读取默认审查规则", "read"),
         "get_review_diff_summary": ("review:diff:{repo_dir}", "读取审查 diff", "read"),
         "validate_review_finding_location": ("review:validate:{file}", "校验审查位置", "other"),

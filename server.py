@@ -41,15 +41,18 @@ from tools import (
     add_review_finding,
     fetch_url,
     get_gitee_pull_request_context,
+    get_github_pull_request_context,
     get_review_diff_summary,
     list_review_findings,
     load_default_review_rules,
     open_gitee_pull_request,
+    open_github_pull_request,
     publish_gitee_pr_comment,
+    publish_github_pr_comment,
     validate_review_finding_location,
     web_search,
 )
-from tools.gitee_api import parse_gitee_repo_url
+from utils.gitee_utils import parse_gitee_repo_url
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +167,8 @@ def _code_reviewer_subagent(model: BaseChatModel) -> SubAgent:
             "读不到时调用 load_default_review_rules。\n"
             "2. 如果用户提供 Gitee PR 编号，调用 get_gitee_pull_request_context "
             "读取 PR 详情、提交、文件和评论。\n"
+            "如果用户提供 GitHub PR 编号，调用 get_github_pull_request_context "
+            "读取 PR 详情、提交、文件和评论。\n"
             "3. 调用 get_review_diff_summary 获取本地 diff 摘要和变更行号。\n"
             "4. 只记录会导致真实风险的问题，不记录纯风格偏好。\n"
             "5. finding 必须包含 file、line、severity、title、description。\n"
@@ -177,6 +182,7 @@ def _code_reviewer_subagent(model: BaseChatModel) -> SubAgent:
         "model": model,
         "tools": [
             get_gitee_pull_request_context,
+            get_github_pull_request_context,
             load_default_review_rules,
             get_review_diff_summary,
             validate_review_finding_location,
@@ -388,6 +394,9 @@ def get_agent(config: RunnableConfig):
             open_gitee_pull_request,
             publish_gitee_pr_comment,
             get_gitee_pull_request_context,
+            open_github_pull_request,
+            publish_github_pr_comment,
+            get_github_pull_request_context,
             load_default_review_rules,
             get_review_diff_summary,
             validate_review_finding_location,

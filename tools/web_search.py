@@ -18,7 +18,7 @@ from langchain_core.tools import tool
 
 from agent.runtime.events import record_event
 from config.env_config import require_env
-from tools.gitee_api import mask_token
+from utils.gitee_utils import mask_token
 from tools.runtime_context import get_runtime_thread_id
 
 logger = logging.getLogger("agent.run.web_search")

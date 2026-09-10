@@ -16,7 +16,7 @@ from typing import Final
 from deepagents.backends.utils import create_file_data
 from langgraph.store.base import BaseStore
 
-from tools.gitee_api import GiteeRepo
+from utils.gitee_utils import GiteeRepo
 
 REPO_MEMORY_NAMESPACE_PREFIX: Final[tuple[str, str]] = ("xihe", "repo-memory")
 

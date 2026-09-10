@@ -28,7 +28,7 @@ from langchain_core.messages import BaseMessage
 
 from agent.middleware.run_limits import AgentRunLimitExceeded, AgentRunLimitTracker
 from agent.runtime.events import record_event
-from tools.gitee_api import mask_token
+from utils.gitee_utils import mask_token
 
 logger = logging.getLogger(__name__)
 

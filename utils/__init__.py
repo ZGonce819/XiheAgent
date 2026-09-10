@@ -1,7 +1,7 @@
 """通用工具函数包。
 
 提供 HTTP 安全请求、运行时上下文提取、Diff 解析、ID 生成、时间戳转换、
-意图识别和消息内容处理等基础能力。
+意图识别、消息内容处理、Gitee/GitHub API 封装等基础能力。
 """
 
 from utils.context_utils import (
@@ -9,6 +9,19 @@ from utils.context_utils import (
     get_runtime_task_kind,
     get_runtime_thread_id,
     runtime_is_read_only_task,
+)
+from utils.gitee_utils import (
+    GiteeRepo,
+    get_gitee_token,
+    mask_token,
+    normalize_gitee_repo_url,
+    parse_gitee_repo_url,
+)
+from utils.github_utils import (
+    GitHubRepo,
+    get_github_token,
+    normalize_github_repo_url,
+    parse_github_repo_url,
 )
 from utils.http_utils import blocked_response, request_with_safe_redirects
 from utils.id_utils import new_finding_id, new_message_id, new_run_id, new_thread_id
@@ -37,11 +50,15 @@ from utils.time_utils import iso_to_millis
 __all__ = [
     "DiffFile",
     "DiffSummary",
+    "GiteeRepo",
+    "GitHubRepo",
     "TaskKind",
     "blocked_response",
     "classify_task_kind",
     "extract_best_plan_text",
     "extract_final_assistant_text",
+    "get_gitee_token",
+    "get_github_token",
     "get_local_diff",
     "get_local_diff_summary",
     "get_runtime_configurable",
@@ -51,11 +68,16 @@ __all__ = [
     "is_pull_only_task",
     "is_read_only_task",
     "is_workspace_listing_task",
+    "mask_token",
     "message_content_to_text",
     "new_finding_id",
     "new_message_id",
     "new_run_id",
     "new_thread_id",
+    "normalize_gitee_repo_url",
+    "normalize_github_repo_url",
+    "parse_gitee_repo_url",
+    "parse_github_repo_url",
     "parse_unified_diff",
     "request_with_safe_redirects",
     "runtime_is_read_only_task",

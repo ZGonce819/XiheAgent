@@ -20,7 +20,7 @@ import requests
 from langchain_core.tools import tool
 
 from agent.runtime.events import record_event
-from tools.gitee_api import mask_token
+from utils.gitee_utils import mask_token
 from tools.runtime_context import get_runtime_thread_id
 from tools.safe_http import request_with_safe_redirects
 

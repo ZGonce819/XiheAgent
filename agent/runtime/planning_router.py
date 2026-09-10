@@ -28,7 +28,7 @@ from agent.runtime._helpers import (
 )
 from agent.runtime.events import record_event
 from agent.runtime.streaming_runtime import run_agent_with_event_stream
-from tools.gitee_api import mask_token, parse_gitee_repo_url
+from utils.gitee_utils import mask_token, parse_gitee_repo_url
 
 logger = logging.getLogger(__name__)
 

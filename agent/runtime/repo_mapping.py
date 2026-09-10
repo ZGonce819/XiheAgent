@@ -26,7 +26,7 @@ from urllib.parse import urlparse
 
 from backends.workspace import Workspace
 from store import LocalMySQLStore
-from tools.gitee_api import GiteeRepo, parse_gitee_repo_url
+from utils.gitee_utils import GiteeRepo, parse_gitee_repo_url
 
 
 @dataclass(frozen=True)

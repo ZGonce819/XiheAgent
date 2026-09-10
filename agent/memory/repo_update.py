@@ -20,7 +20,7 @@ from typing import Any
 from langgraph.store.base import BaseStore
 
 from agent.memory.repo import build_repo_memory_namespace, get_repo_memory_item, repo_memory_store_key
-from tools.gitee_api import GiteeRepo, mask_token
+from utils.gitee_utils import GiteeRepo, mask_token
 
 logger = logging.getLogger(__name__)
 

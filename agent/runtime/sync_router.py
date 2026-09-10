@@ -22,7 +22,7 @@ from agent.runtime._helpers import ensure_repo_memory_for_repo
 from agent.runtime.events import record_event
 from backends.local_shell import LocalShellBackend
 from backends.workspace import Workspace
-from tools.gitee_api import mask_token, parse_gitee_repo_url
+from utils.gitee_utils import mask_token, parse_gitee_repo_url
 
 logger = logging.getLogger(__name__)
 

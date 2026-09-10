@@ -15,7 +15,7 @@ from agent.graph.checkpoint_history import visible_checkpoint_messages
 from agent.graph.graph import get_checkpointer, get_langgraph_store
 from agent.memory.repo import ensure_repo_memory_initialized, repo_project_dir
 from agent.server import get_agent
-from tools.gitee_api import parse_gitee_repo_url
+from utils.gitee_utils import parse_gitee_repo_url
 
 logger = logging.getLogger(__name__)
 

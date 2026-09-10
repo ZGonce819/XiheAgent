@@ -25,7 +25,7 @@ from langgraph.config import get_config
 
 from agent.graph import get_langgraph_store
 from agent.memory.repo import build_repo_memory_namespace, repo_memory_store_key, repo_memory_virtual_path
-from tools.gitee_api import mask_token, parse_gitee_repo_url
+from utils.gitee_utils import mask_token, parse_gitee_repo_url
 
 logger = logging.getLogger(__name__)
 

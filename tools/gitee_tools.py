@@ -13,7 +13,7 @@ from langchain_core.tools import tool
 
 from agent.graph.graph import get_store
 from agent.runtime.events import record_event
-from tools.gitee_api import (
+from utils.gitee_utils import (
     create_pull_request,
     get_pull_request,
     list_pull_request_comments,

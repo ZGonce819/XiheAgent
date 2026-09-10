@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 
-from tools.gitee_api import parse_gitee_repo_url
+from utils.gitee_utils import parse_gitee_repo_url
 
 DEFAULT_REPO_URL = "https://gitee.com/msb-goldbin/ai_coding.git"
 

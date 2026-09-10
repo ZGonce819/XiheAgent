@@ -36,7 +36,7 @@ from agent.runtime.planning_router import run_plan_response_task
 from agent.runtime.streaming_runtime import run_agent_with_event_stream
 from agent.runtime.sync_router import run_pull_only_task, run_workspace_listing_task
 from agent.runtime.task_intent import classify_task_kind, is_pull_only_task, is_workspace_listing_task
-from tools.gitee_api import mask_token, parse_gitee_repo_url
+from utils.gitee_utils import mask_token, parse_gitee_repo_url
 
 logger = logging.getLogger(__name__)
 

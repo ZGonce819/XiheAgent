@@ -28,12 +28,14 @@ from langgraph.types import Command
 
 from backends.local_shell import LocalShellBackend
 from agent.runtime.events import record_event
-from tools.gitee_api import mask_token, normalize_gitee_repo_url
+from utils.gitee_utils import mask_token, normalize_gitee_repo_url
+from utils.github_utils import normalize_github_repo_url
 
 logger = logging.getLogger(__name__)
 
 PATH_ARGUMENTS = {"path", "cwd", "repo_dir", "project_dir", "file_path", "old_path", "new_path"}
 GITEE_URL_ARGUMENTS = {"repo_url"}
+GITHUB_URL_ARGUMENTS = {"repo_url"}
 READ_FILE_INT_ARGUMENTS = {"offset", "limit"}
 
 
@@ -151,10 +153,22 @@ def _sanitize_gitee_url(value: Any) -> Any:
     return normalize_gitee_repo_url(text)
 
 
+def _sanitize_github_url(value: Any) -> Any:
+    """把 GitHub 地址规范为不带 token 的标准 HTTPS clone_url。"""
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text:
+        return text
+    if "github.com" not in text.lower():
+        return text
+    return normalize_github_repo_url(text)
+
+
 def sanitize_tool_kwargs(tool_name: str, kwargs: dict[str, Any], *, backend: LocalShellBackend) -> dict[str, Any]:
     """根据参数名对工具入参做统一清洗。
 
-    只处理所有工具共享的高风险参数：路径和 Gitee URL。
+    只处理所有工具共享的高风险参数：路径、Gitee URL、GitHub URL。
     """
     sanitized = dict(kwargs)
     for key in PATH_ARGUMENTS:
@@ -163,6 +177,9 @@ def sanitize_tool_kwargs(tool_name: str, kwargs: dict[str, Any], *, backend: Loc
     for key in GITEE_URL_ARGUMENTS:
         if key in sanitized:
             sanitized[key] = _sanitize_gitee_url(sanitized[key])
+    for key in GITHUB_URL_ARGUMENTS:
+        if key in sanitized:
+            sanitized[key] = _sanitize_github_url(sanitized[key])
     for key in READ_FILE_INT_ARGUMENTS:
         if key in sanitized:
             sanitized[key] = _coerce_int(sanitized[key])
