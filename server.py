@@ -34,7 +34,8 @@ from agent.middleware import (
     ToolErrorMiddleware,
 )
 from agent.runtime.task_intent import TaskKind
-from backends.local_shell import LocalShellBackend
+from backends import create_backend
+from deepagents.backends.sandbox import BaseSandbox
 from prompt import get_system_prompt
 from tools import (
     add_review_finding,
@@ -55,7 +56,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_RECURSION_LIMIT = 9999
 MODEL_CALL_RECURSION_LIMIT = 5000
 
-_BACKENDS: dict[str, LocalShellBackend] = {}
+_BACKENDS: dict[str, BaseSandbox] = {}
 _MAX_CACHED_BACKENDS = 128
 
 
@@ -69,9 +70,10 @@ def graph_loaded_for_execution(config: RunnableConfig) -> bool:
     return bool(configurable.get("__is_for_execution__", False))
 
 
-def ensure_backend_for_thread(thread_id: str) -> LocalShellBackend:
-    """获取或创建绑定到 thread 的本地 Backend。
+def ensure_backend_for_thread(thread_id: str) -> BaseSandbox:
+    """获取或创建绑定到 thread 的 Backend。
 
+    根据 ``USE_SANDBOX`` 配置决定使用 OpenSandbox 远程沙盒还是 LocalShellBackend。
     负责复用当前机器上的工作区，按 thread 维度缓存 Backend 实例，
     同一会话内可重复使用。超过缓存上限时淘汰最久未使用的实例。
     """
@@ -81,11 +83,11 @@ def ensure_backend_for_thread(thread_id: str) -> LocalShellBackend:
             oldest_key = next(iter(_BACKENDS))
             logger.info("Backend 缓存已满，淘汰最旧实例：%s", oldest_key)
             _BACKENDS.pop(oldest_key)
-        logger.info("为 thread 创建 LocalShellBackend：%s", thread_id)
-        backend = LocalShellBackend()
+        backend = create_backend()
+        logger.info("为 thread 创建 %s：%s", type(backend).__name__, thread_id)
         _BACKENDS[thread_id] = backend
     else:
-        logger.info("复用 thread 的 LocalShellBackend：%s", thread_id)
+        logger.info("复用 thread 的 %s：%s", type(backend).__name__, thread_id)
     return backend
 
 
@@ -263,14 +265,14 @@ def _task_kind_from_config(configurable: dict[str, Any]) -> TaskKind:
 
 def create_repo_backend(
     *,
-    local_backend: LocalShellBackend,
+    local_backend: BaseSandbox,
     store: BaseStore,
     owner: str,
     repo: str,
 ) -> CompositeBackend:
     """创建当前仓库专用的 CompositeBackend。
 
-    - /projects、/skills、/runtimes 和 execute() 继续走 LocalShellBackend。
+    - /projects、/skills、/runtimes 和 execute() 继续走主 Backend。
     - /memories/ 走 DeepAgents StoreBackend，底层由 LangGraph Store 持久化。
     """
     namespace = build_repo_memory_namespace(owner, repo)
@@ -288,7 +290,7 @@ def create_repo_backend(
 def _prepare_repo_backend_context(
     *,
     repo_url: Any,
-    backend: LocalShellBackend,
+    backend: BaseSandbox,
 ) -> tuple[Any, list[str] | None, str | None]:
     """为指定 Gitee 仓库准备 repo 级 Backend 和长期记忆。
 

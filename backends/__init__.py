@@ -13,3 +13,31 @@ Prompt 只能告诉模型"应该怎么做"，但 backend 才决定模型"实际�
 """
 
 from __future__ import annotations
+
+import logging
+
+from deepagents.backends.sandbox import BaseSandbox
+
+logger = logging.getLogger(__name__)
+
+
+def create_backend() -> BaseSandbox:
+    """根据 ``USE_SANDBOX`` 配置创建对应的 Backend 实例。
+
+    开启沙盒时返回 ``OpenSandboxBackend``（远程容器隔离），
+    否则返回 ``LocalShellBackend``（本地受控执行层）。
+    """
+    from config.app_config import get_settings
+
+    if get_settings().use_sandbox:
+        try:
+            from backends.opensandbox import create_opensandbox_backend
+
+            logger.info("USE_SANDBOX=true，使用 OpenSandbox 远程沙盒")
+            return create_opensandbox_backend()
+        except Exception:
+            logger.exception("OpenSandbox 创建失败，回退到 LocalShellBackend")
+
+    from backends.local_shell import get_local_shell_backend
+
+    return get_local_shell_backend()

@@ -13,7 +13,7 @@ from typing import Any
 from langchain_core.tools import tool
 
 from agent.graph.graph import get_store
-from backends.local_shell import LocalShellBackend
+from backends import create_backend
 from tools.runtime_context import get_runtime_thread_id
 from utils.reviewer_utils import get_local_diff_summary, parse_unified_diff, validate_finding_location
 
@@ -65,7 +65,7 @@ def get_review_diff_summary(repo_dir: str, base: str = "master", head: str | Non
         head: 可选目标分支。传入时比较 `base...head`；不传时比较工作区相对 base 的 diff。
     """
 
-    backend = LocalShellBackend()
+    backend = create_backend()
     summary = get_local_diff_summary(backend, repo_dir=repo_dir, base=base, head=head)
     files = [
         {
