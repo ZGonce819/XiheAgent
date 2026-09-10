@@ -43,21 +43,25 @@ from tools import (
     get_codeup_merge_request_context,
     get_gitee_pull_request_context,
     get_github_pull_request_context,
+    get_gitlab_merge_request_context,
     get_review_diff_summary,
     list_review_findings,
     load_default_review_rules,
     open_codeup_merge_request,
     open_gitee_pull_request,
     open_github_pull_request,
+    open_gitlab_merge_request,
     publish_codeup_mr_comment,
     publish_gitee_pr_comment,
     publish_github_pr_comment,
+    publish_gitlab_mr_comment,
     validate_review_finding_location,
     web_search,
 )
 from utils.codeup_utils import CodeupRepo, parse_codeup_repo_url
 from utils.gitee_utils import GiteeRepo, parse_gitee_repo_url
 from utils.github_utils import GitHubRepo, parse_github_repo_url
+from utils.gitlab_utils import GitLabRepo, parse_gitlab_repo_url
 
 logger = logging.getLogger(__name__)
 
@@ -298,13 +302,15 @@ def create_repo_backend(
     )
 
 
-def _parse_repo_url(repo_url: str) -> GiteeRepo | GitHubRepo | CodeupRepo:
+def _parse_repo_url(repo_url: str) -> GiteeRepo | GitHubRepo | GitLabRepo | CodeupRepo:
     """根据 URL 域名自动识别 SCM 平台并解析仓库信息。"""
     from urllib.parse import urlparse
     parsed = urlparse(repo_url.strip())
     hostname = (parsed.hostname or "").lower()
     if hostname in {"codeup.aliyun.com", "www.codeup.aliyun.com"}:
         return parse_codeup_repo_url(repo_url)
+    if hostname in {"gitlab.com", "www.gitlab.com"}:
+        return parse_gitlab_repo_url(repo_url)
     if hostname in {"github.com", "www.github.com"}:
         return parse_github_repo_url(repo_url)
     return parse_gitee_repo_url(repo_url)
@@ -417,6 +423,9 @@ def get_agent(config: RunnableConfig):
             open_codeup_merge_request,
             publish_codeup_mr_comment,
             get_codeup_merge_request_context,
+            open_gitlab_merge_request,
+            publish_gitlab_mr_comment,
+            get_gitlab_merge_request_context,
             load_default_review_rules,
             get_review_diff_summary,
             validate_review_finding_location,

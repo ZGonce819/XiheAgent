@@ -41,6 +41,7 @@ from urllib.parse import urlparse
 from utils.codeup_utils import parse_codeup_repo_url
 from utils.gitee_utils import mask_token, parse_gitee_repo_url
 from utils.github_utils import parse_github_repo_url
+from utils.gitlab_utils import parse_gitlab_repo_url
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,8 @@ def _parse_repo_url(repo_url: str):
     hostname = (parsed.hostname or "").lower()
     if hostname in {"codeup.aliyun.com", "www.codeup.aliyun.com"}:
         return parse_codeup_repo_url(repo_url)
+    if hostname in {"gitlab.com", "www.gitlab.com"}:
+        return parse_gitlab_repo_url(repo_url)
     if hostname in {"github.com", "www.github.com"}:
         return parse_github_repo_url(repo_url)
     return parse_gitee_repo_url(repo_url)
