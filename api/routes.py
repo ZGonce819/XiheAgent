@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from config.app_config import get_settings
+from config.app_config import PROJECT_ROOT, agent_log_path, backend_log_path, get_settings
 from config.env_config import get_env
 
 router = APIRouter()
@@ -27,11 +27,11 @@ def health() -> dict[str, Any]:
 
     return {
         "ok": True,
-        "project_root": str(settings.PROJECT_ROOT),
-        "workspace_root": str(settings.WORKSPACE_ROOT),
-        "log_dir": str(settings.LOG_DIR),
-        "backend_log": str(settings.backend_log_path()),
-        "agent_log": str(settings.agent_log_path()),
+        "project_root": str(PROJECT_ROOT),
+        "workspace_root": str(settings.workspace_root),
+        "log_dir": str(settings.log_dir),
+        "backend_log": str(backend_log_path()),
+        "agent_log": str(agent_log_path()),
         "has_deepseek_key": bool(get_env("DEEPSEEK_API_KEY")),
         "deepseek_base_url": get_env("DEEPSEEK_BASE_URL"),
         "main_model": get_env("MAIN_MODEL", "deepseek-v4-pro"),
