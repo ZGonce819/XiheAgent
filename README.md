@@ -182,7 +182,7 @@ docker pull sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-int
 
 #### 7. XiheAgent 启用沙盒
 
-在 `.env.local` 中添加：
+在 `.env` 中添加：
 ```ini
 # 启用 OpenSandbox 沙盒模式
 USE_SANDBOX=true
@@ -207,8 +207,8 @@ pip install -e ".[dev]"
 ### 配置环境变量
 
 ```bash
-copy .env .env.local
-# 编辑 .env.local，修改数据库连接信息和 API Key
+copy .env.example .env
+# 编辑 .env，修改数据库连接信息和 API Key
 ```
 
 关键配置项：
