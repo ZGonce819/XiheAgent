@@ -25,11 +25,12 @@ from langgraph.config import get_config
 
 from agent.graph import get_langgraph_store
 from agent.memory.repo import build_repo_memory_namespace, repo_memory_store_key, repo_memory_virtual_path
-from urllib.parse import urlparse
 
 from utils.codeup_utils import parse_codeup_repo_url
 from utils.gitee_utils import mask_token, parse_gitee_repo_url
 from utils.github_utils import parse_github_repo_url
+from utils.gitlab_utils import parse_gitlab_repo_url
+from utils.platform_router import detect_platform, get_platform_display_name, get_platform_tools
 
 logger = logging.getLogger(__name__)
 
@@ -38,12 +39,13 @@ MAX_REPO_MEMORY_CHARS = 6000
 
 def _parse_repo_url(repo_url: str):
     """根据 URL 域名自动识别 SCM 平台并解析仓库信息。"""
-    parsed = urlparse(repo_url.strip())
-    hostname = (parsed.hostname or "").lower()
-    if hostname in {"codeup.aliyun.com", "www.codeup.aliyun.com"}:
+    platform = detect_platform(repo_url)
+    if platform == "codeup":
         return parse_codeup_repo_url(repo_url)
-    if hostname in {"github.com", "www.github.com"}:
+    if platform == "github":
         return parse_github_repo_url(repo_url)
+    if platform == "gitlab":
+        return parse_gitlab_repo_url(repo_url)
     return parse_gitee_repo_url(repo_url)
 
 
@@ -72,18 +74,25 @@ def _build_repo_context_notice(
     owner: str,
     repo: str,
     repo_url: str,
+    platform: str,
     memory_content: str | None,
 ) -> str:
     """生成仓库上下文的 SystemMessage 文本。
 
-    无论记忆文件是否存在，都至少注入仓库标识和记忆文件路径，让 Agent 知道
-    自己在哪个仓库工作、可以从哪里读取长期上下文。
+    无论记忆文件是否存在，都至少注入仓库标识、平台名和记忆文件路径，让 Agent 知道
+    自己在哪个仓库工作、当前平台应使用哪些工具、可以从哪里读取长期上下文。
     """
     memory_path = repo_memory_virtual_path(owner, repo)
+    display_name = get_platform_display_name(platform)
+    tools = get_platform_tools(platform)
     lines = [
         "【当前仓库上下文】",
         f"仓库地址：{repo_url}",
         f"owner/repo：{owner}/{repo}",
+        f"代码平台：{display_name}",
+        f"创建 PR/MR 使用：{tools['open_pr']}",
+        f"发布评论使用：{tools['publish_comment']}",
+        f"读取 PR/MR 上下文使用：{tools['get_context']}",
         f"仓库记忆文件：{memory_path}",
     ]
     if memory_content:
@@ -120,6 +129,7 @@ class ContextInjectionMiddleware(AgentMiddleware):
         if not repo_url:
             return None
 
+        platform = detect_platform(repo_url)
         repo = _parse_repo_url(repo_url)
         if memory_content is None:
             try:
@@ -130,14 +140,15 @@ class ContextInjectionMiddleware(AgentMiddleware):
                 logger.warning("仓库记忆读取失败，跳过记忆注入：repo=%s/%s", repo.owner, repo.repo, exc_info=True)
 
         if memory_content:
-            logger.info("注入仓库记忆上下文：repo=%s/%s length=%s", repo.owner, repo.repo, len(memory_content))
+            logger.info("注入仓库记忆上下文：platform=%s repo=%s/%s length=%s", platform, repo.owner, repo.repo, len(memory_content))
         else:
-            logger.info("仓库记忆尚不存在，注入基础上下文：repo=%s/%s", repo.owner, repo.repo)
+            logger.info("仓库记忆尚不存在，注入基础上下文：platform=%s repo=%s/%s", platform, repo.owner, repo.repo)
 
         notice = _build_repo_context_notice(
             owner=repo.owner,
             repo=repo.repo,
             repo_url=repo.clone_url,
+            platform=platform,
             memory_content=memory_content,
         )
         messages = list(state.get("messages", []))

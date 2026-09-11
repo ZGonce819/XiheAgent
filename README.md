@@ -1,6 +1,6 @@
 # XiheAgent (羲和) — AI Coding Assistant
 
-羲和（XiheAgent）是一个基于 FastAPI + LangGraph + DeepAgents 构建的 AI 编码助手，支持 Gitee 仓库集成、多轮对话、代码审查、自动化任务编排等功能。
+羲和（XiheAgent）是一个基于 FastAPI + LangGraph + DeepAgents 构建的 AI 编码助手，支持 Gitee / GitHub / GitLab / Codeup 多平台仓库集成、多轮对话、代码审查、自动化任务编排等功能。
 
 ## 核心特性
 
@@ -8,7 +8,7 @@
 - 🔄 **SSE 实时流式输出** - 支持 asyncio.Queue（单进程）或 Redis Stream（多进程部署）事件分发
 - 💾 **三层存储架构** - Redis（Checkpoint）+ MySQL（业务数据）+ PostgreSQL（长期记忆）
 - 🔐 **企业级安全** - 虚拟路径隔离、命令白名单、Git 分支保护、RBAC 权限控制（规划中）
-- 📊 **Gitee 深度集成** - 自动创建 PR、添加 Code Review 评论、同步代码变更
+- 📊 **多平台 SCM 集成** - 支持 Gitee / GitHub / GitLab / Codeup，自动检测平台并路由到对应工具
 - 🧠 **长期记忆系统** - 工作区级和仓库级记忆，支持跨会话知识积累
 - 🎯 **意图识别路由** - 自动区分编码任务、方案生成、同步操作等不同流程
 - 🖥️ **现代化前端** - Vue 3 + Vite + TanStack Router，响应式设计，支持深色模式
@@ -26,7 +26,7 @@
 | 长期记忆存储 | PostgreSQL (psycopg) - LangGraph Store |
 | Checkpoint 存储 | Redis (langgraph-checkpoint-redis) |
 | SSE 事件总线 | asyncio.Queue / Redis Stream（USE_REDIS_STREAM=true 启用） |
-| 代码托管集成 | Gitee API |
+| 代码托管集成 | Gitee / GitHub / GitLab / Codeup API（自动平台路由） |
 | Python 版本 | >= 3.11 |
 
 ### 前端
@@ -216,8 +216,11 @@ copy .env .env.local
 # DeepSeek API
 DEEPSEEK_API_KEY=your-api-key-here
 
-# Gitee Token
+# SCM 平台 Token（按需配置使用的平台）
 GITEE_TOKEN=your-gitee-token-here
+GITHUB_TOKEN=your-github-token-here
+GITLAB_TOKEN=your-gitlab-token-here
+CODEUP_TOKEN=your-codeup-token-here
 
 # Redis（必需）
 REDIS_HOST=127.0.0.1
@@ -329,13 +332,20 @@ xihe/
 │   └── permissions.py     # 权限控制
 │
 ├── tools/                 # 外部工具集成
-│   ├── gitee_api.py       # Gitee REST API
 │   ├── gitee_tools.py     # Gitee 工作流工具
+│   ├── github_tools.py    # GitHub 工作流工具
+│   ├── gitlab_tools.py    # GitLab 工作流工具
+│   ├── codeup_tools.py    # Codeup 工作流工具
 │   ├── web_search.py      # 网络搜索
 │   ├── fetch_url_tools.py # URL 内容抓取
 │   └── reviewer_tools.py  # 代码审查工具
 │
 ├── utils/                 # 通用工具函数
+│   ├── platform_router.py # SCM 平台检测与工具路由
+│   ├── gitee_utils.py     # Gitee URL 解析与 API
+│   ├── github_utils.py    # GitHub URL 解析与 API
+│   ├── gitlab_utils.py    # GitLab URL 解析与 API
+│   ├── codeup_utils.py    # Codeup URL 解析与 API
 │   ├── http_utils.py      # SSRF 安全 HTTP 客户端
 │   ├── context_utils.py   # LangGraph 运行时上下文提取
 │   ├── reviewer_utils.py  # PR Diff 解析与位置验证
@@ -449,7 +459,10 @@ DELETE /dashboard/api/threads/{id}                 # 删除会话
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `DEEPSEEK_API_KEY` | DeepSeek API 密钥 | *必填* |
-| `GITEE_TOKEN` | Gitee 访问令牌 | *必填* |
+| `GITEE_TOKEN` | Gitee 访问令牌 | *按需* |
+| `GITHUB_TOKEN` | GitHub 访问令牌 | *按需* |
+| `GITLAB_TOKEN` | GitLab 访问令牌 | *按需* |
+| `CODEUP_TOKEN` | Codeup 访问令牌 | *按需* |
 | `XIHE_DATA_DIR` | 数据文件目录 | `{project_root}/data` |
 | `XIHE_LOG_DIR` | 日志文件目录 | `{project_root}/logs` |
 | `XIHE_LOG_LEVEL` | 日志级别 | `INFO` |
