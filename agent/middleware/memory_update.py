@@ -25,7 +25,7 @@ from typing import Any
 from langchain.agents.middleware.types import AgentMiddleware, AgentState
 from langgraph.config import get_config
 
-from agent.graph import get_langgraph_store
+from agent.graph.graph import get_langgraph_store
 from agent.memory.repo_update import RepoMemoryUpdate, update_repo_memory_from_text
 from urllib.parse import urlparse
 

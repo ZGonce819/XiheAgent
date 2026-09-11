@@ -86,6 +86,6 @@ def build_agent(config: dict[str, Any]) -> Any:
         配置好的 DeepAgent 实例。
     """
 
-    from agent.server import get_agent
+    from server import get_agent
 
     return get_agent(config)

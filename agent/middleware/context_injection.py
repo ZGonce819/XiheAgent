@@ -23,7 +23,7 @@ from langchain.agents.middleware.types import AgentMiddleware, AgentState
 from langchain_core.messages import SystemMessage
 from langgraph.config import get_config
 
-from agent.graph import get_langgraph_store
+from agent.graph.graph import get_langgraph_store
 from agent.memory.repo import build_repo_memory_namespace, repo_memory_store_key, repo_memory_virtual_path
 
 from utils.codeup_utils import parse_codeup_repo_url

@@ -14,7 +14,7 @@ from typing import Any
 from agent.graph.checkpoint_history import visible_checkpoint_messages
 from agent.graph.graph import get_checkpointer, get_langgraph_store
 from agent.memory.repo import ensure_repo_memory_initialized, repo_project_dir
-from agent.server import get_agent
+from server import get_agent
 
 logger = logging.getLogger(__name__)
 
