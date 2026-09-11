@@ -17,7 +17,7 @@ Example:
 """
 
 # 导入连接管理基类和 UTC 时间工具函数
-from store._connection import ConnectionManager, utc_now
+from database.mysql import ConnectionManager, utc_now
 # 导入各表 Repo 类，每个 Repo 负责一张表的 CRUD
 from store.finding_repo import FindingRepo
 from store.mapping_repo import MappingRepo

@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from store._connection import ConnectionManager, utc_now
+from database.mysql import ConnectionManager, utc_now
 
 
 class MessageRepo(ConnectionManager):

@@ -1,11 +1,10 @@
-"""MySQL 连接管理基类。
+"""MySQL 连接管理。
 
-提供连接池、线程安全锁和自动重连能力，所有 Repo 通过继承此类获取统一的数据库访问基础。
+提供连接池、线程安全锁和自动重连能力，所有 Repo 通过继承 ConnectionManager 获取统一的数据库访问基础。
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import threading
@@ -15,7 +14,7 @@ from typing import Any
 import pymysql
 from pymysql.cursors import DictCursor
 
-logger = logging.getLogger("store.connection")
+logger = logging.getLogger("database.mysql")
 
 
 def utc_now() -> str:

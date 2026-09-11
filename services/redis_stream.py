@@ -15,14 +15,12 @@ import json
 import logging
 from typing import Any
 
-from config.app_config import get_settings
+from database.redis import get_redis_stream_connection
 
 logger = logging.getLogger(__name__)
 
 _STREAM_KEY_PREFIX = "xihe:sse:events:"
 _CONSUMER_GROUP = "xihe-dashboard"
-
-_redis_conn: Any = None
 
 
 def _stream_key(thread_id: str) -> str:
@@ -31,44 +29,13 @@ def _stream_key(thread_id: str) -> str:
     return f"{_STREAM_KEY_PREFIX}{thread_id}"
 
 
-def _get_redis() -> Any:
-    """获取 Redis 连接实例。
-
-    使用与 Checkpoint 相同的 Redis 实例，但切换到 SSE 专用 DB。
-    连接在模块级别缓存，避免每次调用都新建连接。
-    """
-
-    global _redis_conn
-    if _redis_conn is not None:
-        try:
-            _redis_conn.ping()
-            return _redis_conn
-        except Exception:
-            _redis_conn = None
-
-    import redis
-
-    settings = get_settings()
-    _redis_conn = redis.Redis(
-        host=settings.redis_host,
-        port=settings.redis_port,
-        password=settings.redis_password or None,
-        db=settings.redis_stream_db,
-        decode_responses=True,
-        socket_timeout=5,
-        socket_connect_timeout=3,
-        retry_on_timeout=True,
-    )
-    return _redis_conn
-
-
 def ensure_consumer_group(thread_id: str) -> None:
     """确保 Redis Stream 的 consumer group 已创建。
 
     首次为某个 thread 推送事件前调用。如果 group 已存在则忽略。
     """
 
-    r = _get_redis()
+    r = get_redis_stream_connection()
     try:
         r.xgroup_create(_stream_key(thread_id), _CONSUMER_GROUP, id="0", mkstream=True)
     except Exception as exc:
@@ -86,7 +53,7 @@ def publish_event(thread_id: str, event: str, data: dict[str, Any]) -> None:
         data: 事件负载，会被 JSON 序列化后写入。
     """
 
-    r = _get_redis()
+    r = get_redis_stream_connection()
     payload = json.dumps(data, ensure_ascii=False, default=str)
     r.xadd(_stream_key(thread_id), {"event": event, "data": payload})
 
@@ -111,7 +78,7 @@ def read_events(
     """
 
     ensure_consumer_group(thread_id)
-    r = _get_redis()
+    r = get_redis_stream_connection()
     results = r.xreadgroup(
         groupname=_CONSUMER_GROUP,
         consumername=consumer_name,
@@ -138,5 +105,5 @@ def cleanup_stream(thread_id: str) -> None:
     在 thread 被删除或确认不再需要实时推送时调用。
     """
 
-    r = _get_redis()
+    r = get_redis_stream_connection()
     r.delete(_stream_key(thread_id))

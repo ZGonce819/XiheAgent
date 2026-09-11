@@ -285,6 +285,12 @@ xihe/
 ├── server.py              # DeepAgent 工厂（组装模型/工具/中间件）
 ├── prompt.py              # 系统提示词构建
 │
+├── database/              # 数据库连接管理
+│   ├── mysql.py           # MySQL 连接池与 ConnectionManager 基类
+│   ├── redis.py           # Redis 连接（Checkpoint / Stream）
+│   ├── postgres.py        # PostgreSQL 连接（LangGraph Store）
+│   └── __init__.py        # 数据库模块导出
+│
 ├── config/                # 配置管理
 │   ├── app_config.py      # Settings 单例配置
 │   ├── env_config.py      # 环境变量加载
@@ -355,7 +361,6 @@ xihe/
 │   └── message_utils.py   # LangChain 消息内容处理 (文本提取/方案抽取)
 │
 ├── store/                 # 数据持久化（per-table Repo 拆分）
-│   ├── _connection.py     # ConnectionManager 基类（连接/锁/重连）
 │   ├── thread_repo.py     # threads 表 CRUD + 级联删除
 │   ├── run_repo.py        # runs 表
 │   ├── event_repo.py      # run_events 表

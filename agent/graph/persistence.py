@@ -17,38 +17,10 @@ import logging
 from typing import Any
 
 from config.app_config import Settings, get_settings
+from database.postgres import build_pg_dsn
+from database.redis import build_redis_url
 
 logger = logging.getLogger(__name__)
-
-
-def _build_redis_url(settings: Settings) -> str:
-    """从 Settings 构建 Redis 连接 URL。
-
-    Args:
-        settings: 应用配置实例。
-
-    Returns:
-        Redis 连接 URL，格式为 ``redis://[:password]@host:port/db``。
-    """
-
-    auth = f":{settings.redis_password}@" if settings.redis_password else ""
-    return f"redis://{auth}{settings.redis_host}:{settings.redis_port}/{settings.redis_checkpoint_db}"
-
-
-def _build_pg_dsn(settings: Settings) -> str:
-    """从 Settings 构建 PostgreSQL DSN。
-
-    Args:
-        settings: 应用配置实例。
-
-    Returns:
-        PostgreSQL 连接字符串。
-    """
-
-    return (
-        f"postgresql://{settings.pg_user}:{settings.pg_password}"
-        f"@{settings.pg_host}:{settings.pg_port}/{settings.pg_database}"
-    )
 
 
 def make_checkpointer(settings: Settings | None = None) -> Any:
@@ -68,7 +40,7 @@ def make_checkpointer(settings: Settings | None = None) -> Any:
 
     if settings is None:
         settings = get_settings()
-    url = _build_redis_url(settings)
+    url = build_redis_url(settings)
     logger.info("创建 Redis checkpointer：%s:%s/%s", settings.redis_host, settings.redis_port, settings.redis_checkpoint_db)
     return RedisSaver.from_conn_string(url)
 
@@ -90,6 +62,6 @@ def make_langgraph_store(settings: Settings | None = None) -> Any:
 
     if settings is None:
         settings = get_settings()
-    dsn = _build_pg_dsn(settings)
+    dsn = build_pg_dsn(settings)
     logger.info("创建 PostgreSQL LangGraph Store：%s:%s/%s", settings.pg_host, settings.pg_port, settings.pg_database)
     return PostgresStore.from_conn_string(dsn)
