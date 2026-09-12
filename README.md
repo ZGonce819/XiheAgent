@@ -1,5 +1,7 @@
 # XiheAgent (羲和) — AI Coding Assistant
 
+![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)
+
 羲和（XiheAgent）是一个基于 FastAPI + LangGraph + DeepAgents 构建的 AI 编码助手，支持 Gitee / GitHub / Codeup 多平台仓库集成、多轮对话、代码审查、自动化任务编排等功能。
 
 ## 核心特性
