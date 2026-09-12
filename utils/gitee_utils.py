@@ -85,7 +85,7 @@ def mask_token(text: str) -> str:
 
     API 错误、Git 输出和异常信息可能包含访问令牌。
     所有写日志或返回给模型的外部错误文本都应经过该函数处理。
-    同时覆盖 Gitee、GitHub、GitLab 和 Codeup 四组令牌变量。
+    同时覆盖 Gitee、GitHub 和 Codeup 三组令牌变量。
     """
 
     masked = text
@@ -94,8 +94,6 @@ def mask_token(text: str) -> str:
         "SCM_GITEE_TOKEN",
         "GITHUB_TOKEN",
         "SCM_GITHUB_TOKEN",
-        "GITLAB_TOKEN",
-        "SCM_GITLAB_TOKEN",
         "CODEUP_TOKEN",
         "SCM_CODEUP_TOKEN",
     ):

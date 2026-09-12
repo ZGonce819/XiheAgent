@@ -29,7 +29,6 @@ from agent.memory.repo import build_repo_memory_namespace, repo_memory_store_key
 from utils.codeup_utils import parse_codeup_repo_url
 from utils.gitee_utils import mask_token, parse_gitee_repo_url
 from utils.github_utils import parse_github_repo_url
-from utils.gitlab_utils import parse_gitlab_repo_url
 from utils.platform_router import detect_platform, get_platform_display_name, get_platform_tools
 
 logger = logging.getLogger(__name__)
@@ -44,8 +43,6 @@ def _parse_repo_url(repo_url: str):
         return parse_codeup_repo_url(repo_url)
     if platform == "github":
         return parse_github_repo_url(repo_url)
-    if platform == "gitlab":
-        return parse_gitlab_repo_url(repo_url)
     return parse_gitee_repo_url(repo_url)
 
 

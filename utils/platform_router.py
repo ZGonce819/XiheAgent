@@ -15,8 +15,6 @@ _PLATFORM_HOSTS: dict[str, str] = {
     "www.gitee.com": "gitee",
     "github.com": "github",
     "www.github.com": "github",
-    "gitlab.com": "gitlab",
-    "www.gitlab.com": "gitlab",
     "codeup.aliyun.com": "codeup",
     "www.codeup.aliyun.com": "codeup",
 }
@@ -33,11 +31,6 @@ PLATFORM_TOOL_MAP: dict[str, dict[str, str]] = {
         "publish_comment": "publish_github_pr_comment",
         "get_context": "get_github_pull_request_context",
     },
-    "gitlab": {
-        "open_pr": "open_gitlab_merge_request",
-        "publish_comment": "publish_gitlab_mr_comment",
-        "get_context": "get_gitlab_merge_request_context",
-    },
     "codeup": {
         "open_pr": "open_codeup_merge_request",
         "publish_comment": "publish_codeup_mr_comment",
@@ -49,7 +42,6 @@ PLATFORM_TOOL_MAP: dict[str, dict[str, str]] = {
 PLATFORM_DISPLAY_NAMES: dict[str, str] = {
     "gitee": "Gitee",
     "github": "GitHub",
-    "gitlab": "GitLab",
     "codeup": "Codeup（阿里云云效）",
 }
 
@@ -63,14 +55,13 @@ class UnsupportedPlatformError(ValueError):
 def detect_platform(repo_url: str) -> str:
     """根据仓库 URL 的 hostname 确定性判断平台。
 
-    优先精确匹配已知域名；如果 hostname 中包含 ``gitlab`` 关键字，
-    视为自建 GitLab 实例（例如 ``git.company.com``）。
+    优先精确匹配已知域名。
 
     Args:
         repo_url: 仓库 HTTPS 或 SSH 克隆地址。
 
     Returns:
-        平台标识字符串：``"gitee"``、``"github"``、``"gitlab"`` 或 ``"codeup"``。
+        平台标识字符串：``"gitee"``、``"github"`` 或 ``"codeup"``。
 
     Raises:
         UnsupportedPlatformError: 无法识别平台时抛出。
@@ -80,10 +71,6 @@ def detect_platform(repo_url: str) -> str:
 
     if hostname in _PLATFORM_HOSTS:
         return _PLATFORM_HOSTS[hostname]
-
-    # 自建 GitLab：hostname 中包含 gitlab 关键字
-    if "gitlab" in hostname:
-        return "gitlab"
 
     raise UnsupportedPlatformError(
         f"无法识别的代码托管平台：{hostname or repo_url!r}。"
