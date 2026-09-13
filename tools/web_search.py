@@ -15,11 +15,12 @@ from functools import lru_cache
 from typing import Any
 
 from langchain_core.tools import tool
+from pydantic import BaseModel, Field
 
 from agent.runtime.events import record_event
 from config.env_config import require_env
+from utils.context_utils import get_runtime_thread_id
 from utils.gitee_utils import mask_token
-from tools.runtime_context import get_runtime_thread_id
 
 logger = logging.getLogger("agent.run.web_search")
 
@@ -31,6 +32,12 @@ def _get_zhipu_client() -> Any:
     Web 搜索不是后端启动的必要能力，所以不能在模块导入时直接初始化 SDK。
     这样即使本地暂时没有安装 `zai`，FastAPI 也能正常启动；只有 Agent 真正调用
     web_search 时，才返回明确的依赖或密钥错误。
+
+    Returns:
+        智谱 SDK 客户端实例。
+
+    Raises:
+        RuntimeError: SDK 未安装时抛出，包含安装指引。
     """
 
     # API Key 在真正搜索时才读取，避免导入模块阶段对环境变量产生强依赖。
@@ -51,7 +58,11 @@ def _get_zhipu_client() -> Any:
     return ZhipuAI(api_key=api_key)
 
 
-@tool("web_search", parse_docstring=True)
+class WebSearchSchema(BaseModel):
+    query: str = Field(description="需要搜索的关键词或问题。")
+
+
+@tool("web_search", args_schema=WebSearchSchema)
 def web_search(query: str) -> str:
     """使用智谱搜狗 Web Search API 进行联网搜索。
 

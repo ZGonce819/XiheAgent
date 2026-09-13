@@ -36,7 +36,15 @@ class ThreadMessage:
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> ThreadMessage:
-        """从数据库查询结果构造实体。"""
+        """从数据库查询结果构造实体。
+
+        Args:
+            row: 数据库查询返回的字典行，须包含 ``message_id``、``thread_id``、
+                ``author``、``content`` 等必填字段。
+
+        Returns:
+            构造完成的 :class:`ThreadMessage` 实例。
+        """
 
         return cls(
             message_id=row["message_id"],
@@ -52,6 +60,9 @@ class ThreadMessage:
         """将实体转换为可用于数据库写入的字典。
 
         ``metadata`` 序列化为 JSON 字符串后写入 TEXT 列。
+
+        Returns:
+            与数据库列名对应的字典，可直接用于 INSERT / UPDATE 语句。
         """
 
         import json

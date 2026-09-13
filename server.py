@@ -55,17 +55,12 @@ from tools import (
     validate_review_finding_location,
     web_search,
 )
-from utils.codeup_utils import CodeupRepo, parse_codeup_repo_url
-from utils.gitee_utils import GiteeRepo, parse_gitee_repo_url
-from utils.github_utils import GitHubRepo, parse_github_repo_url
+from config.constants import DEFAULT_RECURSION_LIMIT, MAX_CACHED_BACKENDS, MODEL_CALL_RECURSION_LIMIT, VALID_TASK_KINDS
+from utils.platform_router import parse_repo_url
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_RECURSION_LIMIT = 9999
-MODEL_CALL_RECURSION_LIMIT = 5000
-
 _BACKENDS: dict[str, BaseSandbox] = {}
-_MAX_CACHED_BACKENDS = 128
 
 
 def graph_loaded_for_execution(config: RunnableConfig) -> bool:
@@ -73,6 +68,12 @@ def graph_loaded_for_execution(config: RunnableConfig) -> bool:
 
     部分框架或调试脚本会探测 Agent 图结构，但不代表需要真正执行任务。
     没有 thread_id 时返回空 Agent，避免误创建工具链和触发文件系统副作用。
+
+    Args:
+        config: LangGraph 运行配置，包含 ``configurable`` 字典。
+
+    Returns:
+        ``True`` 表示当前为真实执行态，否则为探测或调试调用。
     """
     configurable = (config or {}).get("configurable") or {}
     return bool(configurable.get("__is_for_execution__", False))
@@ -84,10 +85,16 @@ def ensure_backend_for_thread(thread_id: str) -> BaseSandbox:
     根据 ``USE_SANDBOX`` 配置决定使用 OpenSandbox 远程沙盒还是 LocalShellBackend。
     负责复用当前机器上的工作区，按 thread 维度缓存 Backend 实例，
     同一会话内可重复使用。超过缓存上限时淘汰最久未使用的实例。
+
+    Args:
+        thread_id: 会话唯一标识。
+
+    Returns:
+        缓存或新建的 Backend 实例。
     """
     backend = _BACKENDS.get(thread_id)
     if backend is None:
-        if len(_BACKENDS) >= _MAX_CACHED_BACKENDS:
+        if len(_BACKENDS) >= MAX_CACHED_BACKENDS:
             oldest_key = next(iter(_BACKENDS))
             logger.info("Backend 缓存已满，淘汰最旧实例：%s", oldest_key)
             _BACKENDS.pop(oldest_key)
@@ -104,6 +111,13 @@ def _general_purpose_subagent(model: BaseChatModel) -> SubAgent:
 
     子 Agent 只负责阅读、分析、总结和给主 Agent 提供建议，
     不能直接修改 /projects 下的源码，保持主 Agent 的最终执行权。
+
+    Args:
+        model: 子 Agent 使用的语言模型实例。
+
+    Returns:
+        配置完成的通用子 Agent 字典，包含名称、描述、系统提示词、
+        模型、技能路径和文件系统权限。
     """
     return {
         "name": GENERAL_PURPOSE_SUBAGENT["name"],
@@ -156,6 +170,13 @@ def _code_reviewer_subagent(model: BaseChatModel) -> SubAgent:
 
     职责：读取规则、读取 SCM PR/MR 上下文、分析 diff、记录结构化 finding，
     并输出中文审查报告。不允许修改源码或执行 Git 写操作。
+
+    Args:
+        model: 子 Agent 使用的语言模型实例。
+
+    Returns:
+        配置完成的代码审查子 Agent 字典，包含名称、描述、系统提示词、
+        模型、工具列表、技能路径和文件系统权限。
     """
     return {
         "name": "code_reviewer",
@@ -232,6 +253,10 @@ def _agent_filesystem_permissions() -> list[FilesystemPermission]:
 
     主 Agent 可以修改 /projects 中的项目代码，也可以写 /reviews、/tmp 和 /memories。
     技能、策略、运行环境和日志目录默认只读。
+
+    Returns:
+        文件系统权限列表，按优先级从上到下依次匹配，
+        末尾以全路径拒绝作为兜底。
     """
     return [
         FilesystemPermission(
@@ -267,9 +292,17 @@ def _agent_filesystem_permissions() -> list[FilesystemPermission]:
 
 
 def _task_kind_from_config(configurable: dict[str, Any]) -> TaskKind:
-    """从 config 中读取任务类型，非法值统一回退为 coding。"""
+    """从 config 中读取任务类型，非法值统一回退为 coding。
+
+    Args:
+        configurable: LangGraph ``configurable`` 字典，
+            可包含 ``task_kind`` 键。
+
+    Returns:
+        解析后的任务类型；当值不在合法枚举中时返回 ``"coding"``。
+    """
     value = configurable.get("task_kind", "coding")
-    if value in {"coding", "analysis", "planning", "qa", "sync", "inspect", "review"}:
+    if value in VALID_TASK_KINDS:
         return value  # type: ignore[return-value]
     return "coding"
 
@@ -285,6 +318,15 @@ def create_repo_backend(
 
     - /projects、/skills、/runtimes 和 execute() 继续走主 Backend。
     - /memories/ 走 DeepAgents StoreBackend，底层由 LangGraph Store 持久化。
+
+    Args:
+        local_backend: 本地 Shell/Sandbox Backend 实例。
+        store: LangGraph Store，用于记忆持久化。
+        owner: 仓库 owner（命名空间）。
+        repo: 仓库名称。
+
+    Returns:
+        路由后的 CompositeBackend 实例。
     """
     namespace = build_repo_memory_namespace(owner, repo)
     return CompositeBackend(
@@ -298,18 +340,6 @@ def create_repo_backend(
     )
 
 
-def _parse_repo_url(repo_url: str) -> GiteeRepo | GitHubRepo | CodeupRepo:
-    """根据 URL 域名自动识别 SCM 平台并解析仓库信息。"""
-    from urllib.parse import urlparse
-    parsed = urlparse(repo_url.strip())
-    hostname = (parsed.hostname or "").lower()
-    if hostname in {"codeup.aliyun.com", "www.codeup.aliyun.com"}:
-        return parse_codeup_repo_url(repo_url)
-    if hostname in {"github.com", "www.github.com"}:
-        return parse_github_repo_url(repo_url)
-    return parse_gitee_repo_url(repo_url)
-
-
 def _prepare_repo_backend_context(
     *,
     repo_url: Any,
@@ -320,13 +350,17 @@ def _prepare_repo_backend_context(
     如果任务绑定了 SCM 仓库，将 /memories/ 路径挂到 DeepAgents StoreBackend，
     同时读取记忆文件内容返回，避免后续 middleware 重复查询数据库。
 
+    Args:
+        repo_url: 仓库 URL 字符串；非字符串或空值时直接返回原始 Backend。
+        backend: 当前 thread 的本地 Backend 实例。
+
     Returns:
         (CompositeBackend, memory_virtual_paths, memory_content | None)
     """
     if not isinstance(repo_url, str) or not repo_url.strip():
         return backend, None, None
 
-    repo = _parse_repo_url(repo_url)
+    repo = parse_repo_url(repo_url)
     langgraph_store = get_langgraph_store()
     project_dir = repo_project_dir(repo)
     ensure_repo_memory_initialized(
@@ -364,6 +398,13 @@ def get_agent(config: RunnableConfig):
     根据 config 中的 thread_id、task_kind、repo_url 等参数，
     组装模型、工具、子 Agent、Backend、记忆、中间件和 Checkpoint，
     返回一个可直接调用的 Agent runnable。
+
+    Args:
+        config: LangGraph 运行配置，``configurable`` 中需包含
+            ``thread_id``、可选 ``task_kind`` 和 ``repo_url``。
+
+    Returns:
+        配置完成的 Agent runnable 实例。
     """
     config = dict(config or {})
     configurable = dict(config.get("configurable") or {})

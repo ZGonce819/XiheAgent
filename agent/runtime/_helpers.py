@@ -13,7 +13,7 @@ from typing import Any
 
 from agent.graph.checkpoint_history import visible_checkpoint_messages
 from agent.graph.graph import get_checkpointer, get_langgraph_store
-from agent.memory.repo import ensure_repo_memory_initialized, repo_project_dir
+from agent.memory.repo import ensure_repo_memory_initialized
 from server import get_agent
 
 logger = logging.getLogger(__name__)
@@ -23,8 +23,14 @@ def _get_visible_messages(thread_id: str) -> list[dict[str, Any]]:
     """按 thread_id 获取 checkpoint 中的可见消息列表。
 
     当前项目的 ``visible_checkpoint_messages`` 接收 checkpoint 字典而非 thread_id，
-    这里封装获取 checkpoint 并规整消息字段的逻辑，供方案确认和历史还原使用。
+    这里封装获取 checkpoint 并规整消息字段的逻辑，供方案确认或历史还原使用。
     返回的消息包含 ``author``、``content``、``message_id`` 字段。
+
+    Args:
+        thread_id: LangGraph 线程 ID。
+
+    Returns:
+        规整后的消息列表；读取失败时返回空列表。
     """
 
     try:
@@ -54,9 +60,13 @@ def build_agent_for_runtime(
     每次运行都会重新取得一个 Agent runnable。真正的对话状态不靠这个
     Python 对象长期驻留，而是靠 checkpoint 和 StoreBackend 持久化。
 
-    ``thread_id`` 用于绑定 LangGraph checkpoint、Store 业务记录和前端事件流。
-    ``task_kind`` 会影响系统提示词、工具权限、中间件行为和运行保护阈值。
-    ``repo_url`` 会继续向下传给 Agent 工厂，用于初始化仓库映射、仓库记忆和运行上下文。
+    Args:
+        thread_id: 用于绑定 LangGraph checkpoint、Store 业务记录和前端事件流。
+        task_kind: 任务类型，影响系统提示词、工具权限、中间件行为和运行保护阈值。
+        repo_url: 仓库地址，向下传给 Agent 工厂用于初始化仓库映射和记忆。
+
+    Returns:
+        构造完成的 DeepAgent runnable 实例。
     """
 
     configurable: dict[str, Any] = {
@@ -74,6 +84,10 @@ def ensure_repo_memory_for_repo(repo: Any, project_dir: str) -> None:
 
     记忆正文通过 DeepAgents StoreBackend 写入 LangGraph Store，不再额外建立
     SQLite 索引表。已有记忆不会被覆盖。
+
+    Args:
+        repo: 仓库标识对象，包含 ``owner`` 和 ``repo`` 属性。
+        project_dir: 项目本地目录路径。
     """
 
     created = ensure_repo_memory_initialized(
@@ -83,87 +97,6 @@ def ensure_repo_memory_for_repo(repo: Any, project_dir: str) -> None:
     )
     if created:
         logger.info("已初始化仓库记忆：repo=%s/%s", repo.owner, repo.repo)
-
-
-def message_content_to_text(content: Any) -> str:
-    """把 LangChain message.content 规整成可展示文本。
-
-    LangChain/DeepAgents 的 message.content 可能是普通字符串，也可能是多模态
-    content block 列表。runtime 在提取最终回答、技术方案和记忆摘要时，只需要
-    文本部分，所以这里统一转换，避免每个调用点重复兼容不同消息结构。
-    """
-
-    if isinstance(content, str):
-        return content.strip()
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict):
-                text = item.get("text") or item.get("content")
-                if text:
-                    parts.append(str(text))
-        return "\n".join(part.strip() for part in parts if part and part.strip()).strip()
-    return str(content).strip() if content is not None else ""
-
-
-def extract_final_assistant_text(messages: list[dict[str, Any]]) -> str:
-    """提取 DeepAgent 最后一条 assistant/ai 消息作为用户可见回答。
-
-    任务结束后，仓库记忆更新只需要最终总结，不应该把中间工具消息、todo 状态或
-    调试事件写进长期记忆。因此这里从后往前找最后一条有正文的 AI/assistant 消息。
-    """
-
-    for message in reversed(messages):
-        message_type = str(message.get("type") or "").lower()
-        if message_type not in {"ai", "assistant"}:
-            continue
-        text = message_content_to_text(message.get("content"))
-        if text:
-            return text
-    return ""
-
-
-def extract_best_plan_text(messages: list[dict[str, Any]]) -> str:
-    """从多条 assistant 消息中提取最完整的技术方案。
-
-    DeepAgents 有时会把"完整方案"和"是否确认实施该方案？"拆成不同 assistant
-    消息。如果只取最后一条，前端就只剩确认句。方案任务应优先选择包含方案关键词
-    且篇幅最长的 assistant 消息；没有命中时再退回最长 assistant 消息。
-
-    这个函数只用于兜底校验和仓库记忆更新。前端实时展示不依赖它，前端看到的正文
-    来自 streaming_runtime.py 对 DeepAgents V3 文本 chunk 的实时消费。
-    """
-
-    candidates: list[str] = []
-    for message in messages:
-        message_type = str(message.get("type") or "").lower()
-        if message_type not in {"ai", "assistant"}:
-            continue
-        text = message_content_to_text(message.get("content"))
-        if text:
-            candidates.append(text)
-    if not candidates:
-        return ""
-
-    plan_keywords = [
-        "方案",
-        "技术方案",
-        "修复技术方案",
-        "实施步骤",
-        "修复依据",
-        "验证方案",
-        "风险",
-        "涉及模块",
-        "数据结构",
-        "是否确认实施该方案",
-    ]
-    plan_candidates = [
-        text for text in candidates if any(keyword in text for keyword in plan_keywords)
-    ]
-    selected_pool = plan_candidates or candidates
-    return max(selected_pool, key=len).strip()
 
 
 def build_agent_user_content(
@@ -183,7 +116,16 @@ def build_agent_user_content(
     - 非 coding：只能读取仓库、分析、回答或生成方案，禁止写文件和提交。
 
     如果是用户确认后的 coding 任务，``approved_plan`` 会作为实施依据一并传入。
-    ``display_prompt`` 是用户在网页输入框里真正输入的文本。
+
+    Args:
+        repo_url: 仓库完整地址。
+        task_kind: 任务类型，如 ``"coding"`` 或 ``"planning"``。
+        prompt: 用户任务描述文本。
+        display_prompt: 用户在网页输入框里真正输入的文本；为 ``None`` 时使用 ``prompt``。
+        approved_plan: 用户已确认的技术方案文本；仅在 coding 任务时生效。
+
+    Returns:
+        拼接完成的用户内容字符串。
     """
 
     visible_prompt = (display_prompt or prompt).strip()
@@ -227,7 +169,16 @@ def build_plan_user_content(
     技术方案现在作为普通 Agent 回答直接展示在网页中，不再保存到 thread_plans
     或 Markdown 文件。用户确认后，后端会读取上一条方案消息作为实施依据。
 
-    ``previous_plan + revision_prompt`` 用于"修改上一版方案"的场景。
+    ``previous_plan`` + ``revision_prompt`` 用于"修改上一版方案"的场景。
+
+    Args:
+        repo_url: 仓库完整地址。
+        prompt: 用户原始需求文本。
+        previous_plan: 上一版技术方案内容；为 ``None`` 时表示首次生成。
+        revision_prompt: 用户对上一版方案的修改要求；为 ``None`` 时表示全新方案。
+
+    Returns:
+        拼接完成的方案生成提示文本。
     """
 
     if previous_plan and revision_prompt:
@@ -273,6 +224,12 @@ def is_approval_prompt(prompt: str) -> bool:
 
     这里故意使用本地规则判断，而不是交给模型判断，因为它会影响是否允许进入
     coding 任务，属于权限相关的流程控制。
+
+    Args:
+        prompt: 用户输入文本。
+
+    Returns:
+        ``True`` 表示用户明确要求开始实施；``False`` 表示不是确认指令。
     """
 
     normalized = " ".join((prompt or "").lower().split())
@@ -299,6 +256,12 @@ def is_plan_revision_prompt(prompt: str) -> bool:
 
     只有用户明确表达"修改/补充/重新生成方案"时，才会触发方案修订。
     这能避免历史中的待确认方案劫持后续普通问答。
+
+    Args:
+        prompt: 用户输入文本。
+
+    Returns:
+        ``True`` 表示用户要求修订方案；``False`` 表示普通输入。
     """
 
     normalized = " ".join((prompt or "").lower().split())
@@ -332,6 +295,12 @@ def message_metadata(message: dict[str, Any]) -> dict[str, Any]:
     metadata 可能是 dict，也可能是旧数据中的 JSON 字符串。
     最重要的 metadata 是 source_prompt，用于从"确认实施"恢复出上一轮
     真正的用户需求。
+
+    Args:
+        message: checkpoint 中的单条消息字典。
+
+    Returns:
+        解析后的 metadata 字典；无法解析时返回空字典。
     """
 
     metadata = message.get("metadata")
@@ -351,6 +320,12 @@ def is_confirmable_plan_text(text: str) -> bool:
 
     用中文方案关键词做保守判断，避免普通问答被误识别成可实施方案。
     判断规则宁可保守，也不要激进。
+
+    Args:
+        text: 待判断的 assistant 消息正文。
+
+    Returns:
+        ``True`` 表示文本像一份可确认的技术方案；``False`` 表示不是。
     """
 
     stripped = text.strip()
@@ -381,6 +356,13 @@ def latest_confirmable_plan_from_checkpoint(thread_id: str) -> dict[str, Any] | 
 
     查找方向是从后往前，保证多轮修改方案后总是采用最新的一版。
     返回的是 runtime 自己组装的简化消息结构，不直接暴露 checkpoint 内部结构。
+
+    Args:
+        thread_id: LangGraph 线程 ID。
+
+    Returns:
+        包含 message_id、thread_id、author、content、metadata 的方案字典；
+        未找到可确认方案时返回 ``None``。
     """
 
     for message in reversed(_get_visible_messages(thread_id)):
@@ -409,6 +391,12 @@ def latest_confirmable_plan_message(thread_id: str) -> dict[str, Any] | None:
 
     页面历史和确认实施都以 checkpoint 为准。这个封装函数保留了"读取来源"的抽象，
     如果以后要增加归档查询或迁移兼容，可以在这里扩展。
+
+    Args:
+        thread_id: LangGraph 线程 ID。
+
+    Returns:
+        方案消息字典；未找到时返回 ``None``。
     """
 
     return latest_confirmable_plan_from_checkpoint(thread_id)
@@ -419,6 +407,13 @@ def plan_source_prompt(message: dict[str, Any], fallback: str) -> str:
 
     首次生成方案时，metadata.source_prompt 保存用户原始需求；方案被多次修订时，
     这里继续沿用上一版 source_prompt，避免只把"再改一下"当成完整开发目标。
+
+    Args:
+        message: 方案消息字典。
+        fallback: metadata 中没有 source_prompt 时使用的回退文本。
+
+    Returns:
+        原始需求文本；不存在时返回 ``fallback``。
     """
 
     metadata = message_metadata(message)
@@ -431,6 +426,13 @@ def latest_non_approval_user_prompt(thread_id: str, fallback: str) -> str:
 
     方案确认时，如果 checkpoint 里的方案消息没有携带 source_prompt，
     就从 checkpoint 历史向前找真实用户需求。
+
+    Args:
+        thread_id: LangGraph 线程 ID。
+        fallback: 未找到非确认用户消息时使用的回退文本。
+
+    Returns:
+        最近一条非确认的用户消息内容；未找到时返回 ``fallback``。
     """
 
     for message in reversed(_get_visible_messages(thread_id)):
@@ -447,6 +449,13 @@ def revision_source_prompt(*, previous_source_prompt: str, revision_prompt: str)
 
     多次修改方案时，会把补充要求追加到原始需求后面，
     避免后续实施阶段丢失用户逐轮补充的信息。
+
+    Args:
+        previous_source_prompt: 上一版方案对应的原始需求文本。
+        revision_prompt: 本次用户补充或修改的要求。
+
+    Returns:
+        合并后的 source_prompt 文本。
     """
 
     revision_prompt = revision_prompt.strip()

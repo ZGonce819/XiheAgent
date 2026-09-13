@@ -11,11 +11,12 @@ import sys
 import time
 from pathlib import Path
 
+from scripts.stop_all import stop_ports
+
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
-
-from scripts.stop_all import stop_ports  # noqa: E402
 
 
 def start_process(
@@ -24,7 +25,17 @@ def start_process(
     cwd: Path,
     env: dict[str, str] | None = None,
 ) -> subprocess.Popen:
-    """启动一个子进程并返回 Popen 对象。"""
+    """启动一个子进程并返回 Popen 对象。
+
+    Args:
+        name: 进程名称，用于日志输出。
+        command: 启动命令及参数列表。
+        cwd: 进程工作目录。
+        env: 可选的额外环境变量，会合并到当前环境变量中。
+
+    Returns:
+        已启动的 ``subprocess.Popen`` 对象。
+    """
     print(f"启动 {name}: {' '.join(command)}")
     process_env = os.environ.copy()
     if env:

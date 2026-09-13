@@ -59,6 +59,15 @@ def normalize_safe_command(command: str) -> str:
     前者是为了合并 stderr，后者是 Unix 查看末尾输出的习惯。
     课程版在 Python 中已经捕获 stdout/stderr，也会把完整输出返回给模型，
     所以这里剥离这两个尾部片段，既兼容模型习惯，又不放开任意管道/重定向能力。
+
+    Args:
+        command: 模型生成的待执行命令字符串。
+
+    Returns:
+        归一化后的安全命令字符串。
+
+    Raises:
+        WorkspacePermissionError: 命令不在白名单或包含危险操作符。
     """
     normalized = command.strip()
     normalized = re.sub(r"\s+\|\s*tail\s+-?\d+\s*$", "", normalized, flags=re.IGNORECASE)
@@ -97,6 +106,12 @@ def ensure_safe_command(command: str) -> None:
     """兼容旧调用方的命令校验函数。
 
     旧代码只需要"成功或抛异常"，不关心归一化后的命令文本。
+
+    Args:
+        command: 模型生成的待执行命令字符串。
+
+    Raises:
+        WorkspacePermissionError: 命令不安全时抛出。
     """
     normalize_safe_command(command)
 
@@ -109,6 +124,15 @@ def ensure_safe_git_branch(branch: str) -> str:
 
     分支名通常由 Agent 根据任务自动生成或拼接。进入 shell 前必须限制字符集，
     防止出现命令注入、路径穿越、Git 特殊引用语法等问题。
+
+    Args:
+        branch: 待校验的 Git 分支名。
+
+    Returns:
+        校验通过的分支名（原样返回）。
+
+    Raises:
+        WorkspacePermissionError: 分支名包含非法字符或模式。
     """
     if not _BRANCH_RE.fullmatch(branch):
         raise WorkspacePermissionError(f"Invalid git branch name: {branch}")
@@ -123,6 +147,12 @@ def ensure_safe_git_message(message: str) -> str:
     模型经常会生成多行提交说明，甚至包含 JSON 示例中的双引号。
     Git 本身支持复杂 message，但课程版当前通过 Windows shell 执行 git commit，
     所以这里把 message 压缩成单行，并移除 shell 风险字符。
+
+    Args:
+        message: 模型生成的原始提交信息。
+
+    Returns:
+        归一化后的单行安全提交信息，最长 200 字符。
     """
     normalized = " ".join(message.split())
     normalized = normalized.replace('"', "'")

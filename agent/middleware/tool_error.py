@@ -51,6 +51,14 @@ def tool_error_result(
 
     返回字典包含 ok、tool、error_type、error、workspace、hint 字段，
     模型可以通过读取 content 的 JSON 了解失败原因。
+
+    Args:
+        error: 工具执行过程中抛出的异常。
+        tool_name: 失败的工具名称。
+        backend: 当前工作区后端，用于提供 workspace 路径信息。
+
+    Returns:
+        包含 ok、tool、error_type、error、workspace、hint 的结构化字典。
     """
     error_text = mask_token(str(error))
 
@@ -81,6 +89,12 @@ def _get_tool_call_id(request: ToolCallRequest) -> str | None:
     """从 ToolCallRequest 中提取 tool_call_id。
 
     ToolMessage 必须绑定 tool_call_id 才能与对应的工具调用配对。
+
+    Args:
+        request: LangGraph 工具调用请求对象。
+
+    Returns:
+        tool_call_id 字符串；无法提取时返回 ``None``。
     """
     if isinstance(request.tool_call, dict):
         value = request.tool_call.get("id")
@@ -89,7 +103,14 @@ def _get_tool_call_id(request: ToolCallRequest) -> str | None:
 
 
 def _get_tool_name(request: ToolCallRequest) -> str:
-    """从 ToolCallRequest 中提取工具名。读取失败时回退为 'unknown_tool'。"""
+    """从 ToolCallRequest 中提取工具名。
+
+    Args:
+        request: LangGraph 工具调用请求对象。
+
+    Returns:
+        工具名称；读取失败时返回 ``"unknown_tool"``。
+    """
     if isinstance(request.tool_call, dict):
         name = request.tool_call.get("name")
         return name if isinstance(name, str) and name else "unknown_tool"
@@ -97,7 +118,14 @@ def _get_tool_name(request: ToolCallRequest) -> str:
 
 
 def _get_tool_args(request: ToolCallRequest) -> dict[str, Any]:
-    """从 ToolCallRequest 中提取工具调用参数。"""
+    """从 ToolCallRequest 中提取工具调用参数。
+
+    Args:
+        request: LangGraph 工具调用请求对象。
+
+    Returns:
+        工具参数字典；无法提取时返回空字典。
+    """
     if isinstance(request.tool_call, dict):
         args = request.tool_call.get("args", {})
         return args if isinstance(args, dict) else {}
@@ -105,7 +133,11 @@ def _get_tool_args(request: ToolCallRequest) -> dict[str, Any]:
 
 
 def _get_thread_id() -> str | None:
-    """通过 LangGraph 运行时配置读取当前线程的 thread_id。"""
+    """通过 LangGraph 运行时配置读取当前线程的 thread_id。
+
+    Returns:
+        当前线程 ID；未配置或为空时返回 ``None``。
+    """
     configurable = get_config().get("configurable", {})
     if not isinstance(configurable, dict):
         return None
@@ -120,7 +152,17 @@ def _error_tool_message(
     tool_name: str,
     backend: LocalShellBackend,
 ) -> ToolMessage:
-    """把工具异常转换为结构化的 ToolMessage（status='error'）。"""
+    """把工具异常转换为结构化的 ToolMessage（status='error'）。
+
+    Args:
+        error: 工具执行过程中抛出的异常。
+        request: LangGraph 工具调用请求对象，用于提取 tool_call_id。
+        tool_name: 失败的工具名称。
+        backend: 当前工作区后端。
+
+    Returns:
+        包含结构化错误信息的 ToolMessage。
+    """
     return ToolMessage(
         content=json.dumps(
             tool_error_result(error, tool_name=tool_name, backend=backend),
@@ -143,6 +185,12 @@ def _record_original_tool_error(
     每个工具在真正执行前会先写入一条 in_progress 事件。工具执行过程中一旦
     抛出异常，需要反向查找工具名对应的原步骤 key，把那条事件的 status 改为 error，
     避免前端步骤永远停留在"运行中"。
+
+    Args:
+        thread_id: 当前线程 ID。
+        tool_name: 失败的工具名称。
+        kwargs: 工具调用时的原始参数。
+        error: 工具抛出的异常。
     """
     error_detail = mask_token(str(error))
 
@@ -212,6 +260,11 @@ class ToolErrorMiddleware(AgentMiddleware):
     state_schema = AgentState
 
     def __init__(self, *, backend: LocalShellBackend) -> None:
+        """初始化工具异常处理中间件。
+
+        Args:
+            backend: 当前工作区后端实例，用于在错误结果中提供 workspace 路径。
+        """
         super().__init__()
         self.backend = backend
 
@@ -220,6 +273,11 @@ class ToolErrorMiddleware(AgentMiddleware):
 
         同时做两件事：把原工具步骤从 in_progress 更新为 error，以及新增一条
         通用 tool-error 事件作为兜底记录。
+
+        Args:
+            request: LangGraph 工具调用请求对象，用于提取工具参数。
+            tool_name: 失败的工具名称。
+            error: 工具抛出的异常。
         """
         thread_id = _get_thread_id()
         if not thread_id:
@@ -247,6 +305,15 @@ class ToolErrorMiddleware(AgentMiddleware):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], ToolMessage | Command],
     ) -> ToolMessage | Command:
+        """同步工具调用包装器，捕获异常并返回结构化错误 ToolMessage。
+
+        Args:
+            request: LangGraph 工具调用请求对象。
+            handler: 下游工具调用处理函数。
+
+        Returns:
+            下游返回的正常结果；或异常被捕获后返回的错误 ToolMessage。
+        """
         tool_name = _get_tool_name(request)
         try:
             return handler(request)
@@ -261,6 +328,15 @@ class ToolErrorMiddleware(AgentMiddleware):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
+        """异步工具调用包装器，捕获异常并返回结构化错误 ToolMessage。
+
+        Args:
+            request: LangGraph 工具调用请求对象。
+            handler: 下游异步工具调用处理函数。
+
+        Returns:
+            下游返回的正常结果；或异常被捕获后返回的错误 ToolMessage。
+        """
         tool_name = _get_tool_name(request)
         try:
             return await handler(request)

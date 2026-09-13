@@ -18,18 +18,14 @@ from __future__ import annotations
 
 import logging
 from functools import lru_cache
-from typing import Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field, field_validator
 
 from agent.graph.model import make_intent_model
-
-TaskKind = Literal["coding", "analysis", "planning", "qa", "sync", "inspect", "review"]
+from config.constants import TaskKind
 
 logger = logging.getLogger(__name__)
-
-_ALLOWED_TASK_KINDS: set[str] = {"coding", "analysis", "planning", "qa", "sync", "inspect", "review"}
 
 
 class IntentClassification(BaseModel):
@@ -46,7 +42,14 @@ class IntentClassification(BaseModel):
     @field_validator("reason")
     @classmethod
     def _trim_reason(cls, value: str) -> str:
-        """限制日志中的理由长度，避免模型返回大段文本污染日志。"""
+        """限制日志中的理由长度，避免模型返回大段文本污染日志。
+
+        Args:
+            value: 模型返回的原始理由文本。
+
+        Returns:
+            截断并去除首尾空白后的理由，最长 40 字符。
+        """
 
         return value.strip()[:40]
 
@@ -56,13 +59,27 @@ def _normalize_prompt(prompt: str) -> str:
 
     这里仍然保留本地规则，是因为权限边界必须有确定性兜底。模型分类可以提升泛化能力，
     但不能替代后端对"是否允许写代码"的最终保护。
+
+    Args:
+        prompt: 用户原始输入。
+
+    Returns:
+        小写化、合并空白后的短文本；输入为空时返回空字符串。
     """
 
     return " ".join((prompt or "").lower().split())
 
 
 def _contains_any(text: str, keywords: list[str]) -> bool:
-    """判断文本是否包含任意关键词。"""
+    """判断文本是否包含任意关键词。
+
+    Args:
+        text: 待检测文本。
+        keywords: 关键词列表。
+
+    Returns:
+        ``True`` 表示文本中包含至少一个关键词。
+    """
 
     return any(keyword in text for keyword in keywords)
 
@@ -74,6 +91,12 @@ def is_pull_only_task(prompt: str) -> bool:
     - 它会被后台任务入口直接调用；
     - git pull 属于轻量同步任务，没必要消耗一次模型调用；
     - 如果同时出现"修改、提交、push、PR"等词，就不再当作单纯同步任务。
+
+    Args:
+        prompt: 用户原始输入。
+
+    Returns:
+        ``True`` 表示用户只想拉取 / 同步远程代码。
     """
 
     normalized = _normalize_prompt(prompt)
@@ -97,6 +120,12 @@ def is_workspace_listing_task(prompt: str) -> bool:
     """判断用户是否只是询问本地工作区有哪些项目。
 
     这个函数也保留关键词判断，避免"当前有哪些项目"这类简单问题触发模型调用。
+
+    Args:
+        prompt: 用户原始输入。
+
+    Returns:
+        ``True`` 表示用户只是询问工作区项目列表。
     """
 
     normalized = _normalize_prompt(prompt)
@@ -115,6 +144,9 @@ def _make_structured_intent_model():
     - Pydantic 负责字段和枚举校验。
 
     如果未来模型支持更严格的原生 JSON Schema，可以把 method 调整为 `json_schema`。
+
+    Returns:
+        绑定了 ``IntentClassification`` 结构化输出的 LangChain 模型实例。
     """
 
     return make_intent_model().with_structured_output(IntentClassification, method="json_mode")
@@ -125,6 +157,12 @@ def _classify_by_keyword_backup(prompt: str) -> TaskKind:
 
     备份文件是模型分类改造前的完整实现。模型不可用、结构化解析失败或测试环境没有
     真实 key 时，仍然可以保持项目可用。
+
+    Args:
+        prompt: 用户原始输入。
+
+    Returns:
+        关键词分类得到的任务类型。
     """
 
     from agent.runtime.task_intent_keyword_backup import classify_task_kind as keyword_classify_task_kind
@@ -133,7 +171,14 @@ def _classify_by_keyword_backup(prompt: str) -> TaskKind:
 
 
 def _classify_by_model(prompt: str) -> TaskKind:
-    """调用模型完成第一层用户意图分类。"""
+    """调用模型完成第一层用户意图分类。
+
+    Args:
+        prompt: 用户原始输入。
+
+    Returns:
+        模型结构化输出解析得到的任务类型。
+    """
 
     system_prompt = """你是 AI Coding 系统的第一层用户意图分类器。
 你只负责分类，不要回答用户问题，不要生成方案，不要写代码。
@@ -174,7 +219,14 @@ JSON 字段必须包含：
 
 
 def _has_negative_change_marker(normalized: str) -> bool:
-    """识别用户明确要求不要改代码、不要提交、只读处理的表达。"""
+    """识别用户明确要求不要改代码、不要提交、只读处理的表达。
+
+    Args:
+        normalized: 经 :func:`_normalize_prompt` 处理后的短文本。
+
+    Returns:
+        ``True`` 表示检测到只读 / 拒绝修改类关键词。
+    """
 
     return _contains_any(
         normalized,
@@ -203,7 +255,14 @@ def _has_negative_change_marker(normalized: str) -> bool:
 
 
 def _has_explicit_coding_marker(normalized: str) -> bool:
-    """识别用户明确允许进入写代码阶段的表达。"""
+    """识别用户明确允许进入写代码阶段的表达。
+
+    Args:
+        normalized: 经 :func:`_normalize_prompt` 处理后的短文本。
+
+    Returns:
+        ``True`` 表示检测到确认实施 / 开发类关键词。
+    """
 
     return _contains_any(
         normalized,
@@ -231,7 +290,14 @@ def _has_explicit_coding_marker(normalized: str) -> bool:
 
 
 def _has_review_marker(normalized: str) -> bool:
-    """识别代码审查相关表达。"""
+    """识别代码审查相关表达。
+
+    Args:
+        normalized: 经 :func:`_normalize_prompt` 处理后的短文本。
+
+    Returns:
+        ``True`` 表示检测到代码审查类关键词。
+    """
 
     return _contains_any(
         normalized,
@@ -260,7 +326,14 @@ def _has_review_marker(normalized: str) -> bool:
 
 
 def _has_planning_marker(normalized: str) -> bool:
-    """识别方案类表达。"""
+    """识别方案类表达。
+
+    Args:
+        normalized: 经 :func:`_normalize_prompt` 处理后的短文本。
+
+    Returns:
+        ``True`` 表示检测到方案 / 设计类关键词。
+    """
 
     return _contains_any(
         normalized,
@@ -285,6 +358,12 @@ def _has_review_fix_plan_marker(normalized: str) -> bool:
 
     这类输入里经常同时出现 `review`、`findings`、`审查报告` 和 `方案`。
     它不是重新做 PR 审查，而是读取已有审查结论，整理后续修复计划。
+
+    Args:
+        normalized: 经 :func:`_normalize_prompt` 处理后的短文本。
+
+    Returns:
+        ``True`` 表示同时包含审查来源和修复方案两类关键词。
     """
 
     has_review_source = _contains_any(
@@ -302,7 +381,14 @@ def _has_review_fix_plan_marker(normalized: str) -> bool:
 
 
 def _has_coding_marker(normalized: str) -> bool:
-    """识别普通开发实现类表达。"""
+    """识别普通开发实现类表达。
+
+    Args:
+        normalized: 经 :func:`_normalize_prompt` 处理后的短文本。
+
+    Returns:
+        ``True`` 表示检测到修改 / 实现 / 开发类关键词。
+    """
 
     return _contains_any(
         normalized,
@@ -331,6 +417,13 @@ def _apply_security_guard(prompt: str, predicted: TaskKind) -> TaskKind:
     """对模型分类结果做权限安全修正。
 
     这里是整个分类链路的安全阀：模型可以建议任务类型，但不能突破用户明确给出的只读边界。
+
+    Args:
+        prompt: 用户原始输入。
+        predicted: 模型或关键词分类得到的任务类型。
+
+    Returns:
+        经安全规则修正后的最终任务类型。
     """
 
     normalized = _normalize_prompt(prompt)
@@ -373,6 +466,12 @@ def classify_task_kind(prompt: str) -> TaskKind:
 
     coding 是唯一允许写文件、执行提交、push 和创建 PR 的模式。其余模式都按只读任务处理，
     最多准备或读取本地仓库，然后输出分析、方案、审查报告或答案。
+
+    Args:
+        prompt: 用户原始输入。
+
+    Returns:
+        分类得到的任务类型字符串。
     """
 
     normalized = _normalize_prompt(prompt)
@@ -405,6 +504,13 @@ def classify_task_kind(prompt: str) -> TaskKind:
 
 
 def is_read_only_task(task_kind: TaskKind) -> bool:
-    """只读任务不允许写文件、提交、push 和创建 PR。"""
+    """只读任务不允许写文件、提交、push 和创建 PR。
+
+    Args:
+        task_kind: 任务类型字符串。
+
+    Returns:
+        ``True`` 表示该任务类型为只读模式。
+    """
 
     return task_kind in {"analysis", "planning", "qa", "inspect", "review"}

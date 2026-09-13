@@ -15,7 +15,7 @@ from models._helpers import _to_iso
 class Thread:
     """threads 表实体模型。
 
-     Attributes:
+    Attributes:
         thread_id: 会话唯一标识（UUID）。
         title: 会话标题。
         user_prompt: 用户首次输入的内容摘要。
@@ -43,7 +43,15 @@ class Thread:
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> Thread:
-        """从数据库查询结果（DictCursor row）构造实体。"""
+        """从数据库查询结果（DictCursor row）构造实体。
+
+        Args:
+            row: 数据库查询返回的字典行，须包含 ``thread_id``、``title`` 等
+                必填字段，可选字段通过 ``dict.get`` 安全读取。
+
+        Returns:
+            构造完成的 :class:`Thread` 实例。
+        """
 
         return cls(
             thread_id=row["thread_id"],
@@ -60,7 +68,11 @@ class Thread:
         )
 
     def to_row(self) -> dict[str, Any]:
-        """将实体转换为可用于数据库写入的字典。"""
+        """将实体转换为可用于数据库写入的字典。
+
+        Returns:
+            与数据库列名对应的字典，可直接用于 INSERT / UPDATE 语句。
+        """
 
         return {
             "thread_id": self.thread_id,
@@ -78,7 +90,12 @@ class Thread:
 
     @property
     def repo_full_name(self) -> str:
-        """拼接仓库全名（owner/repo），缺失时回退到 repo_url。"""
+        """拼接仓库全名（owner/repo），缺失时回退到 repo_url。
+
+        Returns:
+            格式为 ``'{owner}/{repo}'`` 的字符串；当 ``repo_owner`` 或
+            ``repo_name`` 缺失时返回 ``repo_url``，两者均为空时返回空字符串。
+        """
 
         if self.repo_owner and self.repo_name:
             return f"{self.repo_owner}/{self.repo_name}"

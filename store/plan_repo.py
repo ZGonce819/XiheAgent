@@ -1,6 +1,7 @@
 """thread_plans 表 CRUD 操作。
 
 管理编码前技术方案的存储、查询和确认状态。
+每个 thread 可以有多份方案记录，用户确认后标记为 approved。
 """
 
 from __future__ import annotations
@@ -11,10 +12,18 @@ from database.mysql import ConnectionManager, utc_now
 
 
 class PlanRepo(ConnectionManager):
-    """thread_plans 表数据访问层。"""
+    """thread_plans 表数据访问层。
+
+    继承 :class:`ConnectionManager` 获取 MySQL 连接管理能力，
+    对外提供技术方案的增删查和确认操作。
+    """
 
     def ensure_table(self) -> None:
-        """创建 thread_plans 表（如不存在）。"""
+        """创建 thread_plans 表（如不存在）。
+
+        Returns:
+            无返回值。
+        """
         self.execute("""
             CREATE TABLE IF NOT EXISTS thread_plans (
                 plan_id VARCHAR(64) PRIMARY KEY,
@@ -45,6 +54,18 @@ class PlanRepo(ConnectionManager):
 
         plan_text 用于前端快速展示；plan_path 指向 data/plans 下的 Markdown 文件，
         方便讲课时直接打开，也方便后续让 Agent 读取已确认方案。
+
+        Args:
+            plan_id: 方案唯一标识。
+            thread_id: 所属会话 ID。
+            prompt: 用户原始输入。
+            plan_text: 方案正文。
+            plan_path: 方案 Markdown 文件路径。
+            run_id: 关联的运行 ID。
+            status: 方案状态，默认 ``pending``。
+
+        Returns:
+            无返回值。
         """
         now = utc_now()
         self.execute(
@@ -74,6 +95,13 @@ class PlanRepo(ConnectionManager):
         """读取某个 thread 最新一份技术方案。
 
         可选按 status 过滤，例如只查已确认的方案。
+
+        Args:
+            thread_id: 所属会话 ID。
+            status: 可选状态过滤条件。
+
+        Returns:
+            最新的方案记录字典；不存在时返回 ``None``。
         """
         if status is None:
             return self.fetch_one(
@@ -96,7 +124,14 @@ class PlanRepo(ConnectionManager):
         )
 
     def list_thread_plans(self, thread_id: str) -> list[dict[str, Any]]:
-        """按创建顺序读取某个 thread 的方案历史。"""
+        """按创建顺序读取某个 thread 的方案历史。
+
+        Args:
+            thread_id: 所属会话 ID。
+
+        Returns:
+            方案记录字典列表，按创建时间升序排列。
+        """
         return self.fetch_all(
             """
             SELECT * FROM thread_plans
@@ -107,7 +142,14 @@ class PlanRepo(ConnectionManager):
         )
 
     def approve_thread_plan(self, plan_id: str) -> dict[str, Any] | None:
-        """把指定方案标记为已确认，并返回确认后的方案记录。"""
+        """把指定方案标记为已确认，并返回确认后的方案记录。
+
+        Args:
+            plan_id: 方案唯一标识。
+
+        Returns:
+            确认后的方案记录字典；不存在时返回 ``None``。
+        """
         now = utc_now()
         self.execute(
             """
@@ -122,7 +164,14 @@ class PlanRepo(ConnectionManager):
         )
 
     def delete_plans_by_thread(self, thread_id: str) -> int:
-        """删除某个 thread 下的所有方案。"""
+        """删除某个 thread 下的所有方案。
+
+        Args:
+            thread_id: 所属会话 ID。
+
+        Returns:
+            被删除的记录数。
+        """
         return self.execute(
             "DELETE FROM thread_plans WHERE thread_id = %s", (thread_id,)
         )

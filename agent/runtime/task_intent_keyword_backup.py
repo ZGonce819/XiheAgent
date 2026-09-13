@@ -6,12 +6,10 @@ from __future__ import annotations
 真实 key 时，仍然可以保持项目可用。
 
 权限边界必须有确定性兜底。模型分类可以提升泛化能力，但不能替代后端对
-"是否允许写代码"的最终保护。
+“是否允许写代码”的最终保护。
 """
 
-from typing import Literal
-
-TaskKind = Literal["coding", "analysis", "planning", "qa", "sync", "inspect", "review"]
+from config.constants import TaskKind
 
 
 def _normalize_prompt(prompt: str) -> str:
@@ -19,13 +17,26 @@ def _normalize_prompt(prompt: str) -> str:
 
     这里不调用模型做分类，原因是任务类型会影响工具权限。权限边界必须在本地后端
     可预测地收敛，不能依赖模型自由判断。
+
+    Args:
+        prompt: 用户原始输入。
+
+    Returns:
+        小写化、合并空白后的短文本；输入为空时返回空字符串。
     """
 
     return " ".join((prompt or "").lower().split())
 
 
 def is_pull_only_task(prompt: str) -> bool:
-    """判断用户是否只想同步远程仓库代码。"""
+    """判断用户是否只想同步远程仓库代码。
+
+    Args:
+        prompt: 用户原始输入。
+
+    Returns:
+        ``True`` 表示用户只想拉取 / 同步远程代码。
+    """
 
     normalized = _normalize_prompt(prompt)
     pull_keywords = ["git pull", " pull", "pull一下", "拉取", "同步远程", "更新远程", "拉一下"]
@@ -36,7 +47,14 @@ def is_pull_only_task(prompt: str) -> bool:
 
 
 def is_workspace_listing_task(prompt: str) -> bool:
-    """判断用户是否只是在询问本地工作区有哪些项目。"""
+    """判断用户是否只是在询问本地工作区有哪些项目。
+
+    Args:
+        prompt: 用户原始输入。
+
+    Returns:
+        ``True`` 表示用户只是询问工作区项目列表。
+    """
 
     normalized = _normalize_prompt(prompt)
     return (
@@ -50,6 +68,12 @@ def classify_task_kind(prompt: str) -> TaskKind:
 
     coding 是唯一允许写文件、执行命令、commit、push、创建 PR 的模式。其余模式都按
     只读任务处理，最多准备/读取本地仓库，然后输出分析、方案或答案。
+
+    Args:
+        prompt: 用户原始输入。
+
+    Returns:
+        关键词分类得到的任务类型字符串。
     """
 
     normalized = _normalize_prompt(prompt)
@@ -236,6 +260,13 @@ def classify_task_kind(prompt: str) -> TaskKind:
 
 
 def is_read_only_task(task_kind: TaskKind) -> bool:
-    """只读任务不暴露写文件、命令执行、Git 提交和 PR 工具。"""
+    """只读任务不暴露写文件、命令执行、Git 提交和 PR 工具。
+
+    Args:
+        task_kind: 任务类型字符串。
+
+    Returns:
+        ``True`` 表示该任务类型为只读模式。
+    """
 
     return task_kind in {"analysis", "planning", "qa", "inspect", "review"}

@@ -25,25 +25,11 @@ from langgraph.config import get_config
 
 from agent.graph.graph import get_langgraph_store
 from agent.memory.repo import build_repo_memory_namespace, repo_memory_store_key, repo_memory_virtual_path
-
-from utils.codeup_utils import parse_codeup_repo_url
-from utils.gitee_utils import mask_token, parse_gitee_repo_url
-from utils.github_utils import parse_github_repo_url
-from utils.platform_router import detect_platform, get_platform_display_name, get_platform_tools
+from config.constants import MAX_REPO_MEMORY_CHARS
+from utils.gitee_utils import mask_token
+from utils.platform_utils import detect_platform, get_platform_display_name, get_platform_tools, parse_repo_url
 
 logger = logging.getLogger(__name__)
-
-MAX_REPO_MEMORY_CHARS = 6000
-
-
-def _parse_repo_url(repo_url: str):
-    """根据 URL 域名自动识别 SCM 平台并解析仓库信息。"""
-    platform = detect_platform(repo_url)
-    if platform == "codeup":
-        return parse_codeup_repo_url(repo_url)
-    if platform == "github":
-        return parse_github_repo_url(repo_url)
-    return parse_gitee_repo_url(repo_url)
 
 
 def _repo_url_and_content_from_config() -> tuple[str | None, str | None]:
@@ -78,6 +64,16 @@ def _build_repo_context_notice(
 
     无论记忆文件是否存在，都至少注入仓库标识、平台名和记忆文件路径，让 Agent 知道
     自己在哪个仓库工作、当前平台应使用哪些工具、可以从哪里读取长期上下文。
+
+    Args:
+        owner: 仓库 owner。
+        repo: 仓库名称。
+        repo_url: 仓库完整地址。
+        platform: 平台标识，如 ``"gitee"``、``"github"``、``"codeup"``。
+        memory_content: 已读取的仓库记忆内容，为 ``None`` 时表示记忆尚未创建。
+
+    Returns:
+        拼接完成的 SystemMessage 纯文本。
     """
     memory_path = repo_memory_virtual_path(owner, repo)
     display_name = get_platform_display_name(platform)
@@ -122,12 +118,24 @@ class ContextInjectionMiddleware(AgentMiddleware):
     state_schema = AgentState
 
     def before_agent(self, state: AgentState, runtime: Any) -> dict[str, Any] | None:
+        """在 Agent 执行前注入仓库上下文 SystemMessage。
+
+        从运行时配置读取 ``repo_url`` 和预缓存的记忆内容；若记忆未预缓存，
+        则实时从 LangGraph Store 读取。无 ``repo_url`` 时跳过注入。
+
+        Args:
+            state: 当前 Agent 状态，包含消息列表。
+            runtime: LangGraph 运行时对象。
+
+        Returns:
+            包含新 SystemMessage 的消息字典；无需注入时返回 ``None``。
+        """
         repo_url, memory_content = _repo_url_and_content_from_config()
         if not repo_url:
             return None
 
         platform = detect_platform(repo_url)
-        repo = _parse_repo_url(repo_url)
+        repo = parse_repo_url(repo_url)
         if memory_content is None:
             try:
                 namespace = build_repo_memory_namespace(repo.owner, repo.repo)
@@ -152,4 +160,5 @@ class ContextInjectionMiddleware(AgentMiddleware):
         return {"messages": [SystemMessage(content=notice), *messages]}
 
     async def abefore_agent(self, state: AgentState, runtime: Any) -> dict[str, Any] | None:
+        """异步版本，直接委托给同步实现。"""
         return self.before_agent(state, runtime)

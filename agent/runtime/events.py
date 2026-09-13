@@ -18,6 +18,9 @@ def _get_event_store() -> LocalMySQLStore:
     """获取专用于事件写入的 Store 实例。
 
     避免从这里导入 ``graph.get_store``，否则会形成 runtime/graph/tools 的循环导入。
+
+    Returns:
+        事件写入专用的 LocalMySQLStore 单例。
     """
 
     global _event_store
@@ -38,6 +41,15 @@ def record_event(
     """写入一个可展示在前端的运行步骤。
 
     这个模块独立于 runtime，避免 tools 导入 runtime 时形成循环依赖。
+    写入失败时只记录日志，不抛出异常，避免影响主流程。
+
+    Args:
+        thread_id: 当前线程 ID。
+        key: 事件唯一标识键，与 thread_id 拼接为 event_id。
+        title: 事件标题，前端展示用。
+        kind: 事件类型，如 ``"think"``、``"execute"``、``"search"`` 等。
+        status: 事件状态，如 ``"in_progress"``、``"completed"``、``"error"``。
+        detail: 事件详情 JSON 字符串；为 ``None`` 时不写入详情。
     """
 
     try:

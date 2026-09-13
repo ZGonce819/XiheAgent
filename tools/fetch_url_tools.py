@@ -18,11 +18,12 @@ from typing import Any
 
 import requests
 from langchain_core.tools import tool
+from pydantic import BaseModel, Field
 
 from agent.runtime.events import record_event
+from utils.context_utils import get_runtime_thread_id
 from utils.gitee_utils import mask_token
-from tools.runtime_context import get_runtime_thread_id
-from tools.safe_http import request_with_safe_redirects
+from utils.http_utils import request_with_safe_redirects
 
 logger = logging.getLogger("agent.run.fetch_url")
 
@@ -79,6 +80,12 @@ def _html_to_markdown(content: str) -> str:
 
     如果用户后续愿意增加 markdownify 依赖，这里会自动获得更好的 Markdown 结果；
     没有该依赖时，退化为标准库纯文本提取。
+
+    Args:
+        content: 原始 HTML 字符串。
+
+    Returns:
+        转换后的 Markdown 或纯文本。
     """
 
     try:
@@ -93,7 +100,12 @@ def _html_to_markdown(content: str) -> str:
         return parser.text()
 
 
-@tool("fetch_url", parse_docstring=True)
+class FetchUrlSchema(BaseModel):
+    url: str = Field(description="需要读取的 HTTP/HTTPS URL。")
+    timeout: int = Field(default=30, description="请求超时时间，单位秒，默认 30。")
+
+
+@tool("fetch_url", args_schema=FetchUrlSchema)
 def fetch_url(url: str, timeout: int = 30) -> dict[str, Any]:
     """读取指定 HTTP/HTTPS URL，并把 HTML 内容转换成 Markdown/文本。
 

@@ -26,6 +26,9 @@ def create_backend() -> BaseSandbox:
 
     开启沙盒时返回 ``OpenSandboxBackend``（远程容器隔离），
     否则返回 ``LocalShellBackend``（本地受控执行层）。
+
+    Returns:
+        符合 DeepAgents ``BaseSandbox`` 协议的 backend 实例。
     """
     from config.app_config import get_settings
 

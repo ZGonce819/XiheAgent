@@ -1,7 +1,7 @@
 """应用配置模块。
 
-提供 Settings 单例，集中管理所有运行时配置项。
-通过 ``get_settings()`` 获取全局唯一实例。
+提供 :class:`Settings` 单例，集中管理所有运行时配置项。
+通过 :func:`get_settings()` 获取全局唯一实例，首次调用时创建并缓存。
 """
 
 from __future__ import annotations
@@ -9,13 +9,20 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
+from config.constants import PROJECT_ROOT, WORKSPACE_ROOT
 from config.env_config import get_env
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _safe_int(value: str, default: int) -> int:
-    """安全地将字符串转换为整数，无效值回退到默认值。"""
+    """安全地将字符串转换为整数，无效值回退到默认值。
+
+    Args:
+        value: 待转换的字符串。
+        default: 转换失败时的回退值。
+
+    Returns:
+        转换后的整数，或 ``default``。
+    """
     try:
         return int(value)
     except (ValueError, TypeError):
@@ -29,6 +36,11 @@ class Settings:
     """
 
     def __init__(self) -> None:
+        """初始化全局配置，从环境变量和 .env 文件读取所有配置项。
+
+        配置按类别分组：项目路径、日志、Redis、MySQL、PostgreSQL、
+        OpenSandbox 沙盒、外部服务密钥。未配置时使用内置默认值。
+        """
         # ── 项目路径 ──────────────────────────────────────────
         self.data_dir: Path = Path(
             get_env("XIHE_DATA_DIR", str(PROJECT_ROOT / "data"))
@@ -36,9 +48,7 @@ class Settings:
         self.log_dir: Path = Path(
             get_env("XIHE_LOG_DIR", str(PROJECT_ROOT / "logs"))
         ).resolve()
-        self.workspace_root: Path = Path(
-            get_env("AI_WORKSPACE_ROOT", r"E:\ai_workspace")
-        )
+        self.workspace_root: Path = WORKSPACE_ROOT
 
         # ── 日志 ──────────────────────────────────────────────
         self.log_level: str = get_env("XIHE_LOG_LEVEL", "INFO").upper()
@@ -79,20 +89,35 @@ class Settings:
 
     @property
     def projects_dir(self) -> Path:
-        """Agent 操作代码仓库的工作区子目录。"""
+        """Agent 操作代码仓库的工作区子目录。
+
+        Returns:
+            ``workspace_root/projects`` 路径。
+        """
         return self.workspace_root / "projects"
 
     @property
     def skills_dir(self) -> Path:
-        """DeepAgents skills 目录。"""
+        """DeepAgents skills 目录。
+
+        Returns:
+            ``workspace_root/skills`` 路径。
+        """
         return self.workspace_root / "skills"
 
 
 _settings_instance: Settings | None = None
+"""全局唯一的 Settings 实例缓存，首次调用 :func:`get_settings` 时初始化。"""
 
 
 def get_settings() -> Settings:
-    """返回全局唯一的 Settings 实例。"""
+    """返回全局唯一的 Settings 实例。
+
+    首次调用时创建并缓存实例，后续调用直接返回缓存对象。
+
+    Returns:
+        全局唯一的 :class:`Settings` 配置实例。
+    """
     global _settings_instance
     if _settings_instance is None:
         _settings_instance = Settings()
@@ -100,7 +125,14 @@ def get_settings() -> Settings:
 
 
 def log_date_text(target_date: date | None = None) -> str:
-    """返回历史日志文件使用的日期文本（YYYY-MM-DD）。"""
+    """返回历史日志文件使用的日期文本（YYYY-MM-DD）。
+
+    Args:
+        target_date: 目标日期，默认使用今天。
+
+    Returns:
+        ISO 8601 格式的日期字符串。
+    """
     return (target_date or date.today()).isoformat()
 
 
@@ -109,6 +141,12 @@ def backend_log_path(target_date: date | None = None) -> Path:
 
     不传日期时返回当前正在写入的固定文件名；
     传日期时返回标准轮转后的历史文件名。
+
+    Args:
+        target_date: 目标日期，默认返回当前日志文件。
+
+    Returns:
+        后端日志文件的完整路径。
     """
     settings = get_settings()
     if target_date is None:
@@ -117,7 +155,14 @@ def backend_log_path(target_date: date | None = None) -> Path:
 
 
 def agent_log_path(target_date: date | None = None) -> Path:
-    """返回 Agent 运行日志路径。"""
+    """返回 Agent 运行日志路径。
+
+    Args:
+        target_date: 目标日期，默认返回当前日志文件。
+
+    Returns:
+        Agent 运行日志文件的完整路径。
+    """
     settings = get_settings()
     if target_date is None:
         return settings.log_dir / "agent-runs.log"

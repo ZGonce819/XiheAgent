@@ -27,30 +27,19 @@ from langgraph.config import get_config
 
 from agent.graph.graph import get_langgraph_store
 from agent.memory.repo_update import RepoMemoryUpdate, update_repo_memory_from_text
-from urllib.parse import urlparse
-
-from utils.codeup_utils import parse_codeup_repo_url
-from utils.gitee_utils import parse_gitee_repo_url
-from utils.github_utils import parse_github_repo_url
+from config.constants import SENSITIVE_MARKERS
+from utils.message_utils import message_content_to_text
+from utils.platform_utils import parse_repo_url
 
 logger = logging.getLogger(__name__)
 
-SENSITIVE_MARKERS = (".env", ".secrets", "api_key", "apikey", "private key", "私钥")
-
-
-def _parse_repo_url(repo_url: str):
-    """根据 URL 域名自动识别 SCM 平台并解析仓库信息。"""
-    parsed = urlparse(repo_url.strip())
-    hostname = (parsed.hostname or "").lower()
-    if hostname in {"codeup.aliyun.com", "www.codeup.aliyun.com"}:
-        return parse_codeup_repo_url(repo_url)
-    if hostname in {"github.com", "www.github.com"}:
-        return parse_github_repo_url(repo_url)
-    return parse_gitee_repo_url(repo_url)
-
 
 def _repo_url_from_config() -> str | None:
-    """从 LangGraph 运行时配置中读取 repo_url。"""
+    """从 LangGraph 运行时配置中读取 repo_url。
+
+    Returns:
+        当前任务绑定的仓库地址；未配置或为空时返回 ``None``。
+    """
     configurable = get_config().get("configurable", {})
     repo_url = configurable.get("repo_url") if isinstance(configurable, dict) else None
     return repo_url if isinstance(repo_url, str) and repo_url.strip() else None
@@ -61,6 +50,9 @@ def _task_kind_from_config() -> str:
 
     task_kind 用于 ``repo_update`` 判断记忆来自哪类任务：
     planning 适合沉淀设计结论，coding 适合沉淀修改模块和测试命令等。
+
+    Returns:
+        任务类型字符串；未配置时返回 ``"unknown"``。
     """
     configurable = get_config().get("configurable", {})
     return str(configurable.get("task_kind", "unknown")) if isinstance(configurable, dict) else "unknown"
@@ -69,33 +61,34 @@ def _task_kind_from_config() -> str:
 def _last_assistant_text(state: AgentState) -> str:
     """从 AgentState 中提取最后一条 assistant/AI 消息文本。
 
-    只取最后一条 assistant 消息，因为中间的 assistant 消息经常是过程推理，
-    不一定稳定。同时兼容 ``str`` 和 ``list`` 两种 content 格式。
+    倒序遍历消息列表，找到第一条类型为 ``ai`` 或 ``assistant`` 的消息，
+    将其内容转为纯文本返回。
+
+    Args:
+        state: Agent 运行结束后的状态。
+
+    Returns:
+        最后一条 assistant 消息的纯文本；不存在时返回空字符串。
     """
     for message in reversed(state.get("messages", [])):
         message_type = str(getattr(message, "type", "") or "").lower()
         if message_type not in {"ai", "assistant"}:
             continue
-        content = getattr(message, "content", "")
-        if isinstance(content, str) and content.strip():
-            return content.strip()
-        if isinstance(content, list):
-            parts: list[str] = []
-            for item in content:
-                if isinstance(item, str):
-                    parts.append(item)
-                elif isinstance(item, dict):
-                    text = item.get("text") or item.get("content")
-                    if text:
-                        parts.append(str(text))
-            text = "\n".join(part.strip() for part in parts if part and part.strip()).strip()
-            if text:
-                return text
+        text = message_content_to_text(getattr(message, "content", ""))
+        if text:
+            return text
     return ""
 
 
 def _message_type_summary(state: AgentState) -> str:
-    """记录 after_agent 中最后几条消息类型，便于排查框架状态结构。"""
+    """生成 after_agent 中最后几条消息的类型摘要，便于排查框架状态结构。
+
+    Args:
+        state: Agent 运行结束后的状态。
+
+    Returns:
+        格式为 ``count=N tail=[...]`` 的摘要字符串。
+    """
     messages = list(state.get("messages", []))
     tail = [str(getattr(message, "type", type(message).__name__)) for message in messages[-5:]]
     return f"count={len(messages)} tail={tail}"
@@ -113,6 +106,19 @@ class MemoryUpdateMiddleware(AgentMiddleware):
     state_schema = AgentState
 
     def after_agent(self, state: AgentState, runtime: Any) -> dict[str, Any] | None:
+        """在 Agent 执行结束后尝试把稳定结论写回仓库记忆。
+
+        从运行时配置读取 ``repo_url``，提取最后一条 assistant 消息文本，
+        交给 ``update_repo_memory_from_text`` 做结构化更新。
+        包含敏感信息或无 ``repo_url`` 时跳过。
+
+        Args:
+            state: Agent 运行结束后的状态。
+            runtime: LangGraph 运行时对象。
+
+        Returns:
+            始终返回 ``None``，不修改 AgentState。
+        """
         repo_url = _repo_url_from_config()
         if not repo_url:
             logger.warning("MemoryUpdateMiddleware: get_config 中没有 repo_url，跳过记忆更新")
@@ -126,7 +132,7 @@ class MemoryUpdateMiddleware(AgentMiddleware):
             )
             return None
 
-        repo = _parse_repo_url(repo_url)
+        repo = parse_repo_url(repo_url)
         update_repo_memory_from_text(
             store=get_langgraph_store(),
             repo=repo,
@@ -135,4 +141,5 @@ class MemoryUpdateMiddleware(AgentMiddleware):
         return None
 
     async def aafter_agent(self, state: AgentState, runtime: Any) -> dict[str, Any] | None:
+        """异步版本，直接委托给同步实现。"""
         return self.after_agent(state, runtime)

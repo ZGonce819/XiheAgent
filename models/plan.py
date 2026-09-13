@@ -39,7 +39,15 @@ class ThreadPlan:
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> ThreadPlan:
-        """从数据库查询结果构造实体。"""
+        """从数据库查询结果构造实体。
+
+        Args:
+            row: 数据库查询返回的字典行，须包含 ``plan_id``、``thread_id``、
+                ``prompt``、``plan_text``、``plan_path`` 等必填字段。
+
+        Returns:
+            构造完成的 :class:`ThreadPlan` 实例。
+        """
 
         return cls(
             plan_id=row["plan_id"],
@@ -54,7 +62,11 @@ class ThreadPlan:
         )
 
     def to_row(self) -> dict[str, Any]:
-        """将实体转换为可用于数据库写入的字典。"""
+        """将实体转换为可用于数据库写入的字典。
+
+        Returns:
+            与数据库列名对应的字典，可直接用于 INSERT / UPDATE 语句。
+        """
 
         return {
             "plan_id": self.plan_id,
@@ -70,6 +82,10 @@ class ThreadPlan:
 
     @property
     def is_approved(self) -> bool:
-        """判断方案是否已被确认。"""
+        """判断方案是否已被确认。
+
+        Returns:
+            当 ``status`` 为 ``'approved'`` 时返回 ``True``，否则返回 ``False``。
+        """
 
         return self.status == "approved"

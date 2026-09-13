@@ -11,7 +11,8 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from agent.runtime.task_intent import TaskKind, is_read_only_task
+from agent.runtime.task_intent import is_read_only_task
+from config.constants import TaskKind, VALID_TASK_KINDS
 
 
 def get_runtime_configurable() -> dict[str, Any]:
@@ -19,6 +20,9 @@ def get_runtime_configurable() -> dict[str, Any]:
 
     ``get_config()`` 只有在 LangGraph 正在执行节点或工具时才可用。
     如果工具在单元测试或脚本中被直接调用，这里会返回空字典作为降级结果。
+
+    Returns:
+        当前运行的 configurable 字典，不可用时返回空字典。
     """
 
     try:
@@ -34,6 +38,9 @@ def get_runtime_thread_id() -> str | None:
 
     thread_id 是工具写事件、写 Store、更新任务状态时的业务关联键。
     没有 thread_id 时，工具仍应返回可恢复错误，而不是写入无归属的数据。
+
+    Returns:
+        当前 thread_id 字符串，不可用时返回 None。
     """
 
     value = get_runtime_configurable().get("thread_id")
@@ -45,10 +52,13 @@ def get_runtime_task_kind() -> TaskKind:
 
     任务类型用于判断当前请求是否允许写操作，例如分析类任务不能直接创建 PR。
     回退为 ``coding`` 是为了兼容旧调用链没有传 task_kind 的情况。
+
+    Returns:
+        当前任务类型字符串。
     """
 
     value = get_runtime_configurable().get("task_kind", "coding")
-    if value in {"coding", "analysis", "planning", "qa", "sync", "inspect"}:
+    if value in VALID_TASK_KINDS:
         return value
     return "coding"
 
@@ -57,6 +67,9 @@ def runtime_is_read_only_task() -> bool:
     """判断当前任务是否为只读模式。
 
     工具层通过这个函数集中复用任务权限规则，避免每个工具各自维护一份判断逻辑。
+
+    Returns:
+        只读任务返回 True，否则返回 False。
     """
 
     return is_read_only_task(get_runtime_task_kind())

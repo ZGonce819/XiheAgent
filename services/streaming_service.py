@@ -22,16 +22,17 @@ from typing import Any
 
 from fastapi.responses import StreamingResponse
 
-from agent.runtime.events import record_event
 from agent.runtime.task_router import get_task, initialize_task_record, run_agent_task
 from config.app_config import get_settings
-from services.redis_stream import (
+from config.constants import SSE_HEADERS
+from services.thread_service import thread_meta_payload
+from utils.redis_utils import (
     cleanup_stream,
     ensure_consumer_group,
     publish_event,
     read_events,
 )
-from services.thread_service import thread_meta_payload, user_visible_stream_text
+from utils.thread_utils import user_visible_stream_text
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,13 @@ def sse_part(event: str, data: dict[str, Any]) -> str:
     """格式化单个 SSE 事件片段。
 
     采用 ``event: xxx`` + ``data: json`` 标准格式，与前端 SSE 解析器对齐。
+
+    Args:
+        event: 事件名称。
+        data: 事件负载字典。
+
+    Returns:
+        符合 SSE 协议的文本片段字符串。
     """
 
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
@@ -177,9 +185,5 @@ def build_streaming_response(
     return StreamingResponse(
         event_iter(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache, no-transform",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+        headers=SSE_HEADERS,
     )

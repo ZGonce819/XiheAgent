@@ -18,6 +18,12 @@ def _run_powershell(command: str) -> subprocess.CompletedProcess[str]:
     """执行一段只用于进程查询/停止的 PowerShell 命令。
 
     不使用 shell=True，避免命令被额外解释；所有动态值只来自固定端口数字。
+
+    Args:
+        command: 要执行的 PowerShell 命令字符串。
+
+    Returns:
+        ``subprocess.CompletedProcess`` 对象，包含 stdout 和 stderr。
     """
     return subprocess.run(
         [
@@ -42,6 +48,12 @@ def find_pids_by_ports(ports: Iterable[int] = DEFAULT_PORTS) -> list[int]:
     start_all.py 默认占用：
     - 2024：FastAPI/Uvicorn 后端
     - 3000：Vite 前端
+
+    Args:
+        ports: 要查询的端口集合，默认为项目使用的端口。
+
+    Returns:
+        去重并排序后的 PID 列表。
     """
     port_list = ",".join(str(port) for port in ports)
     command = (
@@ -98,7 +110,14 @@ def find_pids_by_ports(ports: Iterable[int] = DEFAULT_PORTS) -> list[int]:
 
 
 def stop_pids(pids: Iterable[int]) -> list[int]:
-    """停止指定 PID，并返回实际发出停止命令的 PID 列表。"""
+    """停止指定 PID，并返回实际发出停止命令的 PID 列表。
+    
+    Args:
+        pids: 待停止的进程 ID 集合。
+    
+    Returns:
+        实际发出停止命令的 PID 列表（已去重排序）。
+    """
     stopped: list[int] = []
     for pid in sorted(set(pids)):
         if pid <= 0:
@@ -110,7 +129,14 @@ def stop_pids(pids: Iterable[int]) -> list[int]:
 
 
 def stop_ports(ports: Iterable[int] = DEFAULT_PORTS) -> list[int]:
-    """停止指定端口上的监听进程。"""
+    """停止指定端口上的监听进程。
+    
+    Args:
+        ports: 要清理的端口集合，默认为项目使用的端口。
+    
+    Returns:
+        实际停止的 PID 列表。
+    """
     pids = find_pids_by_ports(ports)
     return stop_pids(pids)
 

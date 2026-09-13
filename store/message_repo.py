@@ -44,6 +44,14 @@ class MessageRepo(ConnectionManager):
         thread_messages 保存的是用户能看到的问答正文，和 run_events 的过程步骤分开。
         继续输入新问题时不会覆盖上一轮问题和回答。
         对用户消息做去重，避免重复提交相同内容。
+
+        Args:
+            message_id: 消息唯一 ID。
+            thread_id: 所属会话 ID。
+            author: 消息作者，例如 ``user`` 或 ``agent``。
+            content: 消息正文。
+            run_id: 可选的关联 run ID。
+            metadata: 可选的附加元数据字典。
         """
         normalized_content = content.strip()
 
@@ -78,7 +86,14 @@ class MessageRepo(ConnectionManager):
         )
 
     def list_thread_messages(self, thread_id: str) -> list[dict[str, Any]]:
-        """按写入顺序读取某个 thread 的会话消息。"""
+        """按写入顺序读取某个 thread 的会话消息。
+
+        Args:
+            thread_id: 会话 ID。
+
+        Returns:
+            消息字典列表，按创建时间升序。
+        """
         return self.fetch_all(
             """
             SELECT * FROM thread_messages
@@ -89,7 +104,14 @@ class MessageRepo(ConnectionManager):
         )
 
     def delete_messages_by_thread(self, thread_id: str) -> int:
-        """删除某个 thread 下的所有消息。"""
+        """删除某个 thread 下的所有消息。
+
+        Args:
+            thread_id: 会话 ID。
+
+        Returns:
+            被删除的行数。
+        """
         return self.execute(
             "DELETE FROM thread_messages WHERE thread_id = %s", (thread_id,)
         )

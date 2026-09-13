@@ -16,11 +16,53 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from langgraph.checkpoint.redis import RedisSaver
+from langgraph.store.postgres import PostgresStore
+
 from config.app_config import Settings, get_settings
 from database.postgres import build_pg_dsn
 from database.redis import build_redis_url
 
 logger = logging.getLogger(__name__)
+
+
+def _verify_redis_connection(url: str) -> bool:
+    """验证 Redis 连接是否可用。
+
+    Args:
+        url: Redis 连接 URL。
+
+    Returns:
+        连接可用返回 ``True``，否则返回 ``False``。
+    """
+    try:
+        import redis as _redis
+        client = _redis.from_url(url, socket_connect_timeout=3, socket_timeout=3)
+        client.ping()
+        client.close()
+        return True
+    except Exception as exc:
+        logger.warning("Redis 连接验证失败：%s", exc)
+        return False
+
+
+def _verify_postgres_connection(dsn: str) -> bool:
+    """验证 PostgreSQL 连接是否可用。
+
+    Args:
+        dsn: PostgreSQL 连接字符串。
+
+    Returns:
+        连接可用返回 ``True``，否则返回 ``False``。
+    """
+    try:
+        import psycopg
+        conn = psycopg.connect(dsn, connect_timeout=3)
+        conn.close()
+        return True
+    except Exception as exc:
+        logger.warning("PostgreSQL 连接验证失败：%s", exc)
+        return False
 
 
 def make_checkpointer(settings: Settings | None = None) -> Any:
@@ -35,14 +77,12 @@ def make_checkpointer(settings: Settings | None = None) -> Any:
     Returns:
         ``RedisSaver`` 实例。
     """
-
-    from langgraph.checkpoint.redis import RedisSaver
-
     if settings is None:
         settings = get_settings()
     url = build_redis_url(settings)
     logger.info("创建 Redis checkpointer：%s:%s/%s", settings.redis_host, settings.redis_port, settings.redis_checkpoint_db)
-    return RedisSaver.from_conn_string(url)
+    saver = RedisSaver.from_conn_string(url)
+    return saver
 
 
 def make_langgraph_store(settings: Settings | None = None) -> Any:
@@ -57,11 +97,9 @@ def make_langgraph_store(settings: Settings | None = None) -> Any:
     Returns:
         ``PostgresStore`` 实例。
     """
-
-    from langgraph.store.postgres import PostgresStore
-
     if settings is None:
         settings = get_settings()
     dsn = build_pg_dsn(settings)
     logger.info("创建 PostgreSQL LangGraph Store：%s:%s/%s", settings.pg_host, settings.pg_port, settings.pg_database)
-    return PostgresStore.from_conn_string(dsn)
+    store = PostgresStore.from_conn_string(dsn)
+    return store

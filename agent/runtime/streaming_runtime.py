@@ -28,6 +28,7 @@ from langchain_core.messages import BaseMessage
 
 from agent.middleware.run_limits import AgentRunLimitExceeded, AgentRunLimitTracker
 from agent.runtime.events import record_event
+from config.constants import MAX_STREAM_TEXT_LENGTH, STREAM_FLUSH_THRESHOLD
 from utils.gitee_utils import mask_token
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,14 @@ def _safe_attr(value: Any, name: str, default: Any = None) -> Any:
     Deep Agents / LangGraph 的 v3 streaming 协议还带有 experimental 提示，
     不同小版本的字段可能是属性，也可能是轻量对象方法。这里统一容错读取，
     避免某个字段缺失时直接打断整个 Agent 任务。
+
+    Args:
+        value: 流事件对象或字典。
+        name: 要读取的字段名。
+        default: 字段不存在或读取失败时的默认值。
+
+    Returns:
+        字段值；读取失败时返回 ``default``。
     """
 
     try:
@@ -50,18 +59,34 @@ def _safe_attr(value: Any, name: str, default: Any = None) -> Any:
 
 
 def _safe_field(value: Any, name: str, default: Any = None) -> Any:
-    """兼容官方事件对象和普通 dict。"""
+    """兼容官方事件对象和普通 dict 的字段读取。
+
+    Args:
+        value: 流事件对象或字典。
+        name: 要读取的字段名。
+        default: 字段不存在时的默认值。
+
+    Returns:
+        字段值；不存在时返回 ``default``。
+    """
 
     if isinstance(value, dict):
         return value.get(name, default)
     return _safe_attr(value, name, default)
 
 
-def _stringify(value: Any, *, limit: int = 1200) -> str:
+def _stringify(value: Any, *, limit: int = MAX_STREAM_TEXT_LENGTH) -> str:
     """把事件对象中的输入、输出压缩成适合前端展示的短文本。
 
-    前端步骤区只需要告诉讲课学员"正在做什么"，不应该塞入大段 token、
+    前端步骤区只需要告诉学员"正在做什么"，不应该塞入大段 token、
     大段文件内容或未脱敏的异常。真正的详细排查仍看后端日志。
+
+    Args:
+        value: 待压缩的事件字段值。
+        limit: 最大字符数，超出部分截断并追加 ``...``。
+
+    Returns:
+        截断并脱敏后的短文本；空值返回空字符串。
     """
 
     if value is None:
@@ -81,6 +106,12 @@ def _event_payloads(event: Any) -> list[Any]:
 
     官方文档中的 messages 事件形态是 `event["params"]["data"][0]`。
     实际小版本中 data 可能是单个 dict，也可能是 list，这里统一规整成列表。
+
+    Args:
+        event: raw protocol event 字典。
+
+    Returns:
+        规整后的 payload 列表；无法提取时返回空列表。
     """
 
     if not isinstance(event, dict):
@@ -105,6 +136,12 @@ def _text_delta_from_event(event: Any) -> str:
 
     Deep Agents 文档建议 UI 需要精确流式正文时直接读取 raw protocol events：
     method=messages、event=content-block-delta、delta.type=text-delta。
+
+    Args:
+        event: raw protocol event 字典。
+
+    Returns:
+        提取到的文本增量；非匹配事件返回空字符串。
     """
 
     if not isinstance(event, dict) or event.get("method") != "messages":
@@ -135,6 +172,13 @@ def _text_block_marker_from_event(event: Any) -> tuple[str, int | None] | None:
 
     不同小版本的 payload 字段可能略有差异，所以只做保守识别；识别不到时返回 None，
     调用方会继续把 token 归入当前文本块。
+
+    Args:
+        event: raw protocol event 字典。
+
+    Returns:
+        ``("start", index)`` 表示新文本块开始；``("finish", index)`` 表示结束；
+        无法识别时返回 ``None``。
     """
 
     payload = _message_event_payload(event)
@@ -168,7 +212,14 @@ def _text_block_marker_from_event(event: Any) -> tuple[str, int | None] | None:
 
 
 def _message_event_payload(event: Any) -> dict[str, Any] | None:
-    """读取 raw messages 事件中的第一个 payload。"""
+    """读取 raw messages 事件中的第一个 payload。
+
+    Args:
+        event: raw protocol event 字典。
+
+    Returns:
+        第一个 dict payload；非 messages 事件或无 payload 时返回 ``None``。
+    """
 
     if not isinstance(event, dict) or event.get("method") != "messages":
         return None
@@ -184,6 +235,12 @@ def _tool_chunk_from_message_event(event: Any) -> dict[str, Any] | None:
     当前 DeepAgents 版本会把工具调用参数作为 message content block 输出：
     content-block-delta -> delta.type=block-delta -> fields.type=tool_call_chunk。
     write_todos 的 JSON 参数会以 fields.args 逐步增长。
+
+    Args:
+        event: raw protocol event 字典。
+
+    Returns:
+        tool_call_chunk 或 tool_call 字典；非工具事件时返回 ``None``。
     """
 
     payload = _message_event_payload(event)
@@ -216,15 +273,23 @@ def _should_flush_stream_text(*, accumulated_text: str, last_flushed_length: int
     DeepAgents 的 raw message 事件可能按 token 级别返回，如果每个 token 都写一次数据库，
     页面虽然实时，但提交会过于频繁。这里做轻量合并：
     - 首段内容立即展示，让用户知道模型已经开始输出；
-    - 累计新增 24 个字符左右刷新一次；
+    - 累计新增达到 ``STREAM_FLUSH_THRESHOLD`` 个字符左右刷新一次；
     - 遇到换行也刷新，Markdown 标题、列表和段落会更快出现在页面上。
+
+    Args:
+        accumulated_text: 当前文本块累计的全部文本。
+        last_flushed_length: 上次刷新时的文本长度。
+        delta: 本轮新增的文本增量。
+
+    Returns:
+        ``True`` 表示应刷新；``False`` 表示继续累积。
     """
 
     if not accumulated_text:
         return False
     if last_flushed_length == 0:
         return True
-    if len(accumulated_text) - last_flushed_length >= 24:
+    if len(accumulated_text) - last_flushed_length >= STREAM_FLUSH_THRESHOLD:
         return True
     return "\n" in delta
 
@@ -234,6 +299,12 @@ def _tool_call_from_event(event: Any) -> Any | None:
 
     工具事件在不同 DeepAgents 小版本中的字段可能不完全一致；本函数只做保守解析。
     解析不到时返回 None，具体文件/命令/SCM 工具仍会通过工具内部 record_event 展示。
+
+    Args:
+        event: raw protocol event 字典。
+
+    Returns:
+        工具调用对象；非 tool_calls 事件或提取失败时返回 ``None``。
     """
 
     if not isinstance(event, dict) or event.get("method") != "tool_calls":
@@ -247,7 +318,14 @@ def _tool_call_from_event(event: Any) -> Any | None:
 
 
 def _subagent_from_event(event: Any) -> Any | None:
-    """尽量从 raw subagents event 中提取子智能体对象。"""
+    """尽量从 raw subagents event 中提取子智能体对象。
+
+    Args:
+        event: raw protocol event 字典。
+
+    Returns:
+        子智能体对象；非 subagents 事件时返回 ``None``。
+    """
 
     if not isinstance(event, dict) or event.get("method") != "subagents":
         return None
@@ -258,7 +336,14 @@ def _subagent_from_event(event: Any) -> Any | None:
 
 
 def _normalize_todo_status(status: Any) -> str:
-    """把 DeepAgents / LangChain 的 todo 状态规整为前端支持的三种状态。"""
+    """把 DeepAgents / LangChain 的 todo 状态规整为前端支持的三种状态。
+
+    Args:
+        status: 原始状态值。
+
+    Returns:
+        ``"in_progress"``、``"completed"`` 或 ``"pending"`` 之一。
+    """
 
     text = str(status or "pending").lower()
     if text in {"in_progress", "in-progress", "active", "doing"}:
@@ -269,7 +354,14 @@ def _normalize_todo_status(status: Any) -> str:
 
 
 def _extract_todos(tool_call: Any) -> list[dict[str, str]]:
-    """从 write_todos 官方 tool_call 中提取任务清单。"""
+    """从 write_todos 官方 tool_call 中提取任务清单。
+
+    Args:
+        tool_call: write_todos 工具调用对象或字典。
+
+    Returns:
+        包含 content 和 status 的任务字典列表；无法提取时返回空列表。
+    """
 
     call_input = _safe_field(tool_call, "input")
     if call_input is None:
@@ -306,7 +398,17 @@ def _extract_todos(tool_call: Any) -> list[dict[str, str]]:
 
 
 def _record_write_todos(thread_id: str, run_id: str, tool_call: Any, index: int) -> bool:
-    """只把 DeepAgents 内置 write_todos 转成结构化任务清单事件。"""
+    """只把 DeepAgents 内置 write_todos 转成结构化任务清单事件。
+
+    Args:
+        thread_id: 当前线程 ID。
+        run_id: 当前运行 ID。
+        tool_call: 工具调用对象。
+        index: 工具调用序号，用于生成事件 ID。
+
+    Returns:
+        ``True`` 表示是 write_todos 并已处理；``False`` 表示不是。
+    """
 
     tool_name = str(_safe_field(tool_call, "tool_name", "") or _safe_field(tool_call, "name", "") or "")
     if tool_name != "write_todos":
@@ -327,7 +429,17 @@ def _record_write_todos(thread_id: str, run_id: str, tool_call: Any, index: int)
 
 
 def _decode_json_string_fragment(value: str) -> str:
-    """解码正则截取出的 JSON 字符串片段。"""
+    """解码正则截取出的 JSON 字符串片段。
+
+    对正则捕获的转义内容执行 ``json.loads`` 还原原始文本，
+    解码失败时原样返回。
+
+    Args:
+        value: 可能是 JSON 转义字符串的文本片段。
+
+    Returns:
+        解码后的纯文本；解码失败时返回原始值。
+    """
 
     try:
         return json.loads(f'"{value}"')
@@ -341,6 +453,12 @@ def _todos_from_args_text(args_text: str) -> list[dict[str, str]]:
     args_text 在 raw chunk 中经常是"不完整但逐步增长"的 JSON 字符串。完整时直接
     json.loads；不完整时用保守正则提取已经闭合的 content/status 对象，让前端能更早
     看到任务计划逐项出现。
+
+    Args:
+        args_text: write_todos 工具的参数文本（可能不完整）。
+
+    Returns:
+        提取到的任务字典列表；无法提取时返回空列表。
     """
 
     if not args_text.strip():
@@ -375,7 +493,19 @@ def _record_todos(
     status: str,
     event_sink: StreamEventSink | None = None,
 ) -> None:
-    """写入结构化任务计划事件。"""
+    """写入结构化任务计划事件。
+
+    同时写入 MySQL run_events 表和可选的 SSE event_sink，
+    保证前端实时展示和刷新后历史恢复都能拿到任务清单。
+
+    Args:
+        thread_id: 当前线程 ID。
+        run_id: 当前运行 ID。
+        call_id: 工具调用 ID。
+        todos: 任务清单列表。
+        status: 事件状态。
+        event_sink: 可选的 SSE 事件推送回调。
+    """
 
     if not todos:
         return
@@ -399,7 +529,14 @@ def _record_todos(
 
 
 def _message_dict(message: Any) -> dict[str, Any]:
-    """把最终输出中的 LangChain 消息对象转换为普通字典。"""
+    """把最终输出中的 LangChain 消息对象转换为普通字典。
+
+    Args:
+        message: LangChain 消息对象或其他类型的消息。
+
+    Returns:
+        包含 type 和 content 的字典。
+    """
 
     if isinstance(message, BaseMessage):
         return {"type": message.type, "content": message.content}
@@ -411,6 +548,12 @@ def _messages_from_output(output: Any) -> list[dict[str, Any]]:
 
     官方 Deep Agents 返回值通常是 `{"messages": [...]}`；为了课程版稳定运行，
     这里也兼容对象属性和其它返回结构。
+
+    Args:
+        output: DeepAgent stream 的最终输出对象。
+
+    Returns:
+        消息字典列表；无法提取时返回空列表。
     """
 
     if isinstance(output, dict):
@@ -435,6 +578,13 @@ def _record_assistant_stream_message(
     `stream:{run_id}:assistant:{index}` 表示运行过程中第 index 段 assistant 文本。
     前端会把不同 index 展示成不同的 AIMessage，因此 Todo 后面的"正在说明/总结/代码处理过程"
     不会互相覆盖。
+
+    Args:
+        thread_id: 当前线程 ID。
+        run_id: 当前运行 ID。
+        index: 文本段序号。
+        text: assistant 文本内容。
+        event_sink: 可选的 SSE 事件推送回调。
     """
 
     if not text.strip():
@@ -471,7 +621,14 @@ def _record_assistant_stream_message(
 
 
 def _tool_event_from_raw(event: Any) -> dict[str, Any] | None:
-    """读取 raw tools 生命周期事件。"""
+    """读取 raw tools 生命周期事件。
+
+    Args:
+        event: raw protocol event 字典。
+
+    Returns:
+        tools 事件 data 字典；非 tools 事件时返回 ``None``。
+    """
 
     if not isinstance(event, dict) or event.get("method") != "tools":
         return None
@@ -486,6 +643,12 @@ def _record_subagent(thread_id: str, run_id: str, subagent: Any, index: int) -> 
     """记录 Deep Agents 子智能体生命周期。
 
     第一版 UI 不单独做子智能体卡片，只用一条简洁步骤展示 delegated task。
+
+    Args:
+        thread_id: 当前线程 ID。
+        run_id: 当前运行 ID。
+        subagent: 子智能体对象。
+        index: 子智能体序号。
     """
 
     name = str(_safe_field(subagent, "name", "") or "subagent")
@@ -520,6 +683,16 @@ def _consume_raw_event_stream(
 
     如果某个 DeepAgents 小版本没有在 raw event 中暴露 tool_calls，工具内部的 record_event
     仍然会记录读文件、命令、SCM 仓库操作等步骤；但 write_todos 只有 raw tool_calls 可见时才会出现。
+
+    Args:
+        stream: DeepAgent 的 v3 事件流迭代器。
+        thread_id: 当前线程 ID。
+        run_id: 当前运行 ID。
+        task_kind: 任务类型，用于运行保护阈值。
+        event_sink: 可选的 SSE 事件推送回调。
+
+    Returns:
+        ``(tool_call_index, subagent_index)`` 元组。
     """
 
     tool_call_index = 0
@@ -695,6 +868,20 @@ def run_agent_with_event_stream(
     - 每一轮运行都把 run_id 写进事件 id，保证 plan、coding、review 多轮内容
       不会在前端互相覆盖或拼接到同一个消息里。
     - 前端仍只消费我们自己的 `/dashboard/api/.../stream`，不用绑定 LangGraph 本地服务。
+
+    Args:
+        agent: DeepAgent runnable 实例。
+        thread_id: 当前线程 ID。
+        run_id: 当前运行 ID。
+        content: 发送给 Agent 的用户内容。
+        task_kind: 任务类型，用于运行保护阈值。
+        event_sink: 可选的 SSE 事件推送回调。
+
+    Returns:
+        包含 messages 和 raw_output 的结果字典。
+
+    Raises:
+        AgentRunLimitExceeded: 运行保护阈值被突破时。
     """
 
     stream = agent.stream_events(

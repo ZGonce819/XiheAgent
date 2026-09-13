@@ -23,7 +23,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 from urllib3.util import connection as urllib3_connection
 
-MAX_REDIRECTS = 5
+from config.constants import MAX_REDIRECTS
 
 # 线程本地状态：不同 Agent 请求可能并发执行，DNS pin 不能跨线程共享。
 _pin_state = threading.local()
@@ -39,6 +39,9 @@ def _get_pin_stack() -> list[dict[str, list]]:
     """获取当前线程的 DNS pin 栈。
 
     每个线程独立维护一组 pin，避免并发请求之间互相污染。
+
+    Returns:
+        当前线程的 DNS pin 字典列表。
     """
 
     stack = getattr(_pin_state, "stack", None)
@@ -58,6 +61,18 @@ def _pinned_create_connection(
 
     requests 底层通过 urllib3 建立 socket 连接。这里临时替换 urllib3 的连接函数，
     在存在 DNS pin 时使用预先校验过的 IP 地址连接，避免校验后再次解析 DNS 得到不同地址。
+
+    Args:
+        address: ``(host, port)`` 元组。
+        timeout: socket 超时时间。
+        source_address: 可选的源地址绑定。
+        socket_options: 可选的 socket 选项列表。
+
+    Returns:
+        已连接的 socket 对象。
+
+    Raises:
+        OSError: 所有已校验地址均无法连接时抛出。
     """
 
     host, port = address
@@ -112,6 +127,10 @@ def _pin_dns(hostname: str, addr_infos: list) -> Iterator[None]:
 
     进入时安装 urllib3 连接函数替换并压栈 pin；退出时弹出当前 pin；
     最后一个使用者退出后恢复 urllib3 原始连接函数。
+
+    Args:
+        hostname: 要固定的域名。
+        addr_infos: ``socket.getaddrinfo`` 返回的地址信息列表。
     """
 
     global _install_count, _original_create_connection
@@ -139,6 +158,9 @@ def _pin_dns(hostname: str, addr_infos: list) -> Iterator[None]:
 
 def _resolve_and_validate(url: str) -> tuple[bool, str, str | None, list | None]:
     """解析 URL 并确认目标不是内网、本机或保留地址。
+
+    Args:
+        url: 待校验的完整 URL。
 
     Returns:
         ``(is_safe, reason, hostname, addr_infos)``：
@@ -175,6 +197,13 @@ def blocked_response(url: str, reason: str) -> dict[str, Any]:
     """生成统一的阻断响应。
 
     返回结构与成功请求结果保持相近字段，调用方可以统一处理 ok/error/status_code。
+
+    Args:
+        url: 被拦截的目标 URL。
+        reason: 拦截原因描述。
+
+    Returns:
+        包含错误信息的统一响应字典。
     """
 
     return {

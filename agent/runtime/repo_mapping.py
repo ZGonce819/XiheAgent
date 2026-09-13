@@ -26,26 +26,21 @@ from urllib.parse import urlparse
 
 from backends.workspace import Workspace
 from store import LocalMySQLStore
-from agent.memory.repo import ScmRepo
-from utils.codeup_utils import parse_codeup_repo_url
-from utils.gitee_utils import parse_gitee_repo_url
-from utils.github_utils import parse_github_repo_url
-
-
-def _parse_repo_url(repo_url: str) -> ScmRepo:
-    """根据 URL 域名自动识别 SCM 平台并解析仓库信息。"""
-    parsed = urlparse(repo_url.strip())
-    hostname = (parsed.hostname or "").lower()
-    if hostname in {"codeup.aliyun.com", "www.codeup.aliyun.com"}:
-        return parse_codeup_repo_url(repo_url)
-    if hostname in {"github.com", "www.github.com"}:
-        return parse_github_repo_url(repo_url)
-    return parse_gitee_repo_url(repo_url)
+from utils.platform_utils import ScmRepo, parse_repo_url
 
 
 @dataclass(frozen=True)
 class RepoMappingResult:
-    """仓库和本地目录的解析结果。"""
+    """仓库和本地目录的解析结果。
+
+    Attributes:
+        repo: 解析后的仓库标识对象。
+        project_dir: 工作区相对路径。
+        local_path: 本地绝对路径。
+        source: 匹配来源，如 ``"stored"``、``"default_name"``、``"projects_scan"``、``"default_clone_path"``。
+        mapping: MySQL 映射表记录；未找到时为 ``None``。
+        remote_matched: 是否通过本地 Git remote 验证。
+    """
 
     repo: ScmRepo
     project_dir: str
@@ -60,13 +55,29 @@ def normalize_repo_url(repo_url: str) -> str:
 
     仓库映射表使用这个标准地址作为唯一业务键，避免同一个仓库因为不同写法
     生成多条映射。
+
+    Args:
+        repo_url: 原始仓库地址。
+
+    Returns:
+        标准化的 clone_url。
     """
 
-    return _parse_repo_url(repo_url).clone_url
+    return parse_repo_url(repo_url).clone_url
 
 
 def repo_mapping_id(repo_url: str, project_dir: str) -> str:
-    """生成稳定映射 ID，便于同一仓库和目录重复 upsert。"""
+    """生成稳定映射 ID，便于同一仓库和目录重复 upsert。
+
+    对标准化后的 repo_url 和 project_dir 拼接计算 SHA1 摘要。
+
+    Args:
+        repo_url: 仓库完整地址。
+        project_dir: 工作区相对路径。
+
+    Returns:
+        40 位十六进制 SHA1 摘要。
+    """
 
     normalized_project_dir = project_dir.replace("\\", "/")
     raw = f"{normalize_repo_url(repo_url)}::{normalized_project_dir}"
@@ -74,9 +85,19 @@ def repo_mapping_id(repo_url: str, project_dir: str) -> str:
 
 
 def _candidate_remote_urls(repo_url: str) -> set[str]:
-    """生成用于比较 remote origin 的标准化候选 URL。"""
+    """生成用于比较 remote origin 的标准化候选 URL。
 
-    repo = _parse_repo_url(repo_url)
+    根据平台类型生成 HTTPS 和 SSH 两种形态的候选地址，用于与本地
+    ``.git/config`` 中的 remote origin 做匹配。
+
+    Args:
+        repo_url: 仓库完整地址。
+
+    Returns:
+        小写化的候选 URL 集合。
+    """
+
+    repo = parse_repo_url(repo_url)
     candidates = {
         repo.clone_url.lower(),
         repo.clone_url.removesuffix(".git").lower(),
@@ -96,7 +117,16 @@ def _candidate_remote_urls(repo_url: str) -> set[str]:
 
 
 def _clean_remote_url(remote_url: str) -> str:
-    """清理 remote URL 中的 token，保留 owner/repo 语义用于比较。"""
+    """清理 remote URL 中的 token，保留 owner/repo 语义用于比较。
+
+    对 HTTP(S) 地址去除 token 查询参数并统一为小写；其他形态只去除 ``.git`` 后缀。
+
+    Args:
+        remote_url: 原始 remote URL。
+
+    Returns:
+        清理后的小写化 URL。
+    """
 
     text = remote_url.strip()
     if not text:
@@ -109,7 +139,16 @@ def _clean_remote_url(remote_url: str) -> str:
 
 
 def _read_origin_hidden(repo_path: Path) -> str | None:
-    """读取本地 Git 仓库的 origin remote 地址。"""
+    """读取本地 Git 仓库的 origin remote 地址。
+
+    从 ``.git/config`` 文件中解析 ``[remote "origin"]`` 段的 ``url`` 字段。
+
+    Args:
+        repo_path: 本地仓库目录路径。
+
+    Returns:
+        origin remote URL；不存在或无 Git 仓库时返回 ``None``。
+    """
 
     config_path = repo_path / ".git" / "config"
     if not config_path.exists():
@@ -127,6 +166,12 @@ def _is_nested_projects_dir(project_dir: str) -> bool:
 
     正常业务仓库只应该位于 `projects/<repo>` 或 `projects/<custom-name>`。
     `projects/projects/<repo>` 通常来自命令工作目录和相对路径重复拼接。
+
+    Args:
+        project_dir: 工作区相对路径。
+
+    Returns:
+        ``True`` 表示是嵌套的错误目录。
     """
 
     normalized = project_dir.replace("\\", "/").strip("/")
@@ -134,7 +179,17 @@ def _is_nested_projects_dir(project_dir: str) -> bool:
 
 
 def remote_matches_repo(remote_url: str | None, repo_url: str) -> bool:
-    """判断本地 remote origin 是否对应目标仓库。"""
+    """判断本地 remote origin 是否对应目标仓库。
+
+    把双方 URL 都标准化后比较，支持 HTTPS 和 SSH 混合比较。
+
+    Args:
+        remote_url: 本地 Git 仓库的 origin remote URL。
+        repo_url: 目标仓库地址。
+
+    Returns:
+        ``True`` 表示匹配；``False`` 表示不匹配或 remote_url 为空。
+    """
 
     if not remote_url:
         return False
@@ -153,6 +208,11 @@ def _save_mapping(
 
     MySQL 映射表只保存 mapping_id、repo_url、workspace_path、repo_owner、repo_name，
     不再有 source/notes/verified 等辅助字段。
+
+    Args:
+        store: MySQL Store 实例。
+        repo: 仓库标识对象。
+        workspace_path: 工作区相对路径。
     """
 
     project_dir = workspace_path.replace("\\", "/")
@@ -178,9 +238,17 @@ def discover_repo_mapping(
     2. 按仓库名检查 `projects/仓库名`。
     3. 只扫描 `projects/*` 下一级 Git 仓库，通过 origin remote 匹配。
     4. 都找不到时返回默认 clone 目录 `projects/仓库名`。
+
+    Args:
+        repo_url: 仓库完整地址。
+        workspace: 当前工作区实例。
+        store: MySQL Store 实例。
+
+    Returns:
+        仓库映射解析结果，包含本地路径、匹配来源和验证状态。
     """
 
-    repo = _parse_repo_url(repo_url)
+    repo = parse_repo_url(repo_url)
     existing = store.get_mapping_by_repo(repo.clone_url)
     if existing:
         # 第一优先级：相信已经保存过的映射，但必须重新验证。
@@ -275,7 +343,14 @@ def save_clone_mapping(
     local_path: str,
     store: LocalMySQLStore,
 ) -> None:
-    """clone 或用户手动指定目录成功后保存映射。"""
+    """clone 或用户手动指定目录成功后保存映射。
 
-    repo = _parse_repo_url(repo_url)
+    Args:
+        repo_url: 仓库完整地址。
+        project_dir: 工作区相对路径。
+        local_path: 本地绝对路径。
+        store: MySQL Store 实例。
+    """
+
+    repo = parse_repo_url(repo_url)
     _save_mapping(store, repo=repo, workspace_path=project_dir)

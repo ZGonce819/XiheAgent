@@ -1,4 +1,4 @@
-"""Redis Stream 事件总线。
+"""Redis Stream 事件总线工具。
 
 可选启用的 SSE 事件分发方案，用于多进程或多实例部署场景。
 
@@ -15,29 +15,40 @@ import json
 import logging
 from typing import Any
 
+from config.constants import CONSUMER_GROUP, STREAM_KEY_PREFIX
 from database.redis import get_redis_stream_connection
 
 logger = logging.getLogger(__name__)
 
-_STREAM_KEY_PREFIX = "xihe:sse:events:"
-_CONSUMER_GROUP = "xihe-dashboard"
-
 
 def _stream_key(thread_id: str) -> str:
-    """生成 thread 对应的 Redis Stream key。"""
+    """生成 thread 对应的 Redis Stream key。
 
-    return f"{_STREAM_KEY_PREFIX}{thread_id}"
+    Args:
+        thread_id: 会话 ID。
+
+    Returns:
+        带全局前缀的完整 Stream key。
+    """
+
+    return f"{STREAM_KEY_PREFIX}{thread_id}"
 
 
 def ensure_consumer_group(thread_id: str) -> None:
     """确保 Redis Stream 的 consumer group 已创建。
 
     首次为某个 thread 推送事件前调用。如果 group 已存在则忽略。
+
+    Args:
+        thread_id: 目标会话 ID。
+
+    Returns:
+        无返回值。
     """
 
     r = get_redis_stream_connection()
     try:
-        r.xgroup_create(_stream_key(thread_id), _CONSUMER_GROUP, id="0", mkstream=True)
+        r.xgroup_create(_stream_key(thread_id), CONSUMER_GROUP, id="0", mkstream=True)
     except Exception as exc:
         if "BUSYGROUP" not in str(exc):
             raise
@@ -51,6 +62,9 @@ def publish_event(thread_id: str, event: str, data: dict[str, Any]) -> None:
         thread_id: 目标会话 ID。
         event: SSE 事件名称，例如 ``text_delta``、``thread_done``。
         data: 事件负载，会被 JSON 序列化后写入。
+
+    Returns:
+        无返回值。
     """
 
     r = get_redis_stream_connection()
@@ -80,7 +94,7 @@ def read_events(
     ensure_consumer_group(thread_id)
     r = get_redis_stream_connection()
     results = r.xreadgroup(
-        groupname=_CONSUMER_GROUP,
+        groupname=CONSUMER_GROUP,
         consumername=consumer_name,
         streams={_stream_key(thread_id): ">"},
         count=count,
@@ -95,7 +109,7 @@ def read_events(
             except (json.JSONDecodeError, TypeError):
                 data = {}
             events.append((event_name, data))
-            r.xack(_stream_key(thread_id), _CONSUMER_GROUP, message_id)
+            r.xack(_stream_key(thread_id), CONSUMER_GROUP, message_id)
     return events
 
 
@@ -103,6 +117,12 @@ def cleanup_stream(thread_id: str) -> None:
     """删除 thread 对应的 Redis Stream，释放内存。
 
     在 thread 被删除或确认不再需要实时推送时调用。
+
+    Args:
+        thread_id: 目标会话 ID。
+
+    Returns:
+        无返回值。
     """
 
     r = get_redis_stream_connection()

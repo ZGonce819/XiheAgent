@@ -1,6 +1,7 @@
 """threads 表 CRUD 操作。
 
 负责会话（Thread）的创建、查询、更新和级联删除。
+每条 thread 对应前端 Dashboard 上的一个对话卡片，关联仓库、分支、PR 等信息。
 """
 
 from __future__ import annotations
@@ -11,10 +12,18 @@ from database.mysql import ConnectionManager, utc_now
 
 
 class ThreadRepo(ConnectionManager):
-    """threads 表数据访问层。"""
+    """threads 表数据访问层。
+
+    继承 :class:`ConnectionManager` 获取 MySQL 连接管理能力，
+    对外提供 thread 记录的增删改查操作。
+    """
 
     def ensure_table(self) -> None:
-        """创建 threads 表（如不存在）。"""
+        """创建 threads 表（如不存在）。
+
+        Returns:
+            无返回值。
+        """
         self.execute("""
             CREATE TABLE IF NOT EXISTS threads (
                 thread_id VARCHAR(64) PRIMARY KEY,
@@ -47,6 +56,20 @@ class ThreadRepo(ConnectionManager):
         """创建或更新一条 thread 记录。
 
         已存在时保留原始 created_at，只更新允许变更的字段。
+
+        Args:
+            thread_id: 会话唯一标识。
+            title: 会话标题。
+            repo_url: 仓库克隆地址。
+            repo_owner: 仓库所有者。
+            repo_name: 仓库名称。
+            branch_name: 工作分支名。
+            pr_url: Pull Request 地址。
+            user_prompt: 用户原始输入。
+            latest_run_status: 最近一次运行状态，默认 ``pending``。
+
+        Returns:
+            无返回值。
         """
         existing = self.get_thread(thread_id)
         now = utc_now()
@@ -75,13 +98,27 @@ class ThreadRepo(ConnectionManager):
         )
 
     def get_thread(self, thread_id: str) -> dict[str, Any] | None:
-        """按 thread_id 查询单条记录。"""
+        """按 thread_id 查询单条记录。
+
+        Args:
+            thread_id: 会话唯一标识。
+
+        Returns:
+            thread 记录字典；不存在时返回 ``None``。
+        """
         return self.fetch_one(
             "SELECT * FROM threads WHERE thread_id = %s", (thread_id,)
         )
 
     def list_threads(self, limit: int = 50) -> list[dict[str, Any]]:
-        """按更新时间倒序返回 thread 列表。"""
+        """按更新时间倒序返回 thread 列表。
+
+        Args:
+            limit: 最大返回条数，默认 50。
+
+        Returns:
+            thread 记录字典列表。
+        """
         return self.fetch_all(
             "SELECT * FROM threads ORDER BY updated_at DESC LIMIT %s", (limit,)
         )
@@ -94,7 +131,17 @@ class ThreadRepo(ConnectionManager):
         pr_url: str | None = None,
         branch_name: str | None = None,
     ) -> None:
-        """更新 thread 的运行状态及可选的 PR / 分支信息。"""
+        """更新 thread 的运行状态及可选的 PR / 分支信息。
+
+        Args:
+            thread_id: 会话唯一标识。
+            status: 新的运行状态。
+            pr_url: 可选的 Pull Request 地址。
+            branch_name: 可选的工作分支名。
+
+        Returns:
+            无返回值。
+        """
         self.execute(
             """
             UPDATE threads
@@ -108,7 +155,14 @@ class ThreadRepo(ConnectionManager):
         )
 
     def delete_thread(self, thread_id: str) -> bool:
-        """删除 thread 主记录（级联清理由 LocalMySQLStore 协调）。"""
+        """删除 thread 主记录（级联清理由 LocalMySQLStore 协调）。
+
+        Args:
+            thread_id: 会话唯一标识。
+
+        Returns:
+            成功删除时返回 ``True``；记录不存在时返回 ``False``。
+        """
         affected = self.execute(
             "DELETE FROM threads WHERE thread_id = %s", (thread_id,)
         )

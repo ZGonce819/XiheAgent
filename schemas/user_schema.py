@@ -9,7 +9,15 @@ from pydantic import BaseModel
 
 
 class UserInfoResponse(BaseModel):
-    """当前用户信息响应。"""
+    """当前用户信息响应。
+
+    Attributes:
+        login: 用户登录名。
+        email: 用户邮箱。
+        avatar_url: 头像地址。
+        is_admin: 是否为管理员。
+        slack_oauth_enabled: 是否已启用 Slack OAuth。
+    """
 
     login: str
     email: str | None = None

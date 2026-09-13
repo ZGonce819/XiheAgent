@@ -14,7 +14,10 @@ class MappingRepo(ConnectionManager):
     """repo_workspace_mappings 表数据访问层。"""
 
     def ensure_table(self) -> None:
-        """创建 repo_workspace_mappings 表（如不存在）。"""
+        """创建 repo_workspace_mappings 表（如不存在）。
+
+        表结构以 id 为主键，repo_url 设唯一索引，保证同一仓库不会出现重复映射。
+        """
         self.execute("""
             CREATE TABLE IF NOT EXISTS repo_workspace_mappings (
                 id VARCHAR(64) PRIMARY KEY,
@@ -37,7 +40,15 @@ class MappingRepo(ConnectionManager):
         repo_owner: str | None = None,
         repo_name: str | None = None,
     ) -> None:
-        """创建或更新仓库到工作区的映射。"""
+        """创建或更新仓库到工作区的映射。
+
+        Args:
+            mapping_id: 映射记录唯一 ID。
+            repo_url: 仓库 URL。
+            workspace_path: 本地工作区路径。
+            repo_owner: 可选的仓库 owner。
+            repo_name: 可选的仓库名称。
+        """
         now = utc_now()
         self.execute(
             """
@@ -54,20 +65,38 @@ class MappingRepo(ConnectionManager):
         )
 
     def get_mapping_by_repo(self, repo_url: str) -> dict[str, Any] | None:
-        """按仓库 URL 查询映射记录。"""
+        """按仓库 URL 查询映射记录。
+
+        Args:
+            repo_url: 仓库 URL。
+
+        Returns:
+            映射记录字典，未找到时返回 None。
+        """
         return self.fetch_one(
             "SELECT * FROM repo_workspace_mappings WHERE repo_url = %s",
             (repo_url,),
         )
 
     def list_mappings(self) -> list[dict[str, Any]]:
-        """返回所有映射记录。"""
+        """返回所有映射记录。
+
+        Returns:
+            映射字典列表，按更新时间降序。
+        """
         return self.fetch_all(
             "SELECT * FROM repo_workspace_mappings ORDER BY updated_at DESC"
         )
 
     def delete_mapping(self, mapping_id: str) -> int:
-        """按 ID 删除映射记录。"""
+        """按 ID 删除映射记录。
+
+        Args:
+            mapping_id: 映射记录 ID。
+
+        Returns:
+            被删除的行数。
+        """
         return self.execute(
             "DELETE FROM repo_workspace_mappings WHERE id = %s", (mapping_id,)
         )

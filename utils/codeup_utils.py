@@ -73,7 +73,14 @@ def parse_codeup_repo_url(repo_url: str) -> CodeupRepo:
 
 
 def normalize_codeup_repo_url(repo_url: str) -> str:
-    """把 Codeup 仓库地址规范化为不含 token 的标准 HTTPS clone URL。"""
+    """把 Codeup 仓库地址规范化为不含 token 的标准 HTTPS clone URL。
+
+    Args:
+        repo_url: 用户输入的 Codeup 仓库地址。
+
+    Returns:
+        标准 HTTPS clone URL 字符串。
+    """
 
     return parse_codeup_repo_url(repo_url).clone_url
 
@@ -83,6 +90,12 @@ def get_codeup_token() -> str:
 
     优先读取 `CODEUP_TOKEN`，没有时回退到 `SCM_CODEUP_TOKEN`。
     这两个变量只在 API 请求或 Git askpass 环境中使用，不应拼接到日志或命令文本中。
+
+    Returns:
+        Codeup 访问令牌字符串。
+
+    Raises:
+        RuntimeError: 未配置任何 Codeup 令牌环境变量。
     """
 
     token = get_env("CODEUP_TOKEN").strip() or get_env("SCM_CODEUP_TOKEN").strip()
@@ -96,6 +109,12 @@ def mask_codeup_token(text: str) -> str:
 
     API 错误、Git 输出和异常信息可能包含访问令牌。
     所有写日志或返回给模型的外部错误文本都应经过该函数处理。
+
+    Args:
+        text: 待脱敏的原始文本。
+
+    Returns:
+        脱敏后的文本。
     """
 
     masked = text
@@ -110,6 +129,12 @@ def _codeup_api_base() -> str:
     """读取 Codeup API 基础地址。
 
     中心版使用 `CODEUP_API_DOMAIN`（默认 `https://devops.aliyuncs.com`）。
+
+    Returns:
+        包含组织 ID 的 API 基础 URL 字符串。
+
+    Raises:
+        RuntimeError: 未配置 CODEUP_ORG_ID 环境变量。
     """
 
     domain = get_env("CODEUP_API_DOMAIN", "https://devops.aliyuncs.com").rstrip("/")
@@ -123,6 +148,9 @@ def _codeup_headers() -> dict[str, str]:
     """构造 Codeup API 请求头。
 
     Codeup OAPI 使用 `x-yunxiao-token` 请求头传递个人访问令牌。
+
+    Returns:
+        包含认证和 Content-Type 的请求头字典。
     """
 
     return {
@@ -136,6 +164,13 @@ def _resolve_repo_id(*, owner: str, repo: str) -> str:
 
     Codeup API 接受数值 ID 或 URL 编码的完整路径。
     这里使用 URL 编码路径（`owner%2Frepo`），避免额外 API 调用来获取数值 ID。
+
+    Args:
+        owner: 仓库 owner（命名空间）。
+        repo: 仓库名称。
+
+    Returns:
+        URL 编码后的 repositoryId 字符串。
     """
 
     return quote(f"{owner}/{repo}", safe="")
@@ -146,6 +181,16 @@ def _resolve_project_id(*, owner: str, repo: str) -> int:
 
     Codeup 创建 MR 需要 `sourceProjectId` / `targetProjectId`（数值类型），
     不能直接使用 URL 编码路径。这里通过 GetRepository API 解析。
+
+    Args:
+        owner: 仓库 owner。
+        repo: 仓库名称。
+
+    Returns:
+        仓库数值 ID。
+
+    Raises:
+        RuntimeError: API 返回失败或响应中缺少数值 ID。
     """
 
     api_base = _codeup_api_base()
@@ -167,6 +212,16 @@ def _codeup_get(path: str, *, params: dict | None = None) -> dict | list:
 
     Codeup OAPI 使用 `x-yunxiao-token` 认证头。这里集中处理
     token 注入、base url 和错误抛出，避免多个读取函数重复写 HTTP 细节。
+
+    Args:
+        path: API 路径。
+        params: 可选的查询参数字典。
+
+    Returns:
+        API 返回的 JSON 字典或列表。
+
+    Raises:
+        RuntimeError: API 返回 400 及以上状态码。
     """
 
     api_base = _codeup_api_base()
@@ -179,7 +234,18 @@ def _codeup_get(path: str, *, params: dict | None = None) -> dict | list:
 
 
 def _codeup_post(path: str, *, json_payload: dict | None = None) -> dict | list:
-    """执行 Codeup POST 请求。"""
+    """执行 Codeup POST 请求。
+    
+    Args:
+        path: API 路径。
+        json_payload: 可选的 JSON 请求体。
+    
+    Returns:
+        API 返回的 JSON 字典或列表。
+    
+    Raises:
+        RuntimeError: API 返回 400 及以上状态码。
+    """
 
     api_base = _codeup_api_base()
     url = f"{api_base}{path}"
@@ -194,6 +260,15 @@ def _check_duplicate_mr(*, owner: str, repo: str, source_branch: str, target_bra
     """查询相同源分支和目标分支的现有 MR，实现幂等语义。
 
     Codeup 在重复 MR 时可能返回 400 错误，提前查询可以避免误判为失败。
+
+    Args:
+        owner: 仓库 owner。
+        repo: 仓库名称。
+        source_branch: 源分支名称。
+        target_branch: 目标分支名称。
+
+    Returns:
+        包含已有 MR 信息的字典，未找到时返回 None。
     """
 
     api_base = _codeup_api_base()
@@ -281,7 +356,16 @@ def create_merge_request(
 
 
 def get_merge_request(*, owner: str, repo: str, local_id: int) -> dict:
-    """读取 Codeup Merge Request 详情。"""
+    """读取 Codeup Merge Request 详情。
+    
+    Args:
+        owner: Codeup 仓库 owner。
+        repo: Codeup 仓库名称。
+        local_id: MR 局部编号。
+    
+    Returns:
+        MR 详情字典。
+    """
 
     repo_id = _resolve_repo_id(owner=owner, repo=repo)
     data = _codeup_get(f"/repositories/{repo_id}/changeRequests/{local_id}")
@@ -292,6 +376,14 @@ def list_merge_request_commits(*, owner: str, repo: str, local_id: int) -> list:
     """读取 Codeup Merge Request 的提交列表。
 
     Codeup 没有独立的 MR commits 列表端点，通过 patchsets 获取版本中的提交信息。
+
+    Args:
+        owner: Codeup 仓库 owner。
+        repo: Codeup 仓库名称。
+        local_id: MR 局部编号。
+
+    Returns:
+        版本提交信息列表。
     """
 
     repo_id = _resolve_repo_id(owner=owner, repo=repo)
@@ -305,6 +397,14 @@ def list_merge_request_files(*, owner: str, repo: str, local_id: int) -> list:
 
     Codeup 的 changeTree 端点需要 `fromPatchSetId` 和 `toPatchSetId`，
     先读取 patchsets 获取最新版本 ID，再查询变更文件树。
+
+    Args:
+        owner: Codeup 仓库 owner。
+        repo: Codeup 仓库名称。
+        local_id: MR 局部编号。
+
+    Returns:
+        文件变更记录列表。
     """
 
     repo_id = _resolve_repo_id(owner=owner, repo=repo)
@@ -338,6 +438,14 @@ def list_merge_request_comments(*, owner: str, repo: str, local_id: int) -> list
 
     Codeup 的评论列表使用 POST 端点（支持过滤条件），
     不传过滤条件时返回全部评论。
+
+    Args:
+        owner: Codeup 仓库 owner。
+        repo: Codeup 仓库名称。
+        local_id: MR 局部编号。
+
+    Returns:
+        评论列表。
     """
 
     repo_id = _resolve_repo_id(owner=owner, repo=repo)
@@ -350,6 +458,17 @@ def _get_latest_patchset_biz_id(*, owner: str, repo: str, local_id: int) -> str:
 
     Codeup 评论必须关联一个 `patchset_biz_id`，
     这里取最新的 MERGE_SOURCE 版本 ID 作为全局评论的版本关联。
+
+    Args:
+        owner: Codeup 仓库 owner。
+        repo: Codeup 仓库名称。
+        local_id: MR 局部编号。
+
+    Returns:
+        最新版本的 patchset_biz_id 字符串。
+
+    Raises:
+        RuntimeError: MR 无可用版本或缺少 patchSetBizId。
     """
 
     repo_id = _resolve_repo_id(owner=owner, repo=repo)

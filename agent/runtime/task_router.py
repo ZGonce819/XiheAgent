@@ -22,40 +22,25 @@ from agent.graph.graph import get_checkpointer, get_store
 from agent.memory.repo_update import RepoMemoryUpdate, update_repo_memory_from_text
 from agent.runtime._helpers import (
     build_agent_for_runtime,
-    extract_final_assistant_text,
     is_approval_prompt,
     is_plan_revision_prompt,
     latest_confirmable_plan_message,
     latest_non_approval_user_prompt,
     message_metadata,
     plan_source_prompt,
-    revision_source_prompt,
 )
 from agent.runtime.events import record_event
 from agent.runtime.planning_router import run_plan_response_task
 from agent.runtime.streaming_runtime import run_agent_with_event_stream
 from agent.runtime.sync_router import run_pull_only_task, run_workspace_listing_task
 from agent.runtime.task_intent import classify_task_kind, is_pull_only_task, is_workspace_listing_task
-from urllib.parse import urlparse
-
-from utils.codeup_utils import parse_codeup_repo_url
-from utils.gitee_utils import mask_token, parse_gitee_repo_url
-from utils.github_utils import parse_github_repo_url
+from utils import extract_final_assistant_text
+from utils.gitee_utils import mask_token
+from utils.platform_utils import parse_repo_url
 
 logger = logging.getLogger(__name__)
 
 RuntimeEventSink = Callable[[str, dict[str, Any]], None]
-
-
-def _parse_repo_url(repo_url: str):
-    """根据 URL 域名自动识别 SCM 平台并解析仓库信息。"""
-    parsed = urlparse(repo_url.strip())
-    hostname = (parsed.hostname or "").lower()
-    if hostname in {"codeup.aliyun.com", "www.codeup.aliyun.com"}:
-        return parse_codeup_repo_url(repo_url)
-    if hostname in {"github.com", "www.github.com"}:
-        return parse_github_repo_url(repo_url)
-    return parse_gitee_repo_url(repo_url)
 
 
 def initialize_task_record(
@@ -75,7 +60,7 @@ def initialize_task_record(
     """
 
     thread_id = thread_id or str(uuid.uuid4())
-    repo = _parse_repo_url(repo_url)
+    repo = parse_repo_url(repo_url)
     get_store().upsert_thread(
         thread_id=thread_id,
         title=prompt[:80] or f"{repo.owner}/{repo.repo}",
@@ -158,7 +143,7 @@ def run_agent_task(
     logger.info("任务开始：thread_id=%s repo_url=%s", thread_id, repo_url)
     record_event(thread_id, "created", "任务已创建", status="completed")
     record_event(thread_id, "repo", "解析仓库", status="in_progress")
-    repo = _parse_repo_url(repo_url)
+    repo = parse_repo_url(repo_url)
     logger.info("仓库解析成功：owner=%s repo=%s", repo.owner, repo.repo)
     record_event(thread_id, "repo", "解析仓库", status="completed")
     store.upsert_thread(

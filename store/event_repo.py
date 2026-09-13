@@ -14,7 +14,10 @@ class RunEventRepo(ConnectionManager):
     """run_events 表数据访问层。"""
 
     def ensure_table(self) -> None:
-        """创建 run_events 表（如不存在）。"""
+        """创建 run_events 表（如不存在）。
+
+        表结构包含 event id 主键、thread_id 索引、事件类型、标题、状态、详情和时间戳。
+        """
         self.execute("""
             CREATE TABLE IF NOT EXISTS run_events (
                 id VARCHAR(64) PRIMARY KEY,
@@ -40,9 +43,17 @@ class RunEventRepo(ConnectionManager):
         detail: str | None = None,
     ) -> None:
         """记录或更新一条运行事件。
-
+    
         相同 event_id 可以被更新，例如先写 in_progress，完成后改成 completed。
-        这些事件只用于 Dashboard 实时展示"正在做什么"，不保存大段命令输出。
+        这些事件只用于 Dashboard 实时展示“正在做什么”，不保存大段命令输出。
+    
+        Args:
+            event_id: 事件唯一标识。
+            thread_id: 所属会话 ID。
+            kind: 事件类型，如 ``tool_call`` / ``step`` 等。
+            title: 事件标题，用于前端展示。
+            status: 事件状态，如 ``pending`` / ``in_progress`` / ``completed``。
+            detail: 事件详情，可为 ``None``。
         """
         now = utc_now()
         self.execute(
@@ -61,7 +72,14 @@ class RunEventRepo(ConnectionManager):
         )
 
     def list_run_events(self, thread_id: str) -> list[dict[str, Any]]:
-        """按创建顺序读取某个 thread 的运行步骤。"""
+        """按创建顺序读取某个 thread 的运行步骤。
+        
+        Args:
+            thread_id: 会话 ID。
+        
+        Returns:
+            事件字典列表，按创建时间升序。
+        """
         return self.fetch_all(
             """
             SELECT * FROM run_events
@@ -76,6 +94,12 @@ class RunEventRepo(ConnectionManager):
 
         run_events 只服务当前/最近一次运行的过程展示；
         历史问答正文保存在 thread_messages，不依赖这里的临时事件。
+
+        Args:
+            thread_id: 会话 ID。
+
+        Returns:
+            被删除的记录行数。
         """
         return self.execute(
             "DELETE FROM run_events WHERE thread_id = %s", (thread_id,)
@@ -83,9 +107,16 @@ class RunEventRepo(ConnectionManager):
 
     def finish_open_run_events(self, thread_id: str, *, status: str = "completed") -> int:
         """把仍处于运行中的展示事件收尾。
-
+    
         Agent 的 tool_calls 流有时只发起始事件，真正完成状态由工具内部事件记录。
-        为避免前端在任务结束后还显示"运行中..."，任务完成或失败时统一关闭残留事件。
+        为避免前端在任务结束后还显示“运行中...”，任务完成或失败时统一关闭残留事件。
+    
+        Args:
+            thread_id: 会话 ID。
+            status: 收尾目标状态，默认 ``completed``。
+    
+        Returns:
+            被更新的记录行数。
         """
         now = utc_now()
         return self.execute(

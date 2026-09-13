@@ -204,5 +204,3 @@ def get_system_prompt(task_kind: TaskKind = "coding") -> str:
     if task_kind == "coding":
         return f"{BASE_SYSTEM_PROMPT}{memory_section}\n\n{CODING_PROMPT}"
     return f"{BASE_SYSTEM_PROMPT}{memory_section}\n\n{READ_ONLY_PROMPTS.get(task_kind, READ_ONLY_PROMPTS['qa'])}"
-
-

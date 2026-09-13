@@ -34,7 +34,11 @@ class Workspace:
     """
 
     def __init__(self, root: Path) -> None:
-        """创建工作区对象，并确保根目录存在。"""
+        """创建工作区对象，并确保根目录存在。
+
+        Args:
+            root: 工作区根目录路径，会被解析为绝对路径并自动创建。
+        """
         self.root = root.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
 

@@ -1,0 +1,70 @@
+.agents-ui {
+  --ui-bg: oklch(0.995 0.001 220);
+  --ui-surface: oklch(1 0 0);
+  --ui-panel: oklch(0.985 0.002 220);
+  --ui-panel-2: oklch(0.96 0.005 250);
+  --ui-border: oklch(0.92 0.006 250);
+  --ui-border-subtle: oklch(0.94 0.004 250);
+  --ui-text: oklch(0.16 0.01 250);
+  --ui-text-muted: oklch(0.52 0.02 250);
+  --ui-text-dim: oklch(0.62 0.015 250);
+  --ui-accent: oklch(0.55 0.2 255);
+  --ui-accent-bubble: oklch(0.955 0.02 255);
+  --ui-sidebar: oklch(0.985 0.002 220);
+  --ui-sidebar-hover: oklch(0.955 0.008 250);
+  --ui-success: oklch(0.6 0.17 145);
+  --ui-danger: oklch(0.58 0.22 25);
+}
+
+.dark .agents-ui,
+.dark.agents-ui {
+  --ui-bg: oklch(0.15 0.01 250);
+  --ui-surface: oklch(0.2 0.012 250);
+  --ui-panel: oklch(0.2 0.012 250);
+  --ui-panel-2: oklch(0.26 0.015 250);
+  --ui-border: oklch(1 0 0 / 8%);
+  --ui-border-subtle: oklch(1 0 0 / 5%);
+  --ui-text: oklch(0.96 0.005 220);
+  --ui-text-muted: oklch(0.68 0.015 250);
+  --ui-text-dim: oklch(0.52 0.02 250);
+  --ui-accent: oklch(0.65 0.18 255);
+  --ui-accent-bubble: oklch(0.26 0.025 255);
+  --ui-sidebar: oklch(0.18 0.01 250);
+  --ui-sidebar-hover: oklch(0.26 0.015 250);
+  --ui-success: oklch(0.6 0.17 145);
+  --ui-danger: oklch(0.7 0.18 22);
+}
+
+.agents-ui {
+  color: var(--ui-text);
+  background: var(--ui-bg);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.agents-ui * {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.85 0.006 250) transparent;
+}
+
+.dark .agents-ui * {
+  scrollbar-color: oklch(0.4 0.01 250) transparent;
+}
+
+.agents-ui .shimmer-text {
+  background: linear-gradient(90deg, var(--ui-text-dim) 40%, var(--ui-accent) 50%, var(--ui-text-dim) 60%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: agents-shimmer 4s linear infinite;
+}
+
+@keyframes agents-shimmer {
+  0% {
+    background-position: 200% center;
+  }
+  100% {
+    background-position: -200% center;
+  }
+}

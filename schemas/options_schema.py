@@ -9,7 +9,15 @@ from pydantic import BaseModel
 
 
 class ModelOption(BaseModel):
-    """单个模型选项。"""
+    """单个模型选项。
+
+    Attributes:
+        id: 模型唯一标识。
+        label: 模型显示名称。
+        efforts: 可用的推理努力程度列表。
+        default_effort: 默认推理努力程度。
+        supports_images: 是否支持图片输入。
+    """
 
     id: str
     label: str
@@ -19,7 +27,15 @@ class ModelOption(BaseModel):
 
 
 class OptionsResponse(BaseModel):
-    """页面选项响应，包含可用模型列表和默认配置。"""
+    """页面选项响应，包含可用模型列表和默认配置。
+
+    Attributes:
+        models: 可用模型选项列表。
+        default_agent_model: 默认主模型 ID。
+        default_agent_reasoning_effort: 默认主模型推理努力程度。
+        default_agent_subagent_model: 默认子代理模型 ID。
+        default_agent_subagent_reasoning_effort: 默认子代理推理努力程度。
+    """
 
     models: list[ModelOption]
     default_agent_model: str

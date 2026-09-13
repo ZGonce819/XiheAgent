@@ -103,8 +103,10 @@ class OpenSandboxBackend(BaseSandbox):
 
         Args:
             command: 要执行的 Shell 命令字符串。
-            timeout: 等待命令完成的最大时间（秒）。
-                如果为 None，则使用后端默认的超时时间。
+            timeout: 等待命令完成的最大时间（秒）；为 None 时使用实例默认超时。
+
+        Returns:
+            包含命令输出和退出码的结构化响应。
         """
         effective_timeout = timeout if timeout is not None else self._default_timeout
         logger.debug(
@@ -118,7 +120,15 @@ class OpenSandboxBackend(BaseSandbox):
         *,
         timeout: int,
     ) -> ExecuteResponse:
-        """使用 OpenSandbox 的 API 执行命令。"""
+        """使用 OpenSandbox 的 API 执行命令。
+
+        Args:
+            command: 要执行的 Shell 命令字符串。
+            timeout: 命令超时时间（秒）。
+
+        Returns:
+            包含命令输出和退出码的结构化响应。
+        """
         try:
             logger.debug("通过 OpenSandbox API 执行命令：%s", command)
             result = self._sandbox.commands.run(command)
@@ -165,7 +175,14 @@ class OpenSandboxBackend(BaseSandbox):
             )
 
     def download_files(self, paths: list[str]) -> list[FileDownloadResponse]:
-        """从沙盒中下载文件。"""
+        """从沙盒中下载文件。
+
+        Args:
+            paths: 沙盒内绝对路径列表。
+
+        Returns:
+            每个路径对应的下载结果，包含文件内容或错误信息。
+        """
         logger.info("开始下载 %d 个文件：%s", len(paths), paths)
         responses: list[FileDownloadResponse] = []
 
@@ -234,7 +251,14 @@ class OpenSandboxBackend(BaseSandbox):
         return responses
 
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        """将文件上传到沙盒中。"""
+        """将文件上传到沙盒中。
+
+        Args:
+            files: ``(路径, 字节内容)`` 元组列表，路径必须是沙盒内绝对路径。
+
+        Returns:
+            每个文件的上传结果，成功时 error 为 None。
+        """
         logger.info("准备上传 %d 个文件", len(files))
         responses: list[FileUploadResponse] = []
         upload_entries = []

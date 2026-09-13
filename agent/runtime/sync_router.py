@@ -11,40 +11,21 @@
 from __future__ import annotations
 
 import logging
-import os
 import uuid
 from pathlib import Path
 from typing import Any
 
-from agent.memory.repo import ensure_repo_memory_initialized, repo_project_dir
-from agent.graph.graph import get_langgraph_store, get_store
+from agent.memory.repo import repo_project_dir
+from agent.graph.graph import get_store
 from agent.runtime._helpers import ensure_repo_memory_for_repo
 from agent.runtime.events import record_event
 from backends.local_shell import LocalShellBackend
 from backends.workspace import Workspace
-from urllib.parse import urlparse
-
-from utils.codeup_utils import parse_codeup_repo_url
-from utils.gitee_utils import mask_token, parse_gitee_repo_url
-from utils.github_utils import parse_github_repo_url
+from config.constants import PROJECTS_DIR, WORKSPACE_ROOT
+from utils.gitee_utils import mask_token
+from utils.platform_utils import parse_repo_url
 
 logger = logging.getLogger(__name__)
-
-
-def _parse_repo_url(repo_url: str):
-    """根据 URL 域名自动识别 SCM 平台并解析仓库信息。"""
-    parsed = urlparse(repo_url.strip())
-    hostname = (parsed.hostname or "").lower()
-    if hostname in {"codeup.aliyun.com", "www.codeup.aliyun.com"}:
-        return parse_codeup_repo_url(repo_url)
-    if hostname in {"github.com", "www.github.com"}:
-        return parse_github_repo_url(repo_url)
-    return parse_gitee_repo_url(repo_url)
-
-# 工作区根目录，和 backends/local_shell.py 保持一致。
-# 优先从环境变量读取，缺省值用于本地开发。
-_WORKSPACE_ROOT = Path(os.environ.get("AI_WORKSPACE_ROOT", r"E:\ai_workspace")).resolve()
-_PROJECTS_DIR = _WORKSPACE_ROOT / "projects"
 
 
 def run_workspace_listing_task(
@@ -54,6 +35,14 @@ def run_workspace_listing_task(
 
     这是一个"直达分支"：用户只是问本地工作区有哪些项目时，没有必要构建 Agent。
     函数仍然会写 thread/run/run_events，是为了前端展示方式和普通任务保持一致。
+
+    Args:
+        repo_url: 仓库完整地址。
+        prompt: 用户输入文本。
+        thread_id: 线程 ID；为 ``None`` 时自动创建。
+
+    Returns:
+        包含 thread_id、run_id、status、projects 的结果字典。
     """
 
     should_record_user_message = thread_id is None
@@ -69,11 +58,11 @@ def run_workspace_listing_task(
     store.clear_run_events(thread_id)
     run_id = str(uuid.uuid4())
     store.record_run(run_id=run_id, thread_id=thread_id, status="running")
-    workspace = Workspace(_WORKSPACE_ROOT)
+    workspace = Workspace(WORKSPACE_ROOT)
     backend = LocalShellBackend(workspace)
     try:
         # 所有可见步骤都通过 record_event 写入 run_events，前端可以复用同一套事件展示组件。
-        record_event(thread_id, "workspace", "定位本地工作区", status="completed", detail=str(_WORKSPACE_ROOT))
+        record_event(thread_id, "workspace", "定位本地工作区", status="completed", detail=str(WORKSPACE_ROOT))
         record_event(
             thread_id, "list:projects", "查看项目目录",
             kind="search", status="in_progress", detail="projects",
@@ -121,6 +110,15 @@ def _run_git_with_fetch_head_retry(
 
     这个兼容逻辑主要服务 Windows 教学环境。PyCharm、杀毒软件或文件索引服务
     偶尔会短暂占用 `.git/FETCH_HEAD`，直接失败会让"同步代码"体验很差。
+
+    Args:
+        backend: 本地 Shell 后端。
+        command: 要执行的 Git 命令。
+        cwd: 工作目录。
+        timeout: 命令超时秒数。
+
+    Returns:
+        Git 命令执行结果。
     """
 
     result = backend.run(command, cwd=cwd, timeout=timeout)
@@ -148,6 +146,14 @@ def run_pull_only_task(
 
     由于它不需要推理，所以不走 DeepAgent，不消耗模型调用次数。它仍然会初始化
     仓库映射和仓库记忆，保证后续 planning/coding 任务能复用同一个本地目录。
+
+    Args:
+        repo_url: 仓库完整地址。
+        prompt: 用户输入文本。
+        thread_id: 线程 ID；为 ``None`` 时自动创建。
+
+    Returns:
+        包含 thread_id、run_id、status 的结果字典。
     """
 
     should_record_user_message = thread_id is None
@@ -163,8 +169,8 @@ def run_pull_only_task(
     store.clear_run_events(thread_id)
     run_id = str(uuid.uuid4())
     store.record_run(run_id=run_id, thread_id=thread_id, status="running")
-    repo = _parse_repo_url(repo_url)
-    workspace = Workspace(_WORKSPACE_ROOT)
+    repo = parse_repo_url(repo_url)
+    workspace = Workspace(WORKSPACE_ROOT)
     backend = LocalShellBackend(workspace)
     project_dir = repo_project_dir(repo)
     ensure_repo_memory_for_repo(repo, project_dir)
@@ -175,7 +181,7 @@ def run_pull_only_task(
     try:
         logger.info("开始执行 pull-only 任务：thread_id=%s repo=%s/%s", thread_id, repo.owner, repo.repo)
         record_event(thread_id, "workspace", "准备本地工作区", status="in_progress")
-        _PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
+        PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
         if target.exists() and (target / ".git").exists():
             # 本地已经存在 Git 仓库时，只更新远程地址并快进拉取 master。
             # 这里使用 --ff-only，避免自动产生 merge commit，保持教学项目历史清晰。

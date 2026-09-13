@@ -10,6 +10,7 @@ import logging
 from typing import Any
 
 from langchain_core.tools import tool
+from pydantic import BaseModel, Field
 
 from agent.graph.graph import get_store
 from agent.runtime.events import record_event
@@ -21,12 +22,21 @@ from utils.gitee_utils import (
     list_pull_request_files,
     post_pr_comment,
 )
-from tools.runtime_context import get_runtime_thread_id, runtime_is_read_only_task
+from utils.context_utils import get_runtime_thread_id, runtime_is_read_only_task
 
 logger = logging.getLogger("agent.run.gitee")
 
 
-@tool
+class OpenGiteePullRequestSchema(BaseModel):
+    owner: str = Field(description="Gitee 仓库 owner。")
+    repo: str = Field(description="Gitee 仓库名称。")
+    head: str = Field(description="已推送的源分支。")
+    base: str = Field(default="master", description="目标分支，默认 master。")
+    title: str = Field(default="Xihe generated changes", description="PR 标题。")
+    body: str = Field(default="由 Xihe 自动生成。", description="PR 描述。")
+
+
+@tool(args_schema=OpenGiteePullRequestSchema)
 def open_gitee_pull_request(
     owner: str,
     repo: str,
@@ -94,7 +104,14 @@ def open_gitee_pull_request(
     return {"ok": True, "pr_url": pr_url, "raw": pr}
 
 
-@tool
+class PublishGiteePrCommentSchema(BaseModel):
+    owner: str = Field(description="Gitee 仓库 owner。")
+    repo: str = Field(description="Gitee 仓库名称。")
+    number: int = Field(description="PR 编号。")
+    body: str = Field(description="评论正文。")
+
+
+@tool(args_schema=PublishGiteePrCommentSchema)
 def publish_gitee_pr_comment(owner: str, repo: str, number: int, body: str) -> dict[str, Any]:
     """向指定 Gitee Pull Request 发布普通评论。
 
@@ -119,12 +136,26 @@ def publish_gitee_pr_comment(owner: str, repo: str, number: int, body: str) -> d
     return post_pr_comment(owner=owner, repo=repo, number=number, body=body)
 
 
-@tool
+class GetGiteePullRequestContextSchema(BaseModel):
+    owner: str = Field(description="Gitee 仓库 owner。")
+    repo: str = Field(description="Gitee 仓库名称。")
+    number: int = Field(description="PR 编号。")
+
+
+@tool(args_schema=GetGiteePullRequestContextSchema)
 def get_gitee_pull_request_context(owner: str, repo: str, number: int) -> dict[str, Any]:
     """读取 Gitee Pull Request 审查上下文。
 
     Reviewer 子 Agent 使用该工具获取 PR 标题、描述、变更文件、提交列表和已有评论。
     该工具只读，不会修改 Gitee 仓库。
+
+    Args:
+        owner: Gitee 仓库 owner。
+        repo: Gitee 仓库名称。
+        number: PR 编号。
+
+    Returns:
+        包含 PR 信息、提交列表、变更文件、评论和摘要统计的字典。
     """
 
     logger.info("读取 Gitee PR 上下文：owner=%s repo=%s number=%s", owner, repo, number)

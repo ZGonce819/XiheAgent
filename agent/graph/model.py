@@ -14,11 +14,8 @@ from __future__ import annotations
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models.chat_models import BaseChatModel
 
+from config.constants import DEEPSEEK_V4_MAX_TOKENS, INTENT_MODEL_MAX_TOKENS
 from config.env_config import get_env, require_env
-
-# DeepSeek V4 系列模型的最大输出 token 数。
-# 编码任务需要较长输出（代码 + 解释），因此设置较高的上限。
-DEEPSEEK_V4_MAX_TOKENS = 16_000
 
 
 def make_main_model() -> BaseChatModel:
@@ -33,7 +30,6 @@ def make_main_model() -> BaseChatModel:
     Raises:
         RuntimeError: 当 DEEPSEEK_API_KEY 或 DEEPSEEK_BASE_URL 未配置时。
     """
-
     return init_chat_model(
         model=get_env("MAIN_MODEL", "deepseek-v4-pro"),
         model_provider="openai",
@@ -58,12 +54,11 @@ def make_intent_model() -> BaseChatModel:
     Raises:
         RuntimeError: 当 DEEPSEEK_API_KEY 或 DEEPSEEK_BASE_URL 未配置时。
     """
-
     return init_chat_model(
         model=get_env("INTENT_MODEL", get_env("MAIN_MODEL", "deepseek-v4-pro")),
         model_provider="openai",
         temperature=0.0,
         api_key=require_env("DEEPSEEK_API_KEY"),
         base_url=require_env("DEEPSEEK_BASE_URL"),
-        max_tokens=2_000,
+        max_tokens=INTENT_MODEL_MAX_TOKENS,
     )

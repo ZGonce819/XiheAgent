@@ -28,17 +28,18 @@ from langgraph.types import Command
 
 from backends.local_shell import LocalShellBackend
 from agent.runtime.events import record_event
+from config.constants import (
+    CODEUP_URL_ARGUMENTS,
+    GITEE_URL_ARGUMENTS,
+    GITHUB_URL_ARGUMENTS,
+    PATH_ARGUMENTS,
+    READ_FILE_INT_ARGUMENTS,
+)
 from utils.codeup_utils import normalize_codeup_repo_url
 from utils.gitee_utils import mask_token, normalize_gitee_repo_url
 from utils.github_utils import normalize_github_repo_url
 
 logger = logging.getLogger(__name__)
-
-PATH_ARGUMENTS = {"path", "cwd", "repo_dir", "project_dir", "file_path", "old_path", "new_path"}
-GITEE_URL_ARGUMENTS = {"repo_url"}
-GITHUB_URL_ARGUMENTS = {"repo_url"}
-CODEUP_URL_ARGUMENTS = {"repo_url"}
-READ_FILE_INT_ARGUMENTS = {"offset", "limit"}
 
 
 class ToolInputRejected(ValueError):
@@ -46,11 +47,22 @@ class ToolInputRejected(ValueError):
 
     这是"可恢复错误"，不是系统异常。返回给模型后，模型应改用工作区相对路径、
     正确仓库地址或更安全的命令重新调用工具。
+
+    异常消息包含被拒绝的参数名和具体原因，供模型读取并修正。
     """
 
 
 def _reject_result(error: ToolInputRejected, *, tool_name: str, backend: LocalShellBackend) -> dict[str, Any]:
-    """把入参拦截结果转换成模型可读的中文结构，序列化为 ToolMessage content。"""
+    """把入参拦截结果转换成模型可读的中文结构，序列化为 ToolMessage content。
+
+    Args:
+        error: 入参被拒绝时抛出的 ToolInputRejected 异常。
+        tool_name: 被拒绝的工具名称。
+        backend: 当前工作区后端，用于提供 workspace 路径信息。
+
+    Returns:
+        包含 ok、tool、error_type、error、workspace、hint 的结构化字典。
+    """
     return {
         "ok": False,
         "tool": tool_name,
@@ -62,7 +74,14 @@ def _reject_result(error: ToolInputRejected, *, tool_name: str, backend: LocalSh
 
 
 def _get_tool_call_id(request: ToolCallRequest) -> str | None:
-    """兼容读取 LangGraph tool_call id。"""
+    """兼容读取 LangGraph tool_call id。
+
+    Args:
+        request: LangGraph 工具调用请求对象。
+
+    Returns:
+        tool_call_id 字符串；无法提取时返回 ``None``。
+    """
     if isinstance(request.tool_call, dict):
         value = request.tool_call.get("id")
         return value if isinstance(value, str) else None
@@ -70,7 +89,14 @@ def _get_tool_call_id(request: ToolCallRequest) -> str | None:
 
 
 def _get_thread_id(request: ToolCallRequest) -> str | None:
-    """从 runtime config 中读取 thread_id，用于写入前端运行事件。"""
+    """从 runtime config 中读取 thread_id，用于写入前端运行事件。
+
+    Args:
+        request: LangGraph 工具调用请求对象。
+
+    Returns:
+        当前线程 ID；无法提取或为空时返回 ``None``。
+    """
     config = getattr(getattr(request, "runtime", None), "config", None)
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
     thread_id = configurable.get("thread_id") if isinstance(configurable, dict) else None
@@ -78,7 +104,16 @@ def _get_thread_id(request: ToolCallRequest) -> str | None:
 
 
 def _coerce_int(value: Any) -> Any:
-    """把模型偶尔生成的字符串参数修正为整数。"""
+    """把模型偶尔生成的字符串参数修正为整数。
+
+    只处理纯数字开头的字符串，其他类型原样返回。
+
+    Args:
+        value: 待转换的参数值。
+
+    Returns:
+        转换后的整数；无法转换时返回原始值。
+    """
     if value is None or isinstance(value, int):
         return value
     if isinstance(value, str):
@@ -95,7 +130,17 @@ def _reject_tool_message(
     tool_name: str,
     backend: LocalShellBackend,
 ) -> ToolMessage:
-    """把参数拦截结果转换为 ToolMessage，让 Agent 可以继续修正。"""
+    """把参数拦截结果转换为 ToolMessage，让 Agent 可以继续修正。
+
+    Args:
+        error: 入参被拒绝时抛出的 ToolInputRejected 异常。
+        request: LangGraph 工具调用请求对象，用于提取 tool_call_id。
+        tool_name: 被拒绝的工具名称。
+        backend: 当前工作区后端。
+
+    Returns:
+        包含结构化错误信息的 ToolMessage（status='error'）。
+    """
     return ToolMessage(
         content=json.dumps(
             _reject_result(error, tool_name=tool_name, backend=backend),
@@ -107,7 +152,16 @@ def _reject_tool_message(
 
 
 def _is_windows_absolute_path(value: str) -> bool:
-    """判断字符串是否像 Windows 绝对路径。"""
+    """判断字符串是否像 Windows 绝对路径。
+
+    同时检查正则匹配和 ``PureWindowsPath`` 解析结果，确保覆盖各种格式。
+
+    Args:
+        value: 待检查的路径字符串。
+
+    Returns:
+        ``True`` 表示是 Windows 绝对路径。
+    """
     if re.match(r"^[A-Za-z]:[\\/]", value):
         return True
     try:
@@ -121,6 +175,22 @@ def sanitize_workspace_path(value: Any, *, argument_name: str, backend: LocalShe
 
     后端 ``Workspace.resolve()`` 仍是最终安全边界。middleware 只在调用前做更友好的
     规范化和敏感目录拦截。
+
+    处理规则：
+    1. Windows 绝对路径在工作区内时转为相对路径，在工作区外时拒绝；
+    2. 包含 ``..`` 的路径直接拒绝，防止跳出工作区；
+    3. 包含 ``.secrets`` 的路径直接拒绝，防止访问敏感文件。
+
+    Args:
+        value: 待清洗的路径参数值。
+        argument_name: 参数名称，用于错误提示。
+        backend: 当前工作区后端。
+
+    Returns:
+        清洗后的路径字符串。
+
+    Raises:
+        ToolInputRejected: 路径越界或包含敏感目录时。
     """
     if not isinstance(value, str):
         return value
@@ -144,7 +214,16 @@ def sanitize_workspace_path(value: Any, *, argument_name: str, backend: LocalShe
 
 
 def _sanitize_gitee_url(value: Any) -> Any:
-    """把 Gitee 地址规范为不带 token 的标准 HTTPS clone_url。"""
+    """把 Gitee 地址规范为不带 token 的标准 HTTPS clone_url。
+
+    非 Gitee 域名或非字符串值原样返回。
+
+    Args:
+        value: 待规范的仓库地址。
+
+    Returns:
+        规范后的 Gitee HTTPS 地址；非 Gitee 地址或非字符串时返回原始值。
+    """
     if not isinstance(value, str):
         return value
     text = value.strip()
@@ -156,7 +235,16 @@ def _sanitize_gitee_url(value: Any) -> Any:
 
 
 def _sanitize_github_url(value: Any) -> Any:
-    """把 GitHub 地址规范为不带 token 的标准 HTTPS clone_url。"""
+    """把 GitHub 地址规范为不带 token 的标准 HTTPS clone_url。
+
+    非 GitHub 域名或非字符串值原样返回。
+
+    Args:
+        value: 待规范的仓库地址。
+
+    Returns:
+        规范后的 GitHub HTTPS 地址；非 GitHub 地址或非字符串时返回原始值。
+    """
     if not isinstance(value, str):
         return value
     text = value.strip()
@@ -168,7 +256,16 @@ def _sanitize_github_url(value: Any) -> Any:
 
 
 def _sanitize_codeup_url(value: Any) -> Any:
-    """把 Codeup 地址规范为不带 token 的标准 HTTPS clone_url。"""
+    """把 Codeup 地址规范为不带 token 的标准 HTTPS clone_url。
+
+    非 Codeup 域名或非字符串值原样返回。
+
+    Args:
+        value: 待规范的仓库地址。
+
+    Returns:
+        规范后的 Codeup HTTPS 地址；非 Codeup 地址或非字符串时返回原始值。
+    """
     if not isinstance(value, str):
         return value
     text = value.strip()
@@ -182,7 +279,15 @@ def _sanitize_codeup_url(value: Any) -> Any:
 def sanitize_tool_kwargs(tool_name: str, kwargs: dict[str, Any], *, backend: LocalShellBackend) -> dict[str, Any]:
     """根据参数名对工具入参做统一清洗。
 
-    只处理所有工具共享的高风险参数：路径、SCM URL。
+    只处理所有工具共享的高风险参数：路径、SCM URL、整型参数。
+
+    Args:
+        tool_name: 工具名称，用于日志输出。
+        kwargs: 原始工具调用参数。
+        backend: 当前工作区后端。
+
+    Returns:
+        清洗后的参数字典。
     """
     sanitized = dict(kwargs)
     for key in PATH_ARGUMENTS:
@@ -215,11 +320,26 @@ class SanitizeToolInputsMiddleware(AgentMiddleware):
     state_schema = AgentState
 
     def __init__(self, *, backend: LocalShellBackend) -> None:
+        """初始化工具入参清洗中间件。
+
+        Args:
+            backend: 当前工作区后端实例，用于路径解析和 workspace 信息。
+        """
         super().__init__()
         self.backend = backend
 
     def _sanitize_request(self, request: ToolCallRequest) -> ToolCallRequest:
-        """返回清洗后的 ToolCallRequest。"""
+        """返回清洗后的 ToolCallRequest。
+
+        对 request 中的工具参数执行统一清洗；如果 tool_call 不是 dict 或
+        args 不是 dict，原样返回。
+
+        Args:
+            request: LangGraph 工具调用请求对象。
+
+        Returns:
+            参数已清洗的请求副本；无法解析时返回原始对象。
+        """
         tool_call = request.tool_call
         if not isinstance(tool_call, dict):
             return request
@@ -231,7 +351,13 @@ class SanitizeToolInputsMiddleware(AgentMiddleware):
         return request.override(tool_call={**tool_call, "args": sanitized_args})
 
     def _record_rejection(self, request: ToolCallRequest, tool_name: str, error: ToolInputRejected) -> None:
-        """把参数拒绝事件写入运行事件表。"""
+        """把参数拒绝事件写入运行事件表。
+
+        Args:
+            request: LangGraph 工具调用请求对象，用于提取 thread_id。
+            tool_name: 被拒绝的工具名称。
+            error: 入参拒绝异常。
+        """
         thread_id = _get_thread_id(request)
         if not thread_id:
             return
@@ -249,6 +375,15 @@ class SanitizeToolInputsMiddleware(AgentMiddleware):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], ToolMessage | Command],
     ) -> ToolMessage | Command:
+        """同步工具调用包装器，先清洗参数再交给下游 handler。
+
+        Args:
+            request: LangGraph 工具调用请求对象。
+            handler: 下游工具调用处理函数。
+
+        Returns:
+            下游返回的正常结果；或入参被拒绝时返回的错误 ToolMessage。
+        """
         tool_name = str(request.tool_call.get("name") or "") if isinstance(request.tool_call, dict) else ""
         try:
             return handler(self._sanitize_request(request))
@@ -262,6 +397,15 @@ class SanitizeToolInputsMiddleware(AgentMiddleware):
         request: ToolCallRequest,
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
+        """异步工具调用包装器，先清洗参数再交给下游 handler。
+
+        Args:
+            request: LangGraph 工具调用请求对象。
+            handler: 下游异步工具调用处理函数。
+
+        Returns:
+            下游返回的正常结果；或入参被拒绝时返回的错误 ToolMessage。
+        """
         tool_name = str(request.tool_call.get("name") or "") if isinstance(request.tool_call, dict) else ""
         try:
             return await handler(self._sanitize_request(request))

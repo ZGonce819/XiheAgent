@@ -18,6 +18,7 @@ dependencies = [
     "langchain-core>=0.2.0",
     "langgraph>=0.2.0",
     "langgraph-checkpoint-redis>=0.1.0",
+    "langgraph-checkpoint-postgres>=3.0.0",
     
     # Database
     "sqlalchemy>=2.0.0",

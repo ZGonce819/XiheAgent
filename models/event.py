@@ -41,6 +41,13 @@ class RunEvent:
         """从数据库查询结果构造实体。
 
         注意：表中主键列名为 ``id``，映射到实体的 ``event_id`` 属性。
+
+        Args:
+            row: 数据库查询返回的字典行，须包含 ``id``、``thread_id``、``kind``、
+                ``title``、``status`` 等必填字段。
+
+        Returns:
+            构造完成的 :class:`RunEvent` 实例。
         """
 
         return cls(
@@ -55,7 +62,11 @@ class RunEvent:
         )
 
     def to_row(self) -> dict[str, Any]:
-        """将实体转换为可用于数据库写入的字典。"""
+        """将实体转换为可用于数据库写入的字典。
+
+        Returns:
+            与数据库列名对应的字典，可直接用于 INSERT / UPDATE 语句。
+        """
 
         return {
             "id": self.event_id,

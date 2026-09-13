@@ -33,7 +33,15 @@ class Run:
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> Run:
-        """从数据库查询结果构造实体。"""
+        """从数据库查询结果构造实体。
+
+        Args:
+            row: 数据库查询返回的字典行，须包含 ``run_id``、``thread_id``、
+                ``status`` 等必填字段。
+
+        Returns:
+            构造完成的 :class:`Run` 实例。
+        """
 
         return cls(
             run_id=row["run_id"],
@@ -45,7 +53,11 @@ class Run:
         )
 
     def to_row(self) -> dict[str, Any]:
-        """将实体转换为可用于数据库写入的字典。"""
+        """将实体转换为可用于数据库写入的字典。
+
+        Returns:
+            与数据库列名对应的字典，可直接用于 INSERT / UPDATE 语句。
+        """
 
         return {
             "run_id": self.run_id,
@@ -58,6 +70,10 @@ class Run:
 
     @property
     def is_finished(self) -> bool:
-        """判断本次运行是否已结束。"""
+        """判断本次运行是否已结束。
+
+        Returns:
+            当 ``finished_at`` 不为 ``None`` 时返回 ``True``，否则返回 ``False``。
+        """
 
         return self.finished_at is not None

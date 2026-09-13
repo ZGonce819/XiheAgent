@@ -59,9 +59,15 @@ def parse_gitee_repo_url(repo_url: str) -> GiteeRepo:
 
 def normalize_gitee_repo_url(repo_url: str) -> str:
     """把 Gitee 仓库地址规范化为不含 token 的标准 HTTPS clone URL。
-
-    这个函数只负责 URL 规范化，不再承担"仓库地址映射到本地目录"的职责。
+    
+    这个函数只负责 URL 规范化，不再承担“仓库地址映射到本地目录”的职责。
     本地目录由 `repo_project_dir()` 固定推导为 `projects/<repo>`。
+    
+    Args:
+        repo_url: 用户输入的 Gitee 仓库地址。
+    
+    Returns:
+        标准 HTTPS clone URL 字符串。
     """
 
     return parse_gitee_repo_url(repo_url).clone_url
@@ -72,6 +78,12 @@ def get_gitee_token() -> str:
 
     优先读取 `GITEE_TOKEN`，没有时回退到 `SCM_GITEE_TOKEN`。
     这两个变量只在 API 请求或 Git askpass 环境中使用，不应拼接到日志或命令文本中。
+
+    Returns:
+        Gitee 访问令牌字符串。
+
+    Raises:
+        RuntimeError: 未配置任何 Gitee 令牌环境变量。
     """
 
     token = get_env("GITEE_TOKEN").strip() or get_env("SCM_GITEE_TOKEN").strip()
@@ -86,6 +98,12 @@ def mask_token(text: str) -> str:
     API 错误、Git 输出和异常信息可能包含访问令牌。
     所有写日志或返回给模型的外部错误文本都应经过该函数处理。
     同时覆盖 Gitee、GitHub 和 Codeup 三组令牌变量。
+
+    Args:
+        text: 待脱敏的原始文本。
+
+    Returns:
+        脱敏后的文本。
     """
 
     masked = text
@@ -105,10 +123,16 @@ def mask_token(text: str) -> str:
 
 def _existing_pr_from_error(text: str) -> dict | None:
     """从 Gitee 重复 PR 错误里提取已有 PR 地址。
-
+    
     Gitee 在相同 head/base 已有 PR 时会返回 400，而不是幂等成功。
-    对当前 Agent 来说，这种情况应该视为"PR 已存在，可复用"，否则同一分支重复执行时，
+    对当前 Agent 来说，这种情况应该视为“PR 已存在，可复用”，否则同一分支重复执行时，
     已经完成的提交协作流程会被误判为失败。
+    
+    Args:
+        text: Gitee API 返回的错误文本。
+    
+    Returns:
+        包含已有 PR 信息的字典，无法解析时返回 None。
     """
 
     # Gitee 返回体是自然语言错误，当前只能基于关键文本和 PR URL 做兼容解析。
@@ -180,6 +204,16 @@ def _gitee_get(path: str, *, params: dict | None = None) -> dict | list:
 
     Gitee v5 API 的只读接口同样使用 `access_token` 参数认证。这里集中处理
     token 注入、base url 和错误抛出，避免多个读取函数重复写 HTTP 细节。
+
+    Args:
+        path: API 路径，例如 ``/repos/{owner}/{repo}``。
+        params: 可选的查询参数字典。
+
+    Returns:
+        API 返回的 JSON 字典或列表。
+
+    Raises:
+        RuntimeError: API 返回 400 及以上状态码。
     """
 
     api_base = get_env("GITEE_API_BASE_URL", "https://gitee.com/api/v5").rstrip("/")
@@ -194,28 +228,64 @@ def _gitee_get(path: str, *, params: dict | None = None) -> dict | list:
 
 
 def get_pull_request(*, owner: str, repo: str, number: int) -> dict:
-    """读取 Gitee Pull Request 详情。"""
+    """读取 Gitee Pull Request 详情。
+    
+    Args:
+        owner: Gitee 仓库 owner。
+        repo: Gitee 仓库名称。
+        number: PR 编号。
+    
+    Returns:
+        PR 详情字典。
+    """
 
     data = _gitee_get(f"/repos/{owner}/{repo}/pulls/{number}")
     return data if isinstance(data, dict) else {"items": data}
 
 
 def list_pull_request_commits(*, owner: str, repo: str, number: int) -> list:
-    """读取 Gitee Pull Request 的提交列表。"""
+    """读取 Gitee Pull Request 的提交列表。
+    
+    Args:
+        owner: Gitee 仓库 owner。
+        repo: Gitee 仓库名称。
+        number: PR 编号。
+    
+    Returns:
+        提交记录列表。
+    """
 
     data = _gitee_get(f"/repos/{owner}/{repo}/pulls/{number}/commits")
     return data if isinstance(data, list) else [data]
 
 
 def list_pull_request_files(*, owner: str, repo: str, number: int) -> list:
-    """读取 Gitee Pull Request 的文件变更列表。"""
+    """读取 Gitee Pull Request 的文件变更列表。
+    
+    Args:
+        owner: Gitee 仓库 owner。
+        repo: Gitee 仓库名称。
+        number: PR 编号。
+    
+    Returns:
+        文件变更记录列表。
+    """
 
     data = _gitee_get(f"/repos/{owner}/{repo}/pulls/{number}/files")
     return data if isinstance(data, list) else [data]
 
 
 def list_pull_request_comments(*, owner: str, repo: str, number: int) -> list:
-    """读取 Gitee Pull Request 的普通评论列表。"""
+    """读取 Gitee Pull Request 的普通评论列表。
+    
+    Args:
+        owner: Gitee 仓库 owner。
+        repo: Gitee 仓库名称。
+        number: PR 编号。
+    
+    Returns:
+        评论列表。
+    """
 
     data = _gitee_get(f"/repos/{owner}/{repo}/pulls/{number}/comments")
     return data if isinstance(data, list) else [data]

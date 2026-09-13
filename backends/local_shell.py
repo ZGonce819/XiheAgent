@@ -48,7 +48,15 @@ logger = logging.getLogger("agent.run.shell")
 
 
 def _get_env(name: str, default: str = "") -> str:
-    """从环境变量读取值，不存在时返回默认值。"""
+    """从环境变量读取值，不存在时返回默认值。
+
+    Args:
+        name: 环境变量名称。
+        default: 环境变量不存在时的默认返回值，默认为空字符串。
+
+    Returns:
+        环境变量的值，或 ``default``。
+    """
     return os.environ.get(name, default)
 
 
@@ -106,6 +114,12 @@ def _mask_token(text: str) -> str:
     Agent 后端会把命令 stdout/stderr、异常信息、Git 输出写入日志或返回给模型。
     如果 Git 认证失败、远端 URL 展开或调试信息里包含 token，就可能造成泄露。
     因此所有准备进入日志和模型上下文的文本，都应先经过这个函数脱敏。
+
+    Args:
+        text: 待脱敏的原始文本。
+
+    Returns:
+        脱敏后的文本，所有已知 Token 已被替换为 ``***``。
     """
     masked = text
     for token_name in ("GITEE_TOKEN", "SCM_GITEE_TOKEN"):
@@ -151,6 +165,13 @@ class LocalShellBackend(BaseSandbox):
         *,
         timeout: int = 3600,
     ) -> None:
+        """初始化本地 backend 实例。
+
+        Args:
+            workspace: 工作区对象或根目录路径；为空时从 ``LOCAL_SHELL_WORKSPACE``
+                环境变量或默认值推导。
+            timeout: ``execute()`` 未显式指定超时时的默认值（秒），默认 3600。
+        """
         # 确定工作区根目录：传入的 workspace > 环境变量 > 默认值
         if isinstance(workspace, Workspace):
             self.workspace = workspace
@@ -189,18 +210,35 @@ class LocalShellBackend(BaseSandbox):
 
     @property
     def id(self) -> str:
+        """返回 backend 实例的唯一标识。
+
+        Returns:
+            格式为 ``local-windows:<root>`` 的标识字符串。
+        """
         return f"local-windows:{self.root}"
 
     def get_work_dir(self) -> str:
-        """DeepAgents 协议：返回默认工作目录的虚拟路径。"""
+        """DeepAgents 协议：返回默认工作目录的虚拟路径。
+
+        Returns:
+            固定返回 ``/projects`` 虚拟路径。
+        """
         return VIRTUAL_PROJECTS
 
     def get_workspace_root(self) -> str:
-        """DeepAgents 协议：返回虚拟根路径。"""
+        """DeepAgents 协议：返回虚拟根路径。
+
+        Returns:
+            固定返回 ``/``。
+        """
         return "/"
 
     def health(self) -> dict[str, Any]:
-        """健康检查：检测目录、Git、Python、Node 等是否可用。"""
+        """健康检查：检测目录、Git、Python、Node 等是否可用。
+
+        Returns:
+            包含健康状态、根目录和各项检查结果的字典。
+        """
         checks = {
             "root_exists": self.root.exists(),
             "root_writable": self._is_writable(self.root),
@@ -237,6 +275,13 @@ class LocalShellBackend(BaseSandbox):
         3. 最后通过 subprocess 执行，并把 stdout/stderr 合并成模型容易阅读的文本。
 
         注意：这个方法不向上抛异常，而是按 DeepAgents 协议返回结构化结果。
+
+        Args:
+            command: 要执行的命令字符串。
+            timeout: 超时时间（秒）；为 None 时使用实例默认超时。
+
+        Returns:
+            包含命令输出和退出码的结构化响应。
         """
         if self.command_guard_enabled:
             denied = self._deny_reason(command)
@@ -287,7 +332,14 @@ class LocalShellBackend(BaseSandbox):
             )
 
     def ls(self, path: str) -> LsResult:
-        """列出虚拟路径下的文件和目录。"""
+        """列出虚拟路径下的文件和目录。
+
+        Args:
+            path: 虚拟路径字符串。
+
+        Returns:
+            包含目录条目列表或错误信息的结果。
+        """
         try:
             resolved = self._resolve_virtual_path(path)
             if not resolved.exists():
@@ -316,6 +368,14 @@ class LocalShellBackend(BaseSandbox):
         默认先按 UTF-8 解码，失败后回退到 Latin-1。
         这个回退策略保证模型在遇到非 UTF-8 文件时仍能看到内容，
         避免因为一次编码异常中断整个 Agent 任务。
+
+        Args:
+            file_path: 虚拟路径。
+            offset: 起始行偏移量。
+            limit: 最大读取行数。
+
+        Returns:
+            包含文件内容和元数据的结果，或错误信息。
         """
         try:
             resolved = self._resolve_virtual_path(file_path)
@@ -346,7 +406,15 @@ class LocalShellBackend(BaseSandbox):
             return ReadResult(error=str(exc))
 
     def write(self, file_path: str, content: str) -> WriteResult:
-        """新建文件。如果文件已存在则报错（修改请用 edit）。"""
+        """新建文件。如果文件已存在则报错（修改请用 edit）。
+
+        Args:
+            file_path: 虚拟路径。
+            content: 文件内容。
+
+        Returns:
+            写入成功时包含路径，失败时包含错误信息。
+        """
         try:
             resolved = self._resolve_virtual_path(file_path)
             denied = self._write_deny_reason(resolved)
@@ -367,7 +435,17 @@ class LocalShellBackend(BaseSandbox):
         new_string: str,
         replace_all: bool = False,
     ) -> EditResult:
-        """替换文件中的文本 —— 相当于精细化的 find & replace。"""
+        """替换文件中的文本 —— 相当于精细化的 find & replace。
+
+        Args:
+            file_path: 虚拟路径。
+            old_string: 要被替换的原始文本。
+            new_string: 替换后的新文本。
+            replace_all: 是否替换所有匹配项，默认只替换第一次出现。
+
+        Returns:
+            替换结果，包含匹配次数或错误信息。
+        """
         try:
             resolved = self._resolve_virtual_path(file_path)
             if not resolved.exists():
@@ -392,7 +470,15 @@ class LocalShellBackend(BaseSandbox):
             return EditResult(error=str(exc))
 
     def glob(self, pattern: str, path: str | None = None) -> GlobResult:
-        """递归搜索匹配模式的文件路径（支持 fnmatch 通配符）。"""
+        """递归搜索匹配模式的文件路径（支持 fnmatch 通配符）。
+
+        Args:
+            pattern: fnmatch 风格的通配符模式。
+            path: 搜索起始的虚拟路径，默认从根目录开始。
+
+        Returns:
+            包含匹配文件列表的结果。
+        """
         try:
             base = self._resolve_virtual_path(path or "/")
             matches = []
@@ -418,7 +504,16 @@ class LocalShellBackend(BaseSandbox):
     def grep(
         self, pattern: str, path: str | None = None, glob: str | None = None
     ) -> GrepResult:
-        """在文件中搜索关键词，返回匹配的行号和内容。"""
+        """在文件中搜索关键词，返回匹配的行号和内容。
+
+        Args:
+            pattern: 要搜索的关键词。
+            path: 搜索起始的虚拟路径。
+            glob: 可选的文件名过滤模式。
+
+        Returns:
+            包含匹配结果（路径、行号、文本）的列表。
+        """
         try:
             base = self._resolve_virtual_path(path or VIRTUAL_PROJECTS)
             files = [base] if base.is_file() else [p for p in base.rglob("*") if p.is_file()]
@@ -445,7 +540,14 @@ class LocalShellBackend(BaseSandbox):
             return GrepResult(matches=None, error=str(exc))
 
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        """批量上传文件（二进制内容直接写入）。"""
+        """批量上传文件（二进制内容直接写入）。
+
+        Args:
+            files: ``(虚拟路径, 字节内容)`` 元组列表。
+
+        Returns:
+            每个文件的上传结果列表。
+        """
         responses: list[FileUploadResponse] = []
         for path, content in files:
             try:
@@ -466,7 +568,14 @@ class LocalShellBackend(BaseSandbox):
         return responses
 
     def download_files(self, paths: list[str]) -> list[FileDownloadResponse]:
-        """批量下载文件，返回二进制内容。"""
+        """批量下载文件，返回二进制内容。
+
+        Args:
+            paths: 虚拟路径列表。
+
+        Returns:
+            每个路径对应的下载结果，包含文件内容或错误信息。
+        """
         responses: list[FileDownloadResponse] = []
         for path in paths:
             try:
@@ -498,7 +607,18 @@ class LocalShellBackend(BaseSandbox):
     # 是为旧版 Gitee/Git 工具保留的入口，内部调上面原生方法。
 
     def read_file(self, path: str) -> str:
-        """读取文本文件（兼容旧工具）。"""
+        """读取文本文件（兼容旧工具）。
+
+        Args:
+            path: 文件路径，支持相对路径和虚拟路径。
+
+        Returns:
+            文件文本内容。
+
+        Raises:
+            FileNotFoundError: 文件不存在。
+            IsADirectoryError: 路径指向目录。
+        """
         result = self.read(self._normalize_compat_path(path), offset=0, limit=200_000)
         if result.error:
             if "目录" in result.error or "is_directory" in result.error:
@@ -507,7 +627,15 @@ class LocalShellBackend(BaseSandbox):
         return str(result.file_data["content"]) if result.file_data else ""
 
     def write_file(self, path: str, content: str) -> str:
-        """写入文本文件（兼容旧工具，可新建也可覆盖）。"""
+        """写入文本文件（兼容旧工具，可新建也可覆盖）。
+
+        Args:
+            path: 文件路径。
+            content: 要写入的文本内容。
+
+        Returns:
+            写入文件的真实绝对路径字符串。
+        """
         virtual_path = self._normalize_compat_path(path)
         resolved = self._resolve_virtual_path(virtual_path)
         denied = self._write_deny_reason(resolved)
@@ -520,7 +648,14 @@ class LocalShellBackend(BaseSandbox):
         return str(resolved)
 
     def list_files(self, path: str = ".") -> list[str]:
-        """列出目录下一层内容（兼容旧工具，返回相对路径）。"""
+        """列出目录下一层内容（兼容旧工具，返回相对路径）。
+
+        Args:
+            path: 目录路径，默认当前目录。
+
+        Returns:
+            相对路径字符串列表。
+        """
         virtual_path = self._normalize_compat_path(path)
         resolved = self._resolve_virtual_path(virtual_path)
         if not resolved.exists():
@@ -539,6 +674,14 @@ class LocalShellBackend(BaseSandbox):
         - ``execute()`` 面向 DeepAgents 原生协议，返回 ``ExecuteResponse``；
         - ``run()`` 面向项目里的历史工具，返回 ``CommandResult``；
         - ``run()`` 允许指定 cwd，并兼容旧工具常见的 ``cd xxx && git ...`` 写法。
+
+        Args:
+            command: 要执行的命令字符串。
+            cwd: 执行目录，支持虚拟路径。
+            timeout: 命令超时时间（秒）。
+
+        Returns:
+            包含命令、工作目录、退出码和标准输出的结构化结果。
         """
         cwd_path, command_text = self._prepare_run_command(command, cwd)
         logger.info(
@@ -655,7 +798,12 @@ class LocalShellBackend(BaseSandbox):
                 path.write_text(content, encoding="utf-8")
 
     def _ensure_shared_python_venv(self) -> None:
-        """创建共享 Python 虚拟环境（供所有项目复用）。"""
+        """创建共享 Python 虚拟环境（供所有项目复用）。
+
+        如果 ``shared_python_venv`` 路径下已存在可用的 Python 可执行文件，
+        则直接跳过创建。创建失败时把错误信息写入 ``self._venv_error``，
+        不会抛出异常，以免阻断后端初始化流程。
+        """
         if (self.shared_python_venv / "Scripts" / "python.exe").exists():
             return
         python = shutil.which("python")
@@ -715,7 +863,14 @@ class LocalShellBackend(BaseSandbox):
     # ── 路径处理 ─────────────────────────────────────────────
 
     def _normalize_compat_path(self, path: str | os.PathLike[str]) -> str:
-        """把旧工具传过来的路径统一成虚拟路径格式（/ 开头）。"""
+        """把旧工具传过来的路径统一成虚拟路径格式（/ 开头）。
+
+        Args:
+            path: 原始路径，可以是相对路径或绝对路径。
+
+        Returns:
+            归一化后的虚拟路径字符串。
+        """
         raw = str(path).strip().replace("\\", "/")
         if raw in {"", "."}:
             return "/"
@@ -728,6 +883,15 @@ class LocalShellBackend(BaseSandbox):
 
         无论调用方传入虚拟路径还是 Windows 绝对路径，最终都必须解析成真实路径，
         并确认它仍然位于 ``self.root`` 工作区内。
+
+        Args:
+            path: 虚拟路径或 Windows 绝对路径。
+
+        Returns:
+            解析后的真实 ``Path`` 对象。
+
+        Raises:
+            PermissionError: 路径逃逸出工作区。
         """
         raw = str(path).strip() or "/"
         if re.match(r"^[A-Za-z]:[\\/]", raw):
@@ -745,6 +909,15 @@ class LocalShellBackend(BaseSandbox):
         """把真实路径转回虚拟路径（/ 开头）。
 
         DeepAgents 和模型不应该直接感知宿主机真实磁盘路径。
+
+        Args:
+            path: 真实文件系统路径。
+
+        Returns:
+            对应的虚拟路径字符串。
+
+        Raises:
+            PermissionError: 路径逃逸出工作区。
         """
         resolved = path.resolve()
         if not self._is_under_root(resolved):
@@ -753,7 +926,14 @@ class LocalShellBackend(BaseSandbox):
         return "/" + rel if rel else "/"
 
     def _is_under_root(self, path: Path) -> bool:
-        """判断路径是否在工作区根目录之下。"""
+        """判断路径是否在工作区根目录之下。
+
+        Args:
+            path: 待检查的路径。
+
+        Returns:
+            路径在 root 下返回 True，否则返回 False。
+        """
         try:
             path.relative_to(self.root)
             return True
@@ -761,7 +941,15 @@ class LocalShellBackend(BaseSandbox):
             return False
 
     def _is_under(self, path: Path, parent: Path) -> bool:
-        """判断 path 是否在 parent 目录之下。"""
+        """判断 path 是否在 parent 目录之下。
+
+        Args:
+            path: 待检查的路径。
+            parent: 父目录。
+
+        Returns:
+            path 在 parent 下返回 True，否则返回 False。
+        """
         try:
             path.relative_to(parent)
             return True
@@ -776,6 +964,12 @@ class LocalShellBackend(BaseSandbox):
         课程项目只允许模型主要修改 ``/projects`` 下的业务仓库。
         ``skills/policies/runtimes/logs/.secrets`` 都属于后端运行基础设施或规则资产，
         不允许在普通任务中被模型写入。
+
+        Args:
+            path: 待检查的目标路径。
+
+        Returns:
+            禁止写入时返回原因字符串，允许写入时返回 None。
         """
         if self._is_under(path, self.policies_dir):
             return "write denied: policies are read-only"
@@ -790,7 +984,14 @@ class LocalShellBackend(BaseSandbox):
         return None
 
     def _is_writable(self, path: Path) -> bool:
-        """测写入权限：尝试写一个临时文件，成功就表示可写。"""
+        """测写入权限：尝试写一个临时文件，成功就表示可写。
+
+        Args:
+            path: 待测试的目录路径。
+
+        Returns:
+            可写返回 True，否则返回 False。
+        """
         try:
             probe = path / ".write_test"
             probe.write_text("ok", encoding="utf-8")
@@ -806,6 +1007,12 @@ class LocalShellBackend(BaseSandbox):
         - 拦截 ``..`` 路径穿越；
         - 拦截明显危险的系统命令；
         - 拦截指向工作区外的 Windows 绝对路径。
+
+        Args:
+            command: 待检查的原始命令字符串。
+
+        Returns:
+            命中拒绝规则时返回原因字符串，全部通过时返回 None。
         """
         lowered = command.lower()
         if _NESTED_PROJECTS_PATH_RE.search(command.replace("\\", "/")):
@@ -832,6 +1039,13 @@ class LocalShellBackend(BaseSandbox):
         LLM 常按 Linux/Unix 习惯生成命令，例如 ``python3``、``pwd``、``test -d``。
         本方法负责把这些常见表达转换成 Windows 可执行形式，
         同时把 ``/projects/...`` 这样的虚拟路径替换为带引号的真实路径。
+
+        Args:
+            command: 原始命令字符串。
+            cwd_path: 可选的命令执行目录。
+
+        Returns:
+            预处理后可在 Windows 上执行的命令字符串。
         """
         if cwd_path is not None and cwd_path.resolve() == self.projects_dir.resolve():
             command = self._normalize_command_for_projects_cwd(command)
@@ -851,6 +1065,12 @@ class LocalShellBackend(BaseSandbox):
         当命令默认在 ``E:\\ai_workspace\\projects`` 下执行时，
         如果命令中再写 ``projects/<repo>``，实际路径会变成重复的。
         这里把相对的 ``projects/<repo>`` 收敛成 ``<repo>``。
+
+        Args:
+            command: 原始命令字符串。
+
+        Returns:
+            修正重复路径后的命令字符串。
         """
         normalized = _RELATIVE_PROJECTS_PATH_RE.sub("", command)
         normalized = _RELATIVE_PROJECTS_DIR_RE.sub(".", normalized)
@@ -863,7 +1083,14 @@ class LocalShellBackend(BaseSandbox):
         return normalized
 
     def _prepare_git_command(self, command: str) -> str:
-        """给 git 命令注入 askpass 配置，避免弹窗或使用过期的凭据管理器。"""
+        """给 git 命令注入 askpass 配置，避免弹窗或使用过期的凭据管理器。
+
+        Args:
+            command: 原始命令字符串。
+
+        Returns:
+            注入 askpass 配置后的命令字符串；非 git 命令原样返回。
+        """
         stripped = command.lstrip()
         leading = command[: len(command) - len(stripped)]
         if stripped == "git":
@@ -876,7 +1103,15 @@ class LocalShellBackend(BaseSandbox):
         return f'{leading}git -c credential.helper= -c core.askPass="{askpass}" {rest}'.rstrip()
 
     def _prepare_run_command(self, command: str, cwd: str) -> tuple[Path, str]:
-        """准备 ``run()`` 的命令：解析 cwd、兼容 ``cd``、安全检查、规范化。"""
+        """准备 ``run()`` 的命令：解析 cwd、兼容 ``cd``、安全检查、规范化。
+
+        Args:
+            command: 原始命令字符串。
+            cwd: 执行目录，支持虚拟路径。
+
+        Returns:
+            ``(执行目录 Path, 预处理后的命令)`` 元组。
+        """
         cwd_path = self._resolve_virtual_path(self._normalize_compat_path(cwd))
         command = re.sub(r"\s+2>&1(?=\s*(?:&&|\|\||$))", "", command.strip())
         first_part = command.split("&&", 1)[0].strip()
@@ -896,7 +1131,14 @@ class LocalShellBackend(BaseSandbox):
         return cwd_path, self._prepare_command(safe_command, cwd_path=cwd_path)
 
     def _virtual_command_path_replacement(self, match: re.Match[str]) -> str:
-        """把命令中的 ``/projects/xxx`` 等虚拟路径替换为真实路径（带引号防空格）。"""
+        """把命令中的 ``/projects/xxx`` 等虚拟路径替换为真实路径（带引号防空格）。
+
+        Args:
+            match: 正则匹配对象，包含虚拟路径及其后缀。
+
+        Returns:
+            替换后的带引号真实路径字符串。
+        """
         roots = {
             "projects": self.projects_dir,
             "skills": self.skills_dir,
@@ -914,7 +1156,11 @@ class LocalShellBackend(BaseSandbox):
         return f'"{path}"'
 
     def _execution_env(self) -> dict[str, str]:
-        """构造子进程环境变量：注入 venv、Git 安全配置、Gitee 认证信息。"""
+        """构造子进程环境变量：注入 venv、Git 安全配置、Gitee 认证信息。
+
+        Returns:
+            包含完整环境变量配置的字典。
+        """
         env = os.environ.copy()
         scripts = self.shared_python_venv / "Scripts"
         if scripts.exists():
@@ -936,7 +1182,11 @@ _BACKEND: LocalShellBackend | None = None
 
 
 def get_local_shell_backend() -> LocalShellBackend:
-    """获取全局唯一的 LocalShellBackend 实例（单例）。"""
+    """获取全局唯一的 LocalShellBackend 实例（单例）。
+    
+    Returns:
+        全局 ``LocalShellBackend`` 实例。
+    """
     global _BACKEND
     if _BACKEND is None:
         _BACKEND = LocalShellBackend()
@@ -944,10 +1194,21 @@ def get_local_shell_backend() -> LocalShellBackend:
 
 
 def create_local_shell_backend(_sandbox_id: str | None = None) -> LocalShellBackend:
-    """DeepAgents 工厂函数：创建（或复用）backend 实例。"""
+    """DeepAgents 工厂函数：创建（或复用）backend 实例。
+    
+    Args:
+        _sandbox_id: 保留参数，未使用。
+    
+    Returns:
+        全局 ``LocalShellBackend`` 实例。
+    """
     return get_local_shell_backend()
 
 
 def validate_local_shell_startup_config() -> None:
-    """启动时验证：确保 backend 可以正常创建。"""
+    """启动时验证：确保 backend 可以正常创建。
+
+    通过尝试获取全局单例来触发初始化流程，
+    如果工作区目录结构或环境变量配置有误，此方法会在启动阶段提前暴露问题。
+    """
     get_local_shell_backend()

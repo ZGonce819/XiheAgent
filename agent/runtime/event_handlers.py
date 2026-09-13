@@ -22,6 +22,14 @@ def run_task_safely(*, repo_url: str, prompt: str, thread_id: str) -> None:
     - 工作区查询：直接列出本地项目，不调用模型。
     - git pull：只拉取远程代码，不修改、不提交。
     - 其它任务：走完整的 Agent 执行流程。
+
+    异常在这里统一捕获并记录日志，不向上冒泡，因为真正的失败状态
+    已经由 runtime 写入 Store。
+
+    Args:
+        repo_url: 仓库完整地址。
+        prompt: 用户输入的任務描述。
+        thread_id: 当前线程 ID。
     """
 
     try:

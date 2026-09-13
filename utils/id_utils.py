@@ -10,24 +10,40 @@ import uuid
 
 
 def new_thread_id() -> str:
-    """生成一个新的 thread ID。"""
+    """生成一个新的 thread ID。
+
+    Returns:
+        UUID4 格式的字符串。
+    """
 
     return str(uuid.uuid4())
 
 
 def new_run_id() -> str:
-    """生成一个新的 run ID。"""
+    """生成一个新的 run ID。
+
+    Returns:
+        UUID4 格式的字符串。
+    """
 
     return str(uuid.uuid4())
 
 
 def new_message_id() -> str:
-    """生成一个新的消息 ID。"""
+    """生成一个新的消息 ID。
+
+    Returns:
+        UUID4 格式的字符串。
+    """
 
     return str(uuid.uuid4())
 
 
 def new_finding_id() -> str:
-    """生成一个新的 review finding ID。"""
+    """生成一个新的 review finding ID。
+
+    Returns:
+        UUID4 格式的字符串。
+    """
 
     return str(uuid.uuid4())

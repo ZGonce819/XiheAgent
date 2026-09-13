@@ -20,6 +20,12 @@ def _to_iso(value: str | datetime | None) -> str | None:
     支持已经是字符串的情况（MySQL 返回 VARCHAR 时间戳），
     也支持 ``datetime`` 对象（测试或内存构造场景）。
     ``None`` 直接返回 ``None``，不做强转。
+
+    Args:
+        value: 待转换的时间值，可以是字符串、``datetime`` 或 ``None``。
+
+    Returns:
+        ISO 8601 格式字符串，输入为 ``None`` 时返回 ``None``。
     """
 
     if value is None:
@@ -35,6 +41,12 @@ def _parse_json(value: str | dict | None) -> dict[str, Any] | None:
     MySQL TEXT 列存储的 JSON 在查询时仍然是字符串，需要反序列化；
     如果传入的已经是字典（例如测试场景），直接返回。
     解析失败时返回 ``None``，不抛异常，避免单条脏数据阻断列表查询。
+
+    Args:
+        value: 待解析的 JSON 字符串、字典或 ``None``。
+
+    Returns:
+        解析后的字典，输入为 ``None`` 或解析失败时返回 ``None``。
     """
 
     if value is None:
@@ -53,6 +65,12 @@ def _parse_bool(value: Any) -> bool:
 
     MySQL 没有原生 BOOLEAN 类型，通常用 ``TINYINT(1)`` 或 ``VARCHAR``
     存储 ``'true'`` / ``'false'``。这里统一处理常见表示。
+
+    Args:
+        value: 待转换的值，可以是 ``bool``、``int``、``str`` 等。
+
+    Returns:
+        转换后的布尔值。
     """
 
     if isinstance(value, bool):

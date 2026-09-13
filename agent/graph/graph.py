@@ -14,6 +14,17 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from agent.graph.persistence import (
+    make_checkpointer,
+    make_langgraph_store,
+    _verify_postgres_connection,
+    _verify_redis_connection,
+)
+from config.app_config import get_settings
+from database.postgres import build_pg_dsn
+from database.redis import build_redis_url
+from store import LocalMySQLStore
+
 logger = logging.getLogger(__name__)
 
 # 模块级缓存，首次调用时初始化。
@@ -28,13 +39,14 @@ def get_checkpointer() -> Any:
     Returns:
         已缓存的 ``RedisSaver`` 实例。
     """
-
     global _checkpointer
     if _checkpointer is None:
-        from agent.graph.persistence import make_checkpointer
-
         _checkpointer = make_checkpointer()
-        logger.info("Redis checkpointer 已初始化")
+        settings = get_settings()
+        if _verify_redis_connection(build_redis_url(settings)):
+            logger.info("Redis checkpointer 已初始化")
+        else:
+            logger.warning("Redis checkpointer 对象已创建，但 Redis 不可用")
     return _checkpointer
 
 
@@ -44,13 +56,14 @@ def get_langgraph_store() -> Any:
     Returns:
         已缓存的 ``PostgresStore`` 实例。
     """
-
     global _langgraph_store
     if _langgraph_store is None:
-        from agent.graph.persistence import make_langgraph_store
-
         _langgraph_store = make_langgraph_store()
-        logger.info("PostgreSQL LangGraph Store 已初始化")
+        settings = get_settings()
+        if _verify_postgres_connection(build_pg_dsn(settings)):
+            logger.info("PostgreSQL LangGraph Store 已初始化")
+        else:
+            logger.warning("PostgreSQL LangGraph Store 对象已创建，但 PostgreSQL 不可用")
     return _langgraph_store
 
 
@@ -63,11 +76,8 @@ def get_store() -> Any:
     Returns:
         已缓存的 ``LocalMySQLStore`` 实例。
     """
-
     global _store
     if _store is None:
-        from store import LocalMySQLStore
-
         _store = LocalMySQLStore()
         logger.info("MySQL 业务 Store 已初始化")
     return _store
@@ -85,7 +95,5 @@ def build_agent(config: dict[str, Any]) -> Any:
     Returns:
         配置好的 DeepAgent 实例。
     """
-
     from server import get_agent
-
     return get_agent(config)

@@ -17,36 +17,23 @@ import logging
 import uuid
 from collections.abc import Callable
 from typing import Any
-from urllib.parse import urlparse
 
 from agent.graph.graph import get_store
 from agent.runtime._helpers import (
     build_agent_for_runtime,
     build_plan_user_content,
-    extract_best_plan_text,
     plan_source_prompt,
     revision_source_prompt,
 )
 from agent.runtime.events import record_event
 from agent.runtime.streaming_runtime import run_agent_with_event_stream
-from utils.codeup_utils import parse_codeup_repo_url
-from utils.gitee_utils import mask_token, parse_gitee_repo_url
-from utils.github_utils import parse_github_repo_url
+from utils import extract_best_plan_text
+from utils.gitee_utils import mask_token
+from utils.platform_utils import parse_repo_url
 
 logger = logging.getLogger(__name__)
 
 RuntimeEventSink = Callable[[str, dict[str, Any]], None]
-
-
-def _parse_repo_url(repo_url: str):
-    """根据 URL 域名自动识别 SCM 平台并解析仓库信息。"""
-    parsed = urlparse(repo_url.strip())
-    hostname = (parsed.hostname or "").lower()
-    if hostname in {"codeup.aliyun.com", "www.codeup.aliyun.com"}:
-        return parse_codeup_repo_url(repo_url)
-    if hostname in {"github.com", "www.github.com"}:
-        return parse_github_repo_url(repo_url)
-    return parse_gitee_repo_url(repo_url)
 
 
 def run_plan_response_task(
@@ -67,6 +54,20 @@ def run_plan_response_task(
 
     这个函数始终以 planning task_kind 运行。即使用户原始需求看起来像 coding，
     只要还没有确认方案，就只能生成方案，不能改文件、不能提交、不能创建 PR。
+
+    Args:
+        repo_url: 仓库完整地址。
+        prompt: 用户原始需求文本。
+        thread_id: 线程 ID；为 ``None`` 时自动创建。
+        previous_plan_message: 上一版方案消息字典；为 ``None`` 时表示首次生成。
+        revision_prompt: 用户对上一版方案的修改要求；为 ``None`` 时表示全新方案。
+        event_sink: 可选的 SSE 事件推送回调。
+
+    Returns:
+        包含 thread_id、run_id、status 的结果字典。
+
+    Raises:
+        RuntimeError: 技术方案生成失败时。
     """
 
     thread_id = thread_id or str(uuid.uuid4())
@@ -75,7 +76,7 @@ def run_plan_response_task(
     logger.info("开始生成技术方案：thread_id=%s repo_url=%s", thread_id, repo_url)
     record_event(thread_id, "created", "任务已创建", status="completed")
     record_event(thread_id, "repo", "解析仓库", status="in_progress")
-    repo = _parse_repo_url(repo_url)
+    repo = parse_repo_url(repo_url)
     record_event(thread_id, "repo", "解析仓库", status="completed")
 
     plan_source = prompt

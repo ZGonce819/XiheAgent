@@ -10,6 +10,7 @@ import logging
 from typing import Any
 
 from langchain_core.tools import tool
+from pydantic import BaseModel, Field
 
 from agent.graph.graph import get_store
 from agent.runtime.events import record_event
@@ -21,12 +22,21 @@ from utils.codeup_utils import (
     list_merge_request_files,
     post_mr_comment,
 )
-from tools.runtime_context import get_runtime_thread_id, runtime_is_read_only_task
+from utils.context_utils import get_runtime_thread_id, runtime_is_read_only_task
 
 logger = logging.getLogger("agent.run.codeup")
 
 
-@tool
+class OpenCodeupMergeRequestSchema(BaseModel):
+    owner: str = Field(description="Codeup 仓库 owner（命名空间）。")
+    repo: str = Field(description="Codeup 仓库名称。")
+    head: str = Field(description="已推送的源分支。")
+    base: str = Field(default="master", description="目标分支，默认 master。")
+    title: str = Field(default="Xihe generated changes", description="MR 标题。")
+    body: str = Field(default="由 Xihe 自动生成。", description="MR 描述。")
+
+
+@tool(args_schema=OpenCodeupMergeRequestSchema)
 def open_codeup_merge_request(
     owner: str,
     repo: str,
@@ -95,7 +105,14 @@ def open_codeup_merge_request(
     return {"ok": True, "pr_url": mr_url, "raw": mr}
 
 
-@tool
+class PublishCodeupMrCommentSchema(BaseModel):
+    owner: str = Field(description="Codeup 仓库 owner（命名空间）。")
+    repo: str = Field(description="Codeup 仓库名称。")
+    number: int = Field(description="MR 局部编号（localId）。")
+    body: str = Field(description="评论正文。")
+
+
+@tool(args_schema=PublishCodeupMrCommentSchema)
 def publish_codeup_mr_comment(owner: str, repo: str, number: int, body: str) -> dict[str, Any]:
     """向指定 Codeup Merge Request 发布全局评论。
 
@@ -119,12 +136,26 @@ def publish_codeup_mr_comment(owner: str, repo: str, number: int, body: str) -> 
     return post_mr_comment(owner=owner, repo=repo, local_id=number, body=body)
 
 
-@tool
+class GetCodeupMergeRequestContextSchema(BaseModel):
+    owner: str = Field(description="Codeup 仓库 owner（命名空间）。")
+    repo: str = Field(description="Codeup 仓库名称。")
+    number: int = Field(description="MR 局部编号（localId）。")
+
+
+@tool(args_schema=GetCodeupMergeRequestContextSchema)
 def get_codeup_merge_request_context(owner: str, repo: str, number: int) -> dict[str, Any]:
     """读取 Codeup Merge Request 审查上下文。
 
     Reviewer 子 Agent 使用该工具获取 MR 标题、描述、变更文件、提交列表和已有评论。
     该工具只读，不会修改 Codeup 仓库。
+
+    Args:
+        owner: Codeup 仓库 owner（命名空间）。
+        repo: Codeup 仓库名称。
+        number: MR 局部编号（localId）。
+
+    Returns:
+        包含 MR 信息、提交列表、变更文件、评论和摘要统计的字典。
     """
 
     logger.info("读取 Codeup MR 上下文：owner=%s repo=%s number=%s", owner, repo, number)

@@ -34,6 +34,9 @@ def get_redis_stream_connection() -> Any:
 
     使用与 Checkpoint 相同的 Redis 实例，但切换到 SSE 专用 DB。
     连接在模块级别缓存，避免每次调用都新建连接。
+
+    Returns:
+        Redis Stream 连接实例（``redis.Redis``）。
     """
 
     global _redis_stream_conn

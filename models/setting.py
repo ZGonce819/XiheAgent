@@ -31,6 +31,12 @@ class Setting:
         """从数据库查询结果构造实体。
 
         ``value`` 列在数据库中为 JSON 字符串，读取时反序列化。
+
+        Args:
+            row: 数据库查询返回的字典行，须包含 ``key`` 和 ``value`` 字段。
+
+        Returns:
+            构造完成的 :class:`Setting` 实例。
         """
 
         raw_value = row["value"]
@@ -49,6 +55,9 @@ class Setting:
         """将实体转换为可用于数据库写入的字典。
 
         ``value`` 序列化为 JSON 字符串后写入 TEXT 列。
+
+        Returns:
+            与数据库列名对应的字典，可直接用于 INSERT / UPDATE 语句。
         """
 
         return {

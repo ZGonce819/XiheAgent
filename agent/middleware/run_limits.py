@@ -15,27 +15,15 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from config.constants import DEFAULT_MAX_SECONDS, DEFAULT_MAX_TOOL_CALLS, TASK_KIND_DEFAULT_LIMITS
 from config.env_config import get_env
-
-
-TASK_KIND_DEFAULT_LIMITS: dict[str, tuple[int, int]] = {
-    "qa": (60, 600),
-    "inspect": (30, 300),
-    "sync": (40, 300),
-    "analysis": (120, 900),
-    "planning": (120, 900),
-    "review": (180, 1200),
-    "coding": (300, 1800),
-}
-
-DEFAULT_MAX_TOOL_CALLS = 240
-DEFAULT_MAX_SECONDS = 1800
 
 
 class AgentRunLimitExceeded(RuntimeError):
     """Agent 本轮运行超过保护上限。
 
     runtime 捕获该异常后应停止继续消费事件流，并向用户返回明确的超限原因。
+    异常消息包含超限类型（时间或工具调用次数）和当前任务类型。
     """
 
 
@@ -60,6 +48,12 @@ class AgentRunLimits:
         1. ``AGENT_<TASK_KIND>_MAX_TOOL_CALLS`` / ``AGENT_<TASK_KIND>_MAX_SECONDS``
         2. ``AGENT_MAX_TOOL_CALLS`` / ``AGENT_MAX_SECONDS``
         3. 代码内置的任务类型默认值
+
+        Args:
+            task_kind: 任务类型，如 ``"coding"``、``"review"``；为 ``None`` 时使用默认值。
+
+        Returns:
+            按优先级解析后的运行限制实例。
         """
         normalized_kind = (task_kind or "default").lower()
         default_tool_calls, default_seconds = TASK_KIND_DEFAULT_LIMITS.get(
@@ -92,12 +86,23 @@ class AgentRunLimitTracker:
     """
 
     def __init__(self, limits: AgentRunLimits | None = None, task_kind: str | None = None):
+        """初始化运行限制跟踪器。
+
+        Args:
+            limits: 预构建的运行限制；为 ``None`` 时自动按 ``task_kind`` 从环境变量读取。
+            task_kind: 任务类型，仅在 ``limits`` 为 ``None`` 时生效。
+        """
         self.limits = limits or AgentRunLimits.from_env(task_kind)
         self.started_at = time.monotonic()
         self.tool_calls = 0
 
     def observe_event(self, event: Any) -> None:
         """读取一个 raw event 并检查是否超过限制。
+
+        工具调用事件会累计到 ``tool_calls``，每次检查时间和工具调用次数是否超限。
+
+        Args:
+            event: LangGraph 事件流中的原始事件字典。
 
         Raises:
             AgentRunLimitExceeded: 运行时长或工具调用次数超过当前阈值。
@@ -115,7 +120,14 @@ class AgentRunLimitTracker:
                 self._check_tool_calls()
 
     def _first_payload(self, event: dict[str, Any]) -> Any:
-        """从 LangGraph 事件中提取第一个 payload。"""
+        """从 LangGraph 事件的 ``params.data`` 中提取第一个 payload。
+
+        Args:
+            event: LangGraph 原始事件字典。
+
+        Returns:
+            第一个 payload 对象；不存在时返回 ``None``。
+        """
         params = event.get("params")
         if not isinstance(params, dict):
             return None
@@ -127,7 +139,11 @@ class AgentRunLimitTracker:
         return data
 
     def _check_time(self) -> None:
-        """检查当前运行耗时是否超过阈值。"""
+        """检查当前运行耗时是否超过阈值。
+
+        Raises:
+            AgentRunLimitExceeded: 运行时长超过 ``max_seconds``。
+        """
         elapsed = time.monotonic() - self.started_at
         if elapsed > self.limits.max_seconds:
             raise AgentRunLimitExceeded(
@@ -136,7 +152,11 @@ class AgentRunLimitTracker:
             )
 
     def _check_tool_calls(self) -> None:
-        """检查工具调用次数是否超过阈值。"""
+        """检查工具调用次数是否超过阈值。
+
+        Raises:
+            AgentRunLimitExceeded: 工具调用次数超过 ``max_tool_calls``。
+        """
         if self.tool_calls > self.limits.max_tool_calls:
             raise AgentRunLimitExceeded(
                 f"本轮工具调用已超过 {self.limits.max_tool_calls} 次保护上限"

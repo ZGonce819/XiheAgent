@@ -57,7 +57,14 @@ def parse_github_repo_url(repo_url: str) -> GitHubRepo:
 
 
 def normalize_github_repo_url(repo_url: str) -> str:
-    """把 GitHub 仓库地址规范化为不含 token 的标准 HTTPS clone URL。"""
+    """把 GitHub 仓库地址规范化为不含 token 的标准 HTTPS clone URL。
+
+    Args:
+        repo_url: 用户输入的 GitHub 仓库地址。
+
+    Returns:
+        标准 HTTPS clone URL 字符串。
+    """
 
     return parse_github_repo_url(repo_url).clone_url
 
@@ -67,6 +74,12 @@ def get_github_token() -> str:
 
     优先读取 `GITHUB_TOKEN`，没有时回退到 `SCM_GITHUB_TOKEN`。
     这两个变量只在 API 请求或 Git askpass 环境中使用，不应拼接到日志或命令文本中。
+
+    Returns:
+        GitHub 访问令牌字符串。
+
+    Raises:
+        RuntimeError: 未配置任何 GitHub 令牌环境变量。
     """
 
     token = get_env("GITHUB_TOKEN").strip() or get_env("SCM_GITHUB_TOKEN").strip()
@@ -76,7 +89,11 @@ def get_github_token() -> str:
 
 
 def _github_api_base() -> str:
-    """读取 GitHub API 基础地址。"""
+    """读取 GitHub API 基础地址。
+    
+    Returns:
+        API 基础 URL 字符串。
+    """
 
     return get_env("GITHUB_API_BASE_URL", "https://api.github.com").rstrip("/")
 
@@ -85,6 +102,9 @@ def _github_headers() -> dict[str, str]:
     """构造 GitHub API 请求头。
 
     GitHub REST API v3 使用 Bearer token 认证。
+
+    Returns:
+        包含认证和 Accept 头的请求头字典。
     """
 
     return {
@@ -98,6 +118,15 @@ def _find_existing_pr(*, owner: str, repo: str, head: str, base: str) -> dict | 
 
     GitHub 在重复 PR 时返回 422 但不像 Gitee 那样在错误文本中包含 PR URL，
     因此需要主动搜索已有 PR 来实现幂等语义。
+
+    Args:
+        owner: GitHub 仓库 owner。
+        repo: GitHub 仓库名称。
+        head: 源分支名称。
+        base: 目标分支名称。
+
+    Returns:
+        包含已有 PR 信息的字典，未找到时返回 None。
     """
 
     api_base = _github_api_base()
@@ -170,6 +199,16 @@ def _github_get(path: str, *, params: dict | None = None) -> dict | list:
 
     GitHub REST API v3 使用 Bearer token 认证头。这里集中处理
     token 注入、base url 和错误抛出，避免多个读取函数重复写 HTTP 细节。
+
+    Args:
+        path: API 路径。
+        params: 可选的查询参数字典。
+
+    Returns:
+        API 返回的 JSON 字典或列表。
+
+    Raises:
+        RuntimeError: API 返回 400 及以上状态码。
     """
 
     api_base = _github_api_base()
@@ -182,21 +221,48 @@ def _github_get(path: str, *, params: dict | None = None) -> dict | list:
 
 
 def get_pull_request(*, owner: str, repo: str, number: int) -> dict:
-    """读取 GitHub Pull Request 详情。"""
+    """读取 GitHub Pull Request 详情。
+    
+    Args:
+        owner: GitHub 仓库 owner。
+        repo: GitHub 仓库名称。
+        number: PR 编号。
+    
+    Returns:
+        PR 详情字典。
+    """
 
     data = _github_get(f"/repos/{owner}/{repo}/pulls/{number}")
     return data if isinstance(data, dict) else {"items": data}
 
 
 def list_pull_request_commits(*, owner: str, repo: str, number: int) -> list:
-    """读取 GitHub Pull Request 的提交列表。"""
+    """读取 GitHub Pull Request 的提交列表。
+    
+    Args:
+        owner: GitHub 仓库 owner。
+        repo: GitHub 仓库名称。
+        number: PR 编号。
+    
+    Returns:
+        提交记录列表。
+    """
 
     data = _github_get(f"/repos/{owner}/{repo}/pulls/{number}/commits")
     return data if isinstance(data, list) else [data]
 
 
 def list_pull_request_files(*, owner: str, repo: str, number: int) -> list:
-    """读取 GitHub Pull Request 的文件变更列表。"""
+    """读取 GitHub Pull Request 的文件变更列表。
+    
+    Args:
+        owner: GitHub 仓库 owner。
+        repo: GitHub 仓库名称。
+        number: PR 编号。
+    
+    Returns:
+        文件变更记录列表。
+    """
 
     data = _github_get(f"/repos/{owner}/{repo}/pulls/{number}/files")
     return data if isinstance(data, list) else [data]
@@ -206,6 +272,14 @@ def list_pull_request_comments(*, owner: str, repo: str, number: int) -> list:
     """读取 GitHub Pull Request 的普通评论列表。
 
     GitHub 的 PR 评论通过 issues 端点获取（/issues/{number}/comments）。
+
+    Args:
+        owner: GitHub 仓库 owner。
+        repo: GitHub 仓库名称。
+        number: PR 编号。
+
+    Returns:
+        评论列表。
     """
 
     data = _github_get(f"/repos/{owner}/{repo}/issues/{number}/comments")

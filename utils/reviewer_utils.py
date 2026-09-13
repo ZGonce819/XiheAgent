@@ -39,12 +39,23 @@ class DiffSummary:
 
     @property
     def changed_file_paths(self) -> tuple[str, ...]:
-        """返回所有变更文件的路径元组。"""
+        """返回所有变更文件的路径元组。
+
+        Returns:
+            按排序顺序排列的变更文件路径元组。
+        """
 
         return tuple(file.path for file in self.files)
 
     def changed_lines_for(self, file_path: str) -> set[int]:
-        """返回指定文件在 diff 中的变更行号集合。"""
+        """返回指定文件在 diff 中的变更行号集合。
+
+        Args:
+            file_path: 待查询的文件路径。
+
+        Returns:
+            新增或修改行号集合；文件不在 diff 中时返回空集合。
+        """
 
         normalized = _normalize_diff_path(file_path)
         for file in self.files:
@@ -54,7 +65,18 @@ class DiffSummary:
 
 
 def _validate_git_ref(value: str, *, name: str) -> str:
-    """校验 git ref，避免模型把 shell 片段塞进 diff 命令。"""
+    """校验 git ref，避免模型把 shell 片段塞进 diff 命令。
+
+    Args:
+        value: 待校验的 git ref 字符串。
+        name: 参数名称，用于错误提示。
+
+    Returns:
+        去除空白后的合法 git ref。
+
+    Raises:
+        ValueError: ref 为空或包含不安全字符时抛出。
+    """
 
     ref = value.strip()
     if not ref or not _SAFE_GIT_REF_RE.fullmatch(ref):
@@ -63,7 +85,14 @@ def _validate_git_ref(value: str, *, name: str) -> str:
 
 
 def _normalize_diff_path(path: str) -> str:
-    """统一 diff 文件路径，去掉 ``a/``、``b/`` 前缀并转换为正斜杠。"""
+    """统一 diff 文件路径，去掉 ``a/``、``b/`` 前缀并转换为正斜杠。
+
+    Args:
+        path: 原始 diff 文件路径。
+
+    Returns:
+        规范化后的正斜杠路径。
+    """
 
     normalized = path.strip().replace("\\", "/")
     if normalized.startswith("a/") or normalized.startswith("b/"):
@@ -132,6 +161,17 @@ def get_local_diff(backend: LocalShellBackend, repo_dir: str, base: str = "HEAD"
 
     新 reviewer 工具优先调用 ``get_local_diff_summary``，因为后者会同时返回
     变更文件和变更行号。
+
+    Args:
+        backend: 当前工作区的 LocalShellBackend。
+        repo_dir: 仓库虚拟路径，例如 ``projects/ai_coding``。
+        base: 对比基准分支、commit 或 ``HEAD``。
+
+    Returns:
+        unified diff 格式的原始文本。
+
+    Raises:
+        RuntimeError: git diff 命令执行失败时抛出。
     """
 
     base = _validate_git_ref(base, name="base")
@@ -155,6 +195,13 @@ def get_local_diff_summary(
         repo_dir: 仓库虚拟路径，例如 ``projects/ai_coding``。
         base: 对比基准分支、commit 或 ``HEAD``。
         head: 可选目标分支。传入时使用 ``base...head``，不传时审查工作区相对 base 的 diff。
+
+    Returns:
+        结构化的 ``DiffSummary`` 对象。
+
+    Raises:
+        ValueError: git ref 不合法时抛出。
+        RuntimeError: git diff 命令执行失败时抛出。
     """
 
     base_ref = _validate_git_ref(base, name="base")

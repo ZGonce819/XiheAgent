@@ -8,20 +8,29 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from langchain_core.tools import tool
+from pydantic import BaseModel, Field
 
 from agent.graph.graph import get_store
 from backends import create_backend
-from tools.runtime_context import get_runtime_thread_id
+from utils.context_utils import get_runtime_thread_id
 from utils.reviewer_utils import get_local_diff_summary, parse_unified_diff, validate_finding_location
 
 DEFAULT_RULES_PATH = Path(__file__).resolve().parents[1] / "reviewer_rules" / "default_review_rules.md"
 
 
 def _compact_diff_for_model(raw_diff: str, *, limit: int = 20000) -> str:
-    """限制传给模型的 diff 文本长度，避免 reviewer 首轮上下文过大。"""
+    """限制传给模型的 diff 文本长度，避免 reviewer 首轮上下文过大。
+
+    Args:
+        raw_diff: 原始 unified diff 文本。
+        limit: 最大字符数，超出部分截断并追加提示。
+
+    Returns:
+        截断后的 diff 文本。
+    """
 
     text = raw_diff.strip()
     if len(text) <= limit:
@@ -55,7 +64,13 @@ def load_default_review_rules() -> dict[str, Any]:
     }
 
 
-@tool
+class GetReviewDiffSummarySchema(BaseModel):
+    repo_dir: str = Field(description="仓库虚拟路径，例如 `projects/ai_coding`。")
+    base: str = Field(default="master", description="基准分支或 commit，默认 `master`。")
+    head: Optional[str] = Field(default=None, description="目标分支。传入时比较 `base...head`；不传时比较工作区相对 base 的 diff。")
+
+
+@tool(args_schema=GetReviewDiffSummarySchema)
 def get_review_diff_summary(repo_dir: str, base: str = "master", head: str | None = None) -> dict[str, Any]:
     """读取本地 git diff，并返回变更文件、变更行号和截断后的 diff 文本。
 
@@ -63,6 +78,9 @@ def get_review_diff_summary(repo_dir: str, base: str = "master", head: str | Non
         repo_dir: 仓库虚拟路径，例如 `projects/ai_coding`。
         base: 基准分支或 commit，默认 `master`。
         head: 可选目标分支。传入时比较 `base...head`；不传时比较工作区相对 base 的 diff。
+
+    Returns:
+        包含基准分支、目标分支、变更文件列表和 diff 预览的字典。
     """
 
     backend = create_backend()
@@ -84,7 +102,13 @@ def get_review_diff_summary(repo_dir: str, base: str = "master", head: str | Non
     }
 
 
-@tool
+class ValidateReviewFindingLocationSchema(BaseModel):
+    raw_diff: str = Field(description="unified diff 文本。通常来自 `get_review_diff_summary` 的完整 diff。")
+    file: str = Field(description="finding 指向的仓库内相对路径。")
+    line: Optional[int] = Field(default=None, description="finding 指向的新文件行号。无法定位时可以为空。")
+
+
+@tool(args_schema=ValidateReviewFindingLocationSchema)
 def validate_review_finding_location(raw_diff: str, file: str, line: int | None = None) -> dict[str, Any]:
     """校验审查发现是否落在真实 diff 文件和变更行上。
 
@@ -93,6 +117,9 @@ def validate_review_finding_location(raw_diff: str, file: str, line: int | None 
             如果只有 preview，超长 diff 场景下建议读取具体文件后把 finding 标为文件级。
         file: finding 指向的仓库内相对路径。
         line: finding 指向的新文件行号。无法定位时可以为空。
+
+    Returns:
+        包含 ``ok`` 校验结果和 ``message`` 说明的字典。
     """
 
     summary = parse_unified_diff(raw_diff)
@@ -100,7 +127,15 @@ def validate_review_finding_location(raw_diff: str, file: str, line: int | None 
     return {"ok": ok, "message": message}
 
 
-@tool
+class AddReviewFindingSchema(BaseModel):
+    file: str = Field(description="问题所在文件路径，通常是仓库内相对路径。")
+    line: Optional[int] = Field(default=None, description="问题所在行号；无法定位到具体行时可以为空。")
+    severity: str = Field(description="严重级别，例如 blocker、major、minor、info。")
+    title: str = Field(description="简短标题，用于列表展示。")
+    description: str = Field(description="详细说明，包含风险、触发条件和建议修复方式。")
+
+
+@tool(args_schema=AddReviewFindingSchema)
 def add_review_finding(
     file: str,
     line: int | None,
@@ -148,6 +183,9 @@ def list_review_findings() -> list[dict[str, Any]]:
     """列出当前 thread 的代码审查发现。
 
     该工具用于让模型在最终回复前重新读取已记录的问题，避免遗漏前面阶段保存的发现项。
+
+    Returns:
+        当前 thread 的审查发现列表；缺少 thread_id 时返回包含 error 的列表。
     """
 
     thread_id = get_runtime_thread_id()

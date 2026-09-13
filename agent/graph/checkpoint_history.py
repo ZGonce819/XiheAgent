@@ -24,40 +24,10 @@ import logging
 import re
 from typing import Any
 
+from config.constants import MIN_MESSAGE_LENGTH
+from utils.message_utils import message_content_to_text
+
 logger = logging.getLogger(__name__)
-
-# 低于此长度的过程消息会被过滤掉，避免前端展示无意义的中间步骤。
-_MIN_MESSAGE_LENGTH = 4
-
-
-def _content_to_text(content: Any) -> str:
-    """把 LangChain message content 转换成纯文本。
-
-    content 可能是字符串或 content block 列表，不同模型和不同流式阶段
-    的结构不同。这里统一处理，提取所有可读文本。
-
-    Args:
-        content: message.content 字段，可能是 str、list 或 None。
-
-    Returns:
-        提取的纯文本，空白已压缩。
-    """
-
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content.strip()
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict):
-                text = item.get("text") or item.get("content") or ""
-                if isinstance(text, str) and text.strip():
-                    parts.append(text)
-        return "\n".join(parts).strip()
-    return str(content).strip()
 
 
 def _extract_user_prompt(messages: list[Any]) -> str:
@@ -72,13 +42,12 @@ def _extract_user_prompt(messages: list[Any]) -> str:
     Returns:
         用户提问文本，找不到时返回空字符串。
     """
-
     for message in messages:
         msg_type = str(getattr(message, "type", "") or type(message).__name__).lower()
         if msg_type not in {"human", "user"}:
             continue
-        text = _content_to_text(getattr(message, "content", ""))
-        if len(text) >= _MIN_MESSAGE_LENGTH:
+        text = message_content_to_text(getattr(message, "content", ""))
+        if len(text) >= MIN_MESSAGE_LENGTH:
             return text
     return ""
 
@@ -95,9 +64,8 @@ def _has_visible_markdown_value(message: Any) -> bool:
     Returns:
         消息内容足够丰富时返回 True。
     """
-
-    text = _content_to_text(getattr(message, "content", ""))
-    if len(text) < _MIN_MESSAGE_LENGTH:
+    text = message_content_to_text(getattr(message, "content", ""))
+    if len(text) < MIN_MESSAGE_LENGTH:
         return False
     # 包含 Markdown 结构特征的消息优先展示。
     markdown_markers = ["#", "```", "- ", "* ", "|", "```"]
@@ -117,7 +85,6 @@ def stable_history_message_id(content: str, index: int) -> str:
     Returns:
         格式为 ``hist-{hash[:12]}`` 的稳定 ID。
     """
-
     digest = hashlib.sha256(f"{index}:{content}".encode()).hexdigest()[:12]
     return f"hist-{digest}"
 
@@ -134,9 +101,8 @@ def _is_short_process_message(text: str) -> bool:
     Returns:
         是过程消息时返回 True。
     """
-
     stripped = text.strip()
-    if len(stripped) < _MIN_MESSAGE_LENGTH:
+    if len(stripped) < MIN_MESSAGE_LENGTH:
         return True
     # 常见的无意义过程消息模式。
     process_patterns = [
@@ -163,7 +129,6 @@ def visible_checkpoint_messages(checkpoint: dict[str, Any] | None) -> list[dict[
     Returns:
         消息字典列表，每项包含 ``id``、``role``、``content`` 字段。
     """
-
     if not checkpoint:
         return []
 
@@ -185,7 +150,7 @@ def visible_checkpoint_messages(checkpoint: dict[str, Any] | None) -> list[dict[
         if msg_type in {"tool", "system"}:
             continue
 
-        text = _content_to_text(getattr(message, "content", ""))
+        text = message_content_to_text(getattr(message, "content", ""))
         if not text:
             continue
 
