@@ -95,6 +95,7 @@ export const useAgentStore = defineStore('agent', {
     currentThread: null,
     messages: [],
     selectedRepo: DEFAULT_REPO,
+    selectedPlatform: 'github',
     selectedModel: '',
     selectedEffort: 'default',
     streaming: false,

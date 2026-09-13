@@ -90,6 +90,7 @@ onMounted(() => {
 
       <ChatComposer
         v-model:repo="agent.selectedRepo"
+        v-model:platform="agent.selectedPlatform"
         v-model:model="agent.selectedModel"
         :disabled="agent.streaming"
         :effort="agent.selectedEffort"
