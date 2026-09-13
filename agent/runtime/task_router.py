@@ -261,6 +261,10 @@ def delete_task(thread_id: str) -> bool:
         return False
     try:
         get_checkpointer().delete_thread(thread_id)
-    except Exception:
-        logger.exception("删除 checkpoint 失败：thread_id=%s", thread_id)
+    except Exception as exc:
+        # 索引尚未创建（thread 从未产生过 checkpoint）属于正常情况，降级处理。
+        if "No such index" in str(exc):
+            logger.debug("删除 checkpoint 跳过（索引不存在）：thread_id=%s", thread_id)
+        else:
+            logger.exception("删除 checkpoint 失败：thread_id=%s", thread_id)
     return True

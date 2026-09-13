@@ -59,13 +59,13 @@ desktop.ini
 ehthumbs.db
 
 # ===========================
-# Node / Frontend (ui/)
+# Node / Frontend (frontend/)
 # ===========================
 node_modules/
-ui/node_modules/
-ui/dist/
-ui/.output/
-ui/.vite/
+frontend/node_modules/
+frontend/dist/
+frontend/.output/
+frontend/.vite/
 bun.lock
 yarn.lock
 package-lock.json

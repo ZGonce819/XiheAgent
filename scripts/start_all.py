@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -43,11 +44,33 @@ def start_process(
     return subprocess.Popen(command, cwd=str(cwd), env=process_env)
 
 
+def wait_for_port(host: str, port: int, timeout: float = 60) -> bool:
+    """等待指定端口可连接。
+
+    Args:
+        host: 主机地址。
+        port: 端口号。
+        timeout: 最大等待秒数。
+
+    Returns:
+        ``True`` 表示端口已就绪，``False`` 表示超时。
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection((host, port), timeout=1):
+                return True
+        except OSError:
+            time.sleep(0.5)
+    return False
+
+
 def main() -> None:
     """同时启动 Xihe 后端和前端。
 
     后端运行在 http://127.0.0.1:2024。
     前端运行在 http://127.0.0.1:3000。
+    等待后端就绪后再启动前端，避免代理连接被拒绝。
     按 Ctrl+C 会同时停止两个进程。
     """
     backend = start_process(
@@ -64,6 +87,13 @@ def main() -> None:
         ],
         PROJECT_ROOT,
     )
+
+    print("等待后端就绪...")
+    if not wait_for_port("127.0.0.1", 2024):
+        backend.terminate()
+        raise SystemExit("后端未在规定时间内就绪，已退出")
+    print("后端已就绪，启动前端...")
+
     frontend = start_process(
         "frontend",
         [
@@ -75,7 +105,7 @@ def main() -> None:
             "--port",
             "3000",
         ],
-        PROJECT_ROOT / "ui",
+        PROJECT_ROOT / "frontend",
         env={"VITE_DASHBOARD_API_BASE_URL": "http://127.0.0.1:2024"},
     )
 

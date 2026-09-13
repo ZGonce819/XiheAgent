@@ -170,13 +170,11 @@ def normalize_repo_url(repo: str | None, *, fallback: str | None = None) -> str:
         规范化后的完整 HTTPS clone URL。
 
     Raises:
-        ValueError: 仓库地址格式无法解析。
+        ValueError: 仓库地址缺失或格式无法解析。
     """
-    from config.constants import DEFAULT_REPO_URL
-
-    text = (repo or fallback or DEFAULT_REPO_URL).strip()
+    text = (repo or fallback or "").strip()
     if not text:
-        return DEFAULT_REPO_URL
+        raise ValueError("未提供仓库地址，请先配置仓库 URL。")
 
     if text.startswith(("http://", "https://")):
         return parse_repo_url(text).clone_url

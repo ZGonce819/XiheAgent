@@ -12,9 +12,10 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
-from config.constants import PROJECT_ROOT
+_PROJECT_ROOT: Path = Path(__file__).resolve().parents[1]
+"""项目根目录，直接计算以避免与 ``config.constants`` 循环导入。"""
 
-LOCAL_ENV = PROJECT_ROOT / ".env"
+LOCAL_ENV = _PROJECT_ROOT / ".env"
 """项目根目录下的 ``.env`` 文件路径。"""
 
 

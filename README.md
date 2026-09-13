@@ -401,7 +401,7 @@ xihe/
 │   ├── start_all.py       # 启动脚本
 │   └── stop_all.py        # 停止脚本
 │
-├── ui/                    # 前端项目（Vue 3 + Vite）
+├── frontend/              # 前端项目（Vue 3 + Vite）
 │   ├── src/
 │   │   ├── api/           # API 客户端（axios + SSE 解析）
 │   │   ├── components/    # Vue 组件

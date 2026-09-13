@@ -21,7 +21,6 @@ from config.app_config import (
 )
 from config.constants import (
     CODEUP_URL_ARGUMENTS,
-    DEFAULT_REPO_URL,
     GITEE_URL_ARGUMENTS,
     GITHUB_URL_ARGUMENTS,
     MIN_MESSAGE_LENGTH,
@@ -36,7 +35,6 @@ from config.logging_config import configure_logging, read_recent_log
 
 __all__ = [
     "CODEUP_URL_ARGUMENTS",
-    "DEFAULT_REPO_URL",
     "GITEE_URL_ARGUMENTS",
     "GITHUB_URL_ARGUMENTS",
     "MIN_MESSAGE_LENGTH",

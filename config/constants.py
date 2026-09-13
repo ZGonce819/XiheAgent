@@ -5,7 +5,7 @@
 
 常量分类:
     - 项目根目录与工作区路径
-    - 仓库默认值与任务类型
+    - 任务类型
     - 安全与脱敏标记
     - 模型配置与 Agent 运行限制
     - 仓库记忆模板与容量阈值
@@ -33,10 +33,6 @@ PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 WORKSPACE_ROOT: Final[Path] = Path(get_env("AI_WORKSPACE_ROOT", r"E:\ai_workspace")).resolve()
 
 PROJECTS_DIR: Final[Path] = WORKSPACE_ROOT / "projects"
-
-# ── 仓库默认值 ──────────────────────────────────────────────────────────────
-
-DEFAULT_REPO_URL: Final[str] = "https://gitee.com/msb-goldbin/ai_coding.git"
 
 # ── 任务类型 ────────────────────────────────────────────────────────────────
 

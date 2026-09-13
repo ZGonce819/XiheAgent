@@ -56,7 +56,7 @@ from tools import (
     web_search,
 )
 from config.constants import DEFAULT_RECURSION_LIMIT, MAX_CACHED_BACKENDS, MODEL_CALL_RECURSION_LIMIT, VALID_TASK_KINDS
-from utils.platform_router import parse_repo_url
+from utils.platform_utils import parse_repo_url
 
 logger = logging.getLogger(__name__)
 
