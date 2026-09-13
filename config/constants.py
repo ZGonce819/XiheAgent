@@ -82,7 +82,7 @@ TASK_KIND_DEFAULT_LIMITS: Final[dict[str, tuple[int, int]]] = {
 
 # ── 仓库记忆 ────────────────────────────────────────────────────────────────
 
-REPO_MEMORY_NAMESPACE_PREFIX: Final[tuple[str, str]] = ("xihe", "repo-memory")
+REPO_MEMORY_NAMESPACE_PREFIX: Final[tuple[str, str]] = ("xihe-agent", "repo-memory")
 
 INITIAL_REPO_MEMORY_TEMPLATE: Final[Template] = Template("""\
 # 仓库记忆：$owner/$repo
@@ -135,8 +135,8 @@ SSE_HEADERS: Final[dict[str, str]] = {
 
 # ── Redis Stream ────────────────────────────────────────────────────────────
 
-STREAM_KEY_PREFIX: Final[str] = "xihe:sse:events:"
-CONSUMER_GROUP: Final[str] = "xihe-dashboard"
+STREAM_KEY_PREFIX: Final[str] = "xihe-agent:sse:events:"
+CONSUMER_GROUP: Final[str] = "xihe-agent-dashboard"
 
 # ── Checkpoint 消息过滤 ──────────────────────────────────────────────────────
 

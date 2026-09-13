@@ -32,8 +32,8 @@ class OpenCodeupMergeRequestSchema(BaseModel):
     repo: str = Field(description="Codeup 仓库名称。")
     head: str = Field(description="已推送的源分支。")
     base: str = Field(default="master", description="目标分支，默认 master。")
-    title: str = Field(default="Xihe generated changes", description="MR 标题。")
-    body: str = Field(default="由 Xihe 自动生成。", description="MR 描述。")
+    title: str = Field(default="xihe-agent generated changes", description="MR 标题。")
+    body: str = Field(default="由 xihe-agent 自动生成。", description="MR 描述。")
 
 
 @tool(args_schema=OpenCodeupMergeRequestSchema)
@@ -42,8 +42,8 @@ def open_codeup_merge_request(
     repo: str,
     head: str,
     base: str = "master",
-    title: str = "Xihe generated changes",
-    body: str = "由 Xihe 自动生成。",
+    title: str = "xihe-agent generated changes",
+    body: str = "由 xihe-agent 自动生成。",
 ) -> dict[str, Any]:
     """为已经推送到 Codeup 的分支创建或复用 Merge Request。
 

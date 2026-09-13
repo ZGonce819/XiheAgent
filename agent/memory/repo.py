@@ -80,7 +80,7 @@ def build_repo_memory_namespace(owner: str, repo: str) -> tuple[str, ...]:
         repo: 仓库名称，会转为小写。
 
     Returns:
-        四元组 namespace：``("xihe", "repo-memory", owner, repo)``。
+        四元组 namespace：``("xihe-agent", "repo-memory", owner, repo)``。
     """
     return (*REPO_MEMORY_NAMESPACE_PREFIX, owner.lower(), repo.lower())
 
@@ -88,7 +88,7 @@ def build_repo_memory_namespace(owner: str, repo: str) -> tuple[str, ...]:
 def _extract_owner_repo_from_namespace(namespace: tuple[str, ...]) -> tuple[str, str] | None:
     """从 namespace 中提取 owner 和 repo。
 
-    namespace 格式为 ``("xihe", "repo-memory", owner, repo)``。
+    namespace 格式为 ``("xihe-agent", "repo-memory", owner, repo)``。
     当前两段必须匹配 :data:`REPO_MEMORY_NAMESPACE_PREFIX`，否则视为非法 namespace。
 
     Args:

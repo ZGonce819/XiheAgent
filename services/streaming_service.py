@@ -157,7 +157,7 @@ def build_streaming_response(
 
         thread = threading.Thread(
             target=worker,
-            name=f"xihe-stream-{thread_id}",
+            name=f"xihe-agent-stream-{thread_id}",
             daemon=True,
         )
         thread.start()

@@ -1,4 +1,4 @@
-"""Xihe Agent 状态定义模块。
+"""xihe-agent 状态定义模块。
 
 定义 LangGraph 图执行过程中流转的状态结构 ``AgentTaskState``，
 包括消息列表、任务类型、仓库标识等核心字段。

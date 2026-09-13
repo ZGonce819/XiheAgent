@@ -62,7 +62,7 @@ class ConnectionManager:
             "port": int(os.getenv("MYSQL_PORT", "3306")),
             "user": os.getenv("MYSQL_USER", "root"),
             "password": os.getenv("MYSQL_PASSWORD", ""),
-            "database": os.getenv("MYSQL_DATABASE", "xihe"),
+            "database": os.getenv("MYSQL_DATABASE", "xihe-agent"),
             "charset": "utf8mb4",
             "cursorclass": DictCursor,
             "autocommit": False,

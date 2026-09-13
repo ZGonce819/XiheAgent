@@ -162,7 +162,7 @@ def configure_logging() -> None:
     root_logger.addHandler(backend_handler)
     root_logger.addHandler(agent_handler)
 
-    logging.getLogger("xihe").info(
+    logging.getLogger("xihe-agent").info(
         "日志系统已启动：dir=%s level=%s rotation=%s interval=%s retention=%s",
         settings.log_dir,
         settings.log_level,

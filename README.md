@@ -1,8 +1,8 @@
-# XiheAgent (羲和) — AI Coding Assistant
+# xihe-agent (羲和) — AI Coding Assistant
 
 ![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)
 
-羲和（XiheAgent）是一个基于 FastAPI + LangGraph + DeepAgents 构建的 AI 编码助手，支持 Gitee / GitHub / Codeup 多平台仓库集成、多轮对话、代码审查、自动化任务编排等功能。
+羲和（xihe-agent）是一个基于 FastAPI + LangGraph + DeepAgents 构建的 AI 编码助手，支持 Gitee / GitHub / Codeup 多平台仓库集成、多轮对话、代码审查、自动化任务编排等功能。
 
 ## 核心特性
 
@@ -63,8 +63,8 @@ docker-compose up -d
 
 # 或单独启动
 docker run -d --name redis -p 6379:6379 redis:7-alpine
-docker run -d --name mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=root -e MYSQL_DATABASE=xihe mysql:8
-docker run -d --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=xihe postgres:16
+docker run -d --name mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=root -e MYSQL_DATABASE=xihe-agent mysql:8
+docker run -d --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=xihe-agent postgres:16
 ```
 
 #### 手动安装
@@ -75,13 +75,13 @@ docker run -d --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=postgres -e POST
 
 **MySQL**：
 ```sql
-CREATE DATABASE xihe CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE `xihe-agent` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 -- 后端启动时会自动建表，无需手动执行 DDL
 ```
 
 **PostgreSQL**：
 ```sql
-CREATE DATABASE xihe;
+CREATE DATABASE "xihe-agent";
 -- 后端启动时会自动初始化 schema
 ```
 
@@ -182,7 +182,7 @@ opensandbox-server -h
 docker pull sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:v1.0.2
 ```
 
-#### 7. XiheAgent 启用沙盒
+#### 7. xihe-agent 启用沙盒
 
 在 `.env` 中添加：
 ```ini
@@ -197,7 +197,7 @@ SANDBOX_PORT=8080
 pip install -e ".[sandbox]"
 ```
 
-**注意：** 如果不启用沙盒，XiheAgent 会自动降级使用 `LocalShellBackend`（本地 Shell 执行），适合开发和个人使用场景。
+**注意：** 如果不启用沙盒，xihe-agent 会自动降级使用 `LocalShellBackend`（本地 Shell 执行），适合开发和个人使用场景。
 
 ### 安装 Python 依赖
 
@@ -233,14 +233,14 @@ MYSQL_HOST=127.0.0.1
 MYSQL_PORT=3306
 MYSQL_USER=root
 MYSQL_PASSWORD=root
-MYSQL_DATABASE=xihe
+MYSQL_DATABASE=xihe-agent
 
 # PostgreSQL（可选，不使用 memories 可设为空）
 PG_HOST=127.0.0.1
 PG_PORT=5432
 PG_USER=postgres
 PG_PASSWORD=postgres
-PG_DATABASE=xihe
+PG_DATABASE=xihe-agent
 
 # Redis Stream SSE（设为 true 启用多进程模式，默认使用 asyncio.Queue）
 USE_REDIS_STREAM=false
@@ -256,7 +256,7 @@ SANDBOX_PORT=8080
 
 ```bash
 # 方式一：使用脚本（推荐）
-xihe-start
+xihe-agent-start
 
 # 方式二：直接启动
 uvicorn xihe.app:app --reload --host 127.0.0.1 --port 2024
@@ -265,7 +265,7 @@ uvicorn xihe.app:app --reload --host 127.0.0.1 --port 2024
 ### 启动前端服务
 
 ```bash
-cd ui
+cd frontend
 npm install  # 首次需要安装依赖
 npm run dev  # 启动 Vite 开发服务器，端口 3000
 ```
@@ -281,7 +281,7 @@ curl http://127.0.0.1:2024/health
 ## 项目结构
 
 ```
-xihe/
+xihe-agent/
 ├── app.py                 # FastAPI 应用入口
 ├── server.py              # DeepAgent 工厂（组装模型/工具/中间件）
 ├── prompt.py              # 系统提示词构建
@@ -466,9 +466,9 @@ DELETE /dashboard/api/threads/{id}                 # 删除会话
 | `GITEE_TOKEN` | Gitee 访问令牌 | *按需* |
 | `GITHUB_TOKEN` | GitHub 访问令牌 | *按需* |
 | `CODEUP_TOKEN` | Codeup 访问令牌 | *按需* |
-| `XIHE_DATA_DIR` | 数据文件目录 | `{project_root}/data` |
-| `XIHE_LOG_DIR` | 日志文件目录 | `{project_root}/logs` |
-| `XIHE_LOG_LEVEL` | 日志级别 | `INFO` |
+| `XIHE_AGENT_DATA_DIR` | 数据文件目录 | `{project_root}/data` |
+| `XIHE_AGENT_LOG_DIR` | 日志文件目录 | `{project_root}/logs` |
+| `XIHE_AGENT_LOG_LEVEL` | 日志级别 | `INFO` |
 | `AI_WORKSPACE_ROOT` | 代码工作区根目录 | `E:/ai_workspace` |
 | `REDIS_HOST` | Redis 主机地址（Checkpoint） | `localhost` |
 | `REDIS_PORT` | Redis 端口 | `6379` |
@@ -478,12 +478,12 @@ DELETE /dashboard/api/threads/{id}                 # 删除会话
 | `MYSQL_PORT` | MySQL 端口 | `3306` |
 | `MYSQL_USER` | MySQL 用户名 | `root` |
 | `MYSQL_PASSWORD` | MySQL 密码 | *必填* |
-| `MYSQL_DATABASE` | MySQL 数据库名（业务数据） | `xihe` |
+| `MYSQL_DATABASE` | MySQL 数据库名（业务数据） | `xihe-agent` |
 | `PG_HOST` | PostgreSQL 主机地址（长期记忆） | `localhost` |
 | `PG_PORT` | PostgreSQL 端口 | `5432` |
 | `PG_USER` | PostgreSQL 用户名 | `postgres` |
 | `PG_PASSWORD` | PostgreSQL 密码 | *必填* |
-| `PG_DATABASE` | PostgreSQL 数据库名（LangGraph Store） | `xihe` |
+| `PG_DATABASE` | PostgreSQL 数据库名（LangGraph Store） | `xihe-agent` |
 | `USE_SANDBOX` | 是否启用 OpenSandbox 沙盒模式 | `false` |
 | `SANDBOX_HOST` | OpenSandbox Server IP（仅沙盒模式需要） | *无* |
 | `SANDBOX_PORT` | OpenSandbox Server 端口（仅沙盒模式需要） | `8080` |
@@ -492,15 +492,15 @@ DELETE /dashboard/api/threads/{id}                 # 删除会话
 
 ```bash
 # 代码格式化
-black xihe/
-isort xihe/
+black xihe-agent/
+isort xihe-agent/
 
 # 代码检查
-ruff check xihe/
-ruff check --fix xihe/
+ruff check xihe-agent/
+ruff check --fix xihe-agent/
 
 # 类型检查
-mypy xihe/
+mypy xihe-agent/
 
 # 运行测试
 pytest tests/ -v

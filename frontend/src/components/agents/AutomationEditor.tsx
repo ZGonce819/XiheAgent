@@ -241,7 +241,7 @@ export function AutomationEditor({ mode, schedule }: AutomationEditorProps) {
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="每次运行时，Xihe 应该做什么？"
+            placeholder="每次运行时，xihe-agent 应该做什么？"
             rows={5}
             className="w-full resize-none bg-transparent text-sm leading-relaxed text-[var(--ui-text)] outline-none placeholder:text-[var(--ui-text-dim)]"
           />

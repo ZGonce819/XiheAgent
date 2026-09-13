@@ -1,4 +1,4 @@
-"""Xihe Agent 模型工厂模块。
+"""xihe-agent 模型工厂模块。
 
 负责创建 Agent 使用的大语言模型实例。当前项目统一使用 DeepSeek 兼容接口，
 通过 OpenAI 协议访问。模型分为两类：

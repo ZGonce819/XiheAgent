@@ -92,7 +92,7 @@ def thread_payload(thread: dict[str, Any]) -> dict[str, Any]:
     full_name = repo_full_name(thread)
     return {
         "id": thread["thread_id"],
-        "title": thread.get("title") or "Xihe Task",
+        "title": thread.get("title") or "xihe-agent Task",
         "repo": full_name,
         "repoFullName": full_name,
         "branch": thread.get("branch_name") or "master",

@@ -143,7 +143,7 @@ def fetch_url(url: str, timeout: int = 30) -> dict[str, Any]:
             normalized_url,
             # 限制超时时间范围，避免模型传入过大数值导致任务长期阻塞。
             timeout=max(1, min(int(timeout), 60)),
-            headers={"User-Agent": "Xihe/1.0"},
+            headers={"User-Agent": "xihe-agent/1.0"},
         )
         if blocked:
             # 安全策略拒绝访问时，safe_http 会返回统一错误结构。

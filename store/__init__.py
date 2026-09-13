@@ -1,4 +1,4 @@
-"""Xihe 数据存储子包。
+"""xihe-agent 数据存储子包。
 
 提供 MySQL 持久化存储，管理仓库映射、任务状态和业务事件。
 
@@ -12,7 +12,7 @@
 
 Example:
     >>> from store import LocalMySQLStore
-    >>> store = LocalMySQLStore(host="localhost", database="xihe")
+    >>> store = LocalMySQLStore(host="localhost", database="xihe-agent")
     >>> store.upsert_thread(thread_id="t1", title="User task")
 """
 

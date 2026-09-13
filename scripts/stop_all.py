@@ -142,7 +142,7 @@ def stop_ports(ports: Iterable[int] = DEFAULT_PORTS) -> list[int]:
 
 
 def main() -> None:
-    """清理 Xihe 项目后端和前端服务端口。"""
+    """清理 xihe-agent 项目后端和前端服务端口。"""
     ports = DEFAULT_PORTS
     stopped = stop_ports(ports)
     if stopped:

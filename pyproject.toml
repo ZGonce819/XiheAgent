@@ -1,7 +1,7 @@
 [project]
 name = "xihe-agent"
 version = "1.0.0"
-description = "XiheAgent (羲和) - A powerful AI-powered coding assistant built with FastAPI and LangGraph"
+description = "xihe-agent (羲和) - A powerful AI-powered coding assistant built with FastAPI and LangGraph"
 authors = [
     { name = "Apolleo", email = "ZGonce819@foxmail.com" }
 ]
@@ -56,8 +56,8 @@ dev = [
 ]
 
 [project.scripts]
-xihe-start = "xihe.scripts.start_all:main"
-xihe-stop = "xihe.scripts.stop_all:main"
+xihe-agent-start = "xihe.scripts.start_all:main"
+xihe-agent-stop = "xihe.scripts.stop_all:main"
 
 [tool.ruff]
 line-length = 100

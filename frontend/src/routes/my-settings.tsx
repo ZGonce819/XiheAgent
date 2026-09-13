@@ -61,7 +61,7 @@ function UserMappingSection({ session }: { session: SessionUser }) {
   return (
     <SettingsSection
       title="User mapping"
-      description="仅当你计划从 Slack 触发 Xihe 时才需要连接 Slack。手动 Gitee 任务使用服务端仓库令牌。"
+      description="仅当你计划从 Slack 触发 xihe-agent 时才需要连接 Slack。手动 Gitee 任务使用服务端仓库令牌。"
     >
       <div className="divide-y divide-border">
         <SettingsRow

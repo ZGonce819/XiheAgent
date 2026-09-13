@@ -110,7 +110,7 @@ function UsagePage() {
           </p>
         ) : !leaderboard.data?.rows.length ? (
           <div className="p-6 text-center text-sm text-muted-foreground">
-            {PERIOD_LABELS[activePeriod].toLowerCase()} 还没有记录 Xihe 用量。
+            {PERIOD_LABELS[activePeriod].toLowerCase()} 还没有记录 xihe-agent 用量。
           </div>
         ) : (
           <UsageTable

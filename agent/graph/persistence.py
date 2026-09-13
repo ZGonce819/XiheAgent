@@ -1,4 +1,4 @@
-"""Xihe LangGraph 持久化层。
+"""xihe-agent LangGraph 持久化层。
 
 提供 checkpointer 和 store 的工厂函数：
 
@@ -7,7 +7,7 @@
 - **Store**（PostgreSQL）：LangGraph 的跨线程长期存储，用于仓库级记忆等
   需要持久化但不属于单一 checkpointer 线程的数据。
 
-原始参考项目使用 SQLite，Xihe 改为 Redis + PostgreSQL 三层存储架构：
+原始参考项目使用 SQLite，xihe-agent 改为 Redis + PostgreSQL 三层存储架构：
 Redis 负责 checkpoint、MySQL 负责业务数据、PostgreSQL 负责 LangGraph Store。
 """
 

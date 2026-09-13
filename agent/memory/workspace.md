@@ -1,6 +1,6 @@
 # 本地工作区记忆
 
-Xihe 使用固定的 Windows 本地工作区 `E:\ai_workspace` 执行 Agent 任务。
+xihe-agent 使用固定的 Windows 本地工作区 `E:\ai_workspace` 执行 Agent 任务。
 这个目录来自 open-swe 的本地 workspace 设计，里面包含若干固定用途的子目录。
 本文件只记录工作区事实，不承载强制行为规则；具体工具权限、读写边界和执行规范由系统提示词与后端权限控制。
 

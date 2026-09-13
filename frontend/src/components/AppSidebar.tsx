@@ -30,7 +30,7 @@ interface NavItem {
 
 const NAV: Array<NavItem> = [
   { to: "/my-settings", label: "Profile Settings", icon: IoOptionsOutline },
-  { to: "/cloud-agents", label: "Xihe 智能体", icon: IoCloudOutline },
+  { to: "/cloud-agents", label: "xihe-agent 智能体", icon: IoCloudOutline },
   { to: "/review", label: "PR Review", icon: IoGitPullRequestOutline },
   { to: "/usage", label: "Usage", icon: IoStatsChartOutline },
   { to: "/admin", label: "Admin", icon: IoSettingsOutline, adminOnly: true },

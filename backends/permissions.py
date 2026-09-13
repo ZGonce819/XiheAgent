@@ -160,5 +160,5 @@ def ensure_safe_git_message(message: str) -> str:
         normalized = normalized.replace(token, " ")
     normalized = " ".join(normalized.split())
     if not normalized:
-        return "Xihe generated changes"
+        return "xihe-agent generated changes"
     return normalized[:200]

@@ -1,4 +1,4 @@
-"""Xihe 项目一键启动脚本。
+"""xihe-agent 项目一键启动脚本。
 
 同时启动后端（Uvicorn）和前端（Vite），并在退出时统一清理子进程与端口占用。
 """
@@ -66,7 +66,7 @@ def wait_for_port(host: str, port: int, timeout: float = 60) -> bool:
 
 
 def main() -> None:
-    """同时启动 Xihe 后端和前端。
+    """同时启动 xihe-agent 后端和前端。
 
     后端运行在 http://127.0.0.1:2024。
     前端运行在 http://127.0.0.1:3000。

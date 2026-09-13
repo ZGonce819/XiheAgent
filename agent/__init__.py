@@ -1,4 +1,4 @@
-"""Xihe Agent 核心包。
+"""xihe-agent 核心包。
 
 提供 AI Agent 运行所需的完整能力栈：
 

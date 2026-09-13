@@ -175,11 +175,11 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
   return (
     <SettingsSection
       title="Global defaults"
-      description="Workspace-wide model defaults. Per-user Xihe selections override the agent defaults."
+      description="Workspace-wide model defaults. Per-user xihe-agent selections override the agent defaults."
     >
       <div className="divide-y divide-border">
         <RolePicker
-          label="Xihe 智能体"
+          label="xihe-agent 智能体"
           description="Model used for internal code-writing runs triggered from the dashboard or integrations."
           models={models}
           model={settings.data?.default_agent_model ?? null}
@@ -195,7 +195,7 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
           disabled={!settings.data || save.isPending}
         />
         <RolePicker
-          label="Xihe 子智能体"
+          label="xihe-agent 子智能体"
           description="Model used by delegated main-agent tasks."
           models={models}
           model={settings.data?.default_agent_subagent_model ?? null}

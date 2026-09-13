@@ -42,7 +42,7 @@ function confirmDelete() {
 <template>
   <aside class="sidebar">
     <div class="brand">
-      <span class="brand-text">Xihe</span>
+      <span class="brand-text">xihe-agent</span>
     </div>
 
     <button class="new-button" :disabled="disabled" @click="$emit('new-thread')">

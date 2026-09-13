@@ -1,4 +1,4 @@
-"""Xihe API Schema 包。
+"""xihe-agent API Schema 包。
 
 提供 API 请求体和响应体的 Pydantic 模型定义。
 """

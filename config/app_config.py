@@ -43,18 +43,18 @@ class Settings:
         """
         # ── 项目路径 ──────────────────────────────────────────
         self.data_dir: Path = Path(
-            get_env("XIHE_DATA_DIR", str(PROJECT_ROOT / "data"))
+            get_env("XIHE_AGENT_DATA_DIR", str(PROJECT_ROOT / "data"))
         ).resolve()
         self.log_dir: Path = Path(
-            get_env("XIHE_LOG_DIR", str(PROJECT_ROOT / "logs"))
+            get_env("XIHE_AGENT_LOG_DIR", str(PROJECT_ROOT / "logs"))
         ).resolve()
         self.workspace_root: Path = WORKSPACE_ROOT
 
         # ── 日志 ──────────────────────────────────────────────
-        self.log_level: str = get_env("XIHE_LOG_LEVEL", "INFO").upper()
-        self.log_rotation_when: str = get_env("XIHE_LOG_WHEN", "midnight")
-        self.log_rotation_interval: int = _safe_int(get_env("XIHE_LOG_INTERVAL", "1"), 1)
-        self.log_retention_days: int = _safe_int(get_env("XIHE_LOG_RETENTION_DAYS", "14"), 14)
+        self.log_level: str = get_env("XIHE_AGENT_LOG_LEVEL", "INFO").upper()
+        self.log_rotation_when: str = get_env("XIHE_AGENT_LOG_WHEN", "midnight")
+        self.log_rotation_interval: int = _safe_int(get_env("XIHE_AGENT_LOG_INTERVAL", "1"), 1)
+        self.log_retention_days: int = _safe_int(get_env("XIHE_AGENT_LOG_RETENTION_DAYS", "14"), 14)
 
         # ── Redis（Checkpoint + 可选 SSE 事件总线）──────────────
         self.redis_host: str = get_env("REDIS_HOST", "localhost")
@@ -69,14 +69,14 @@ class Settings:
         self.mysql_port: int = _safe_int(get_env("MYSQL_PORT", "3306"), 3306)
         self.mysql_user: str = get_env("MYSQL_USER", "root")
         self.mysql_password: str = get_env("MYSQL_PASSWORD")
-        self.mysql_database: str = get_env("MYSQL_DATABASE", "xihe")
+        self.mysql_database: str = get_env("MYSQL_DATABASE", "xihe-agent")
 
         # ── PostgreSQL（长期记忆 / LangGraph Store）─────────────
         self.pg_host: str = get_env("PG_HOST", "localhost")
         self.pg_port: int = _safe_int(get_env("PG_PORT", "5432"), 5432)
         self.pg_user: str = get_env("PG_USER", "postgres")
         self.pg_password: str = get_env("PG_PASSWORD")
-        self.pg_database: str = get_env("PG_DATABASE", "xihe")
+        self.pg_database: str = get_env("PG_DATABASE", "xihe-agent")
 
         # ── OpenSandbox 沙盒（可选）────────────────────────────
         self.use_sandbox: bool = get_env("USE_SANDBOX", "false").lower() == "true"

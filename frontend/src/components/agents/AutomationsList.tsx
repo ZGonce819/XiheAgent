@@ -46,7 +46,7 @@ export function AutomationsList() {
           自动任务
         </h1>
         <p className="mt-1 text-sm text-[var(--ui-text-muted)]">
-          按固定计划运行 Xihe。每次运行都会启动一个新的智能体线程。
+          按固定计划运行 xihe-agent。每次运行都会启动一个新的智能体线程。
         </p>
 
         <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -121,7 +121,7 @@ function EmptyState() {
         暂无自动任务
       </h3>
       <p className="mt-1 max-w-sm text-sm text-[var(--ui-text-muted)]">
-        可以让 Xihe 按计划检查代码、处理问题或维护文档。
+        可以让 xihe-agent 按计划检查代码、处理问题或维护文档。
       </p>
       <Link
         to="/agents/automations/new"

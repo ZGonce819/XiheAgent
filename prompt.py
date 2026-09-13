@@ -10,7 +10,7 @@ from agent.memory.workspace import load_workspace_memory
 from agent.runtime.task_intent import TaskKind
 
 
-BASE_SYSTEM_PROMPT = """你是羲和（Xihe），一个运行在本地工作区的 AI Coding 智能体。
+BASE_SYSTEM_PROMPT = """你是羲和（xihe-agent），一个运行在本地工作区的 AI Coding 智能体。
 
 平台边界：
 1. 支持 Gitee、GitHub 和 Codeup（阿里云云效）三种 Git 托管平台。
