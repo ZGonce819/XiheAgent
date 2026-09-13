@@ -11,6 +11,7 @@ from typing import Any
 
 from agent.graph.checkpoint_history import visible_checkpoint_messages
 from config.env_config import get_env
+from utils.platform_utils import detect_platform, get_platform_display_name
 from utils.thread_utils import pr_payload, repo_full_name, status_for_frontend
 from utils.time_utils import iso_to_millis
 
@@ -90,11 +91,23 @@ def thread_payload(thread: dict[str, Any]) -> dict[str, Any]:
     """
 
     full_name = repo_full_name(thread)
+    repo_url = thread.get("repo_url") or ""
+    platform = ""
+    platform_display = ""
+    if repo_url:
+        try:
+            platform = detect_platform(repo_url)
+            platform_display = get_platform_display_name(platform)
+        except Exception:
+            pass
     return {
         "id": thread["thread_id"],
         "title": thread.get("title") or "xihe-agent Task",
         "repo": full_name,
         "repoFullName": full_name,
+        "repoUrl": repo_url,
+        "platform": platform,
+        "platformDisplay": platform_display,
         "branch": thread.get("branch_name") or "master",
         "model": get_env("MAIN_MODEL", "deepseek-v4-pro"),
         "effort": None,

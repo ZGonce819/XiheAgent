@@ -159,6 +159,9 @@ export interface AgentThread {
   title: string
   repo: string
   repoFullName: string
+  repoUrl: string
+  platform: string
+  platformDisplay: string
   branch: string
   model: string
   effort?: string | null

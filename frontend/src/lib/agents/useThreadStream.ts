@@ -21,6 +21,9 @@ interface ThreadMetaPayload {
   id?: string;
   status?: AgentStatus;
   branch?: string;
+  repoUrl?: string;
+  platform?: string;
+  platformDisplay?: string;
   pr?: AgentThread["pr"];
   updatedAt?: number;
 }
@@ -236,6 +239,9 @@ function applyThreadMeta(thread: AgentThread, data: ThreadMetaPayload): AgentThr
     ...thread,
     status: data.status ?? thread.status,
     branch: data.branch ?? thread.branch,
+    repoUrl: data.repoUrl ?? thread.repoUrl,
+    platform: data.platform ?? thread.platform,
+    platformDisplay: data.platformDisplay ?? thread.platformDisplay,
     pr: data.pr ?? thread.pr,
     updatedAt: data.updatedAt ?? thread.updatedAt,
   };

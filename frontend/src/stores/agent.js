@@ -83,6 +83,9 @@ function mergeThreadMeta(target, source) {
   if (!target || !source) return
   target.status = source.status || target.status
   target.branch = source.branch || target.branch
+  target.repoUrl = source.repoUrl || target.repoUrl
+  target.platform = source.platform || target.platform
+  target.platformDisplay = source.platformDisplay || target.platformDisplay
   target.pr = source.pr || target.pr
   target.updatedAt = source.updatedAt || target.updatedAt
 }
@@ -151,6 +154,9 @@ export const useAgentStore = defineStore('agent', {
       const thread = await dashboardApi.getThread(threadId)
       this.currentThread = thread
       this.selectedRepo = thread.repo || thread.repoFullName || DEFAULT_REPO
+      if (thread.platform) {
+        this.selectedPlatform = thread.platform
+      }
       this.messages = normalizeThreadMessages(thread.messages)
     },
     async createThread() {

@@ -90,6 +90,59 @@ def make_checkpointer(settings: Settings | None = None) -> Any:
     return saver
 
 
+def _run_store_migrations(dsn: str) -> None:
+    """用 autocommit 连接手动执行 LangGraph Store 迁移。
+
+    ``PostgresStore.setup()`` 内部用 ``self._cursor()`` 强制开事务，
+    而 ``CREATE INDEX CONCURRENTLY`` 不允许在事务块中执行。
+    这里绕过 ``setup()``，直接用 autocommit 连接逐条执行迁移 SQL。
+
+    Args:
+        dsn: PostgreSQL 连接字符串。
+    """
+
+    migrations = [
+        """
+        CREATE TABLE IF NOT EXISTS store (
+            prefix text NOT NULL,
+            key text NOT NULL,
+            value jsonb NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (prefix, key)
+        );
+        """,
+        """
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS store_prefix_idx
+            ON store USING btree (prefix text_pattern_ops);
+        """,
+        """
+        ALTER TABLE store
+        ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITH TIME ZONE,
+        ADD COLUMN IF NOT EXISTS ttl_minutes INT;
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_store_expires_at ON store (expires_at)
+        WHERE expires_at IS NOT NULL;
+        """,
+    ]
+    conn = psycopg.connect(dsn, autocommit=True)
+    try:
+        cur = conn.cursor()
+        cur.execute("CREATE TABLE IF NOT EXISTS store_migrations (v INTEGER PRIMARY KEY)")
+        cur.execute("SELECT v FROM store_migrations ORDER BY v DESC LIMIT 1")
+        row = cur.fetchone()
+        current_version = row[0] if row else -1
+        for v, sql in enumerate(migrations[current_version + 1 :], start=current_version + 1):
+            cur.execute(sql)
+            cur.execute("INSERT INTO store_migrations (v) VALUES (%s)", (v,))
+            logger.info("LangGraph Store 迁移 %d 已完成", v)
+    except Exception as exc:
+        logger.warning("LangGraph Store 迁移异常（可能已初始化）：%s", exc)
+    finally:
+        conn.close()
+
+
 def make_langgraph_store(settings: Settings | None = None) -> Any:
     """创建 PostgreSQL LangGraph Store。
 
@@ -111,6 +164,10 @@ def make_langgraph_store(settings: Settings | None = None) -> Any:
         settings = get_settings()
     dsn = build_pg_dsn(settings)
     logger.info("创建 PostgreSQL LangGraph Store：%s:%s/%s", settings.pg_host, settings.pg_port, settings.pg_database)
-    conn = psycopg.connect(dsn)
+    # PostgresStore.setup() 内部用 self._cursor() 强制开事务，
+    # 而 CREATE INDEX CONCURRENTLY 不允许在事务中执行。
+    # 绕过 setup()，直接用 autocommit 连接手动执行迁移 SQL。
+    _run_store_migrations(dsn)
+    conn = psycopg.connect(dsn, autocommit=True)
     store = PostgresStore(conn)
     return store

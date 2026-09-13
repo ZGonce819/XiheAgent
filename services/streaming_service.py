@@ -88,10 +88,14 @@ def build_streaming_response(
         queue: asyncio.Queue[tuple[str, dict[str, Any]]] = asyncio.Queue()
         loop = asyncio.get_running_loop()
 
-        def enqueue(event: str, data: dict[str, Any]) -> None:
+        def send_event(event: str, data: dict[str, Any]) -> None:
+            """统一事件发送：Redis Stream 模式走 Redis，否则走 asyncio.Queue。"""
             payload = dict(data)
             payload.setdefault("thread_id", thread_id)
-            loop.call_soon_threadsafe(queue.put_nowait, (event, payload))
+            if use_redis:
+                publish_event(thread_id, event, payload)
+            else:
+                loop.call_soon_threadsafe(queue.put_nowait, (event, payload))
 
         def event_sink(event: str, data: dict[str, Any]) -> None:
             payload = dict(data)
@@ -101,10 +105,7 @@ def build_streaming_response(
                 )
                 if not payload["content"].strip():
                     return
-            if use_redis:
-                publish_event(thread_id, event, payload)
-            else:
-                enqueue(event, payload)
+            send_event(event, payload)
 
         def worker() -> None:
             try:
@@ -115,13 +116,16 @@ def build_streaming_response(
                     event_sink=event_sink,
                 )
                 latest = get_task(thread_id) or initial_task
-                enqueue("thread_done", thread_meta_payload(latest))
-                enqueue("done", {})
+                send_event("thread_done", thread_meta_payload(latest))
+                send_event("done", {})
             except Exception as exc:
-                latest = get_task(thread_id) or initial_task
-                enqueue("error", {"message": str(exc), "detail": str(exc)})
-                enqueue("thread_done", thread_meta_payload(latest))
-                enqueue("done", {})
+                try:
+                    latest = get_task(thread_id) or initial_task
+                except Exception:
+                    latest = initial_task
+                send_event("error", {"message": str(exc), "detail": str(exc)})
+                send_event("thread_done", thread_meta_payload(latest))
+                send_event("done", {})
 
         yield sse_part("thread_snapshot", thread_meta_payload(initial_task))
         yield sse_part(

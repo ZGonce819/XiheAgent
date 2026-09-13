@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from deepagents import FilesystemPermission, create_deep_agent
+from deepagents import create_deep_agent
 from deepagents.backends import CompositeBackend, StoreBackend
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from deepagents.middleware.summarization import create_summarization_tool_middleware
@@ -125,43 +125,6 @@ def _general_purpose_subagent(model: BaseChatModel) -> SubAgent:
         "system_prompt": GENERAL_PURPOSE_SUBAGENT["system_prompt"],
         "model": model,
         "skills": ["/skills/"],
-        "permissions": [
-            FilesystemPermission(
-                operations=["read"],
-                paths=[
-                    "/projects/**",
-                    "/skills/**",
-                    "/policies/**",
-                    "/reviews/**",
-                    "/runtimes/**",
-                    "/logs/**",
-                    "/tmp/**",
-                    "/memories/**",
-                ],
-                mode="allow",
-            ),
-            FilesystemPermission(
-                operations=["write"],
-                paths=["/reviews/**", "/tmp/**"],
-                mode="allow",
-            ),
-            FilesystemPermission(
-                operations=["write"],
-                paths=[
-                    "/projects/**",
-                    "/skills/**",
-                    "/policies/**",
-                    "/runtimes/**",
-                    "/logs/**",
-                ],
-                mode="deny",
-            ),
-            FilesystemPermission(
-                operations=["read", "write"],
-                paths=["/**"],
-                mode="deny",
-            ),
-        ],
     }
 
 
@@ -216,79 +179,7 @@ def _code_reviewer_subagent(model: BaseChatModel) -> SubAgent:
             list_review_findings,
         ],
         "skills": ["/skills/"],
-        "permissions": [
-            FilesystemPermission(
-                operations=["read"],
-                paths=[
-                    "/projects/**",
-                    "/skills/**",
-                    "/policies/**",
-                    "/reviews/**",
-                    "/memories/**",
-                    "/tmp/**",
-                ],
-                mode="allow",
-            ),
-            FilesystemPermission(
-                operations=["write"],
-                paths=["/reviews/**", "/tmp/**"],
-                mode="allow",
-            ),
-            FilesystemPermission(
-                operations=["write"],
-                paths=["/projects/**", "/skills/**", "/policies/**", "/memories/**"],
-                mode="deny",
-            ),
-            FilesystemPermission(
-                operations=["read", "write"],
-                paths=["/**"],
-                mode="deny",
-            ),
-        ],
     }
-
-
-def _agent_filesystem_permissions() -> list[FilesystemPermission]:
-    """主 Agent 的文件系统权限。
-
-    主 Agent 可以修改 /projects 中的项目代码，也可以写 /reviews、/tmp 和 /memories。
-    技能、策略、运行环境和日志目录默认只读。
-
-    Returns:
-        文件系统权限列表，按优先级从上到下依次匹配，
-        末尾以全路径拒绝作为兜底。
-    """
-    return [
-        FilesystemPermission(
-            operations=["read"],
-            paths=[
-                "/projects/**",
-                "/skills/**",
-                "/policies/**",
-                "/reviews/**",
-                "/runtimes/**",
-                "/logs/**",
-                "/tmp/**",
-                "/memories/**",
-            ],
-            mode="allow",
-        ),
-        FilesystemPermission(
-            operations=["write"],
-            paths=["/projects/**", "/reviews/**", "/tmp/**", "/memories/**"],
-            mode="allow",
-        ),
-        FilesystemPermission(
-            operations=["write"],
-            paths=["/skills/**", "/policies/**", "/runtimes/**", "/logs/**"],
-            mode="deny",
-        ),
-        FilesystemPermission(
-            operations=["read", "write"],
-            paths=["/**"],
-            mode="deny",
-        ),
-    ]
 
 
 def _task_kind_from_config(configurable: dict[str, Any]) -> TaskKind:
@@ -432,9 +323,6 @@ def get_agent(config: RunnableConfig):
     if repo_memory_content:
         configurable["_repo_memory_content"] = repo_memory_content
 
-    def backend_factory(_runtime: object, _thread_id: str = thread_id) -> Any:
-        return agent_backend
-
     main_model = make_main_model()
     subagent_model = make_main_model()
 
@@ -469,8 +357,7 @@ def get_agent(config: RunnableConfig):
             _general_purpose_subagent(subagent_model),
             _code_reviewer_subagent(subagent_model),
         ],
-        backend=backend_factory,
-        permissions=_agent_filesystem_permissions(),
+        backend=agent_backend,
         middleware=[
             ContextInjectionMiddleware(),
             MessageSanitizeMiddleware(),
