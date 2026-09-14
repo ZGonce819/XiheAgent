@@ -355,6 +355,7 @@ textarea {
 
 .workspace {
   display: flex;
+  position: relative;
   min-width: 0;
   min-height: 0;
   flex-direction: column;
@@ -411,6 +412,54 @@ textarea {
   min-height: 0;
   overflow-y: auto;
   padding: var(--space-6) var(--space-8);
+}
+
+.composer-dock {
+  position: relative;
+}
+
+.scroll-to-bottom {
+  position: absolute;
+  z-index: 3;
+  right: 50%;
+  bottom: calc(100% + 12px);
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  transform: translateX(50%);
+  border: 1px solid var(--color-border-primary);
+  border-radius: 50%;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+}
+
+.scroll-to-bottom:hover,
+.scroll-to-bottom:focus-visible {
+  color: var(--color-accent);
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.scroll-to-bottom-arrow {
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+}
+
+.scroll-to-bottom.loading::before {
+  position: absolute;
+  inset: -3px;
+  border: 2px solid transparent;
+  border-top-color: var(--color-accent);
+  border-right-color: var(--color-accent);
+  border-radius: 50%;
+  content: '';
+  animation: tool-spin 0.9s linear infinite;
 }
 
 .empty-state {
@@ -766,6 +815,13 @@ textarea {
 
 .process-narration + .process-narration {
   margin-top: 8px;
+}
+
+.process-steps > .process-narration {
+  margin: 4px 0 4px 26px;
+  overflow-wrap: anywhere;
+  color: var(--color-text-muted);
+  line-height: 1.6;
 }
 
 .process-narration > :first-child {

@@ -25,10 +25,11 @@ const errorCount = computed(() => props.items.filter((item) => item.status === '
 const completedCount = computed(() => props.items.filter((item) => item.status === 'completed').length)
 const hasMixedOutcome = computed(() => errorCount.value > 0 && completedCount.value > 0)
 const expanded = ref(isRunning.value)
+const userInteracted = ref(false)
 
 watch(isRunning, (running, wasRunning) => {
   if (running) expanded.value = true
-  if (!running && wasRunning) expanded.value = false
+  if (!running && wasRunning && !userInteracted.value) expanded.value = false
 })
 
 function statusLabel(status) {
@@ -116,7 +117,7 @@ function renderMarkdown(text) {
       type="button"
       class="tool-activity-toggle"
       :aria-expanded="expanded"
-      @click="expanded = !expanded"
+      @click="userInteracted = true; expanded = !expanded"
     >
       <span class="tool-activity-state" :class="{ spinning: isRunning }" aria-hidden="true"></span>
       <span class="tool-activity-summary">

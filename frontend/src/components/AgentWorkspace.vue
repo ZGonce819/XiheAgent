@@ -1,5 +1,5 @@
 <script setup>
-import { nextTick, onMounted, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import ChatComposer from './ChatComposer.vue'
 import ChatMessage from './ChatMessage.vue'
@@ -8,10 +8,28 @@ import { useAgentStore } from '../stores/agent'
 
 const agent = useAgentStore()
 const messageList = ref(null)
+const showScrollToBottom = ref(false)
+const stickToBottom = ref(true)
+
+function updateScrollState() {
+  const el = messageList.value
+  if (!el) return
+  const distance = el.scrollHeight - el.scrollTop - el.clientHeight
+  showScrollToBottom.value = distance > 48
+  stickToBottom.value = distance <= 48
+}
+
+function scrollToBottom() {
+  const el = messageList.value
+  if (!el) return
+  el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+  stickToBottom.value = true
+  showScrollToBottom.value = false
+}
 
 watch(
   () => agent.messages.map((message) => {
-    const length = message.chunks?.map((chunk) => {
+    const signature = message.chunks?.map((chunk) => {
       if (chunk.kind === 'todo') return JSON.stringify(chunk.todos || [])
       if (chunk.kind === 'tools') {
         return JSON.stringify({
@@ -23,22 +41,35 @@ watch(
         return JSON.stringify({
           items: (chunk.items || []).map((item) => [item.id, item.title, item.status]),
           narrations: chunk.narrations || [],
+          timeline: (chunk.timeline || []).map((entry) => ({
+            id: entry.id,
+            type: entry.type,
+            text: entry.text,
+            items: (entry.items || []).map((item) => [item.id, item.status, item.elapsedMs]),
+            todos: (entry.todos || []).map((todo) => [todo.content, todo.status]),
+          })),
         })
       }
       return chunk.text || ''
-    }).join('').length || 0
-    return `${message.id}:${length}`
+    }).join('|') || ''
+    return `${message.id}:${signature}`
   }).join('|'),
   async () => {
     await nextTick()
-    if (messageList.value) {
+    if (messageList.value && stickToBottom.value) {
       messageList.value.scrollTop = messageList.value.scrollHeight
     }
+    updateScrollState()
   },
 )
 
 onMounted(() => {
   agent.bootstrap()
+  messageList.value?.addEventListener('scroll', updateScrollState, { passive: true })
+})
+
+onBeforeUnmount(() => {
+  messageList.value?.removeEventListener('scroll', updateScrollState)
 })
 </script>
 
@@ -100,15 +131,28 @@ onMounted(() => {
         <div v-if="agent.error" class="error-banner">{{ agent.error }}</div>
       </div>
 
-      <ChatComposer
-        v-model:repo="agent.selectedRepo"
-        v-model:platform="agent.selectedPlatform"
-        v-model:model="agent.selectedModel"
-        :disabled="agent.streaming"
-        :effort="agent.selectedEffort"
-        @send="agent.submit"
-        @stop="agent.stopStream"
-      />
+      <div class="composer-dock">
+        <button
+          v-if="showScrollToBottom"
+          type="button"
+          class="scroll-to-bottom"
+          :class="{ loading: agent.streaming }"
+          aria-label="回到底部"
+          @click="scrollToBottom"
+        >
+          <span class="scroll-to-bottom-arrow" aria-hidden="true"></span>
+        </button>
+
+        <ChatComposer
+          v-model:repo="agent.selectedRepo"
+          v-model:platform="agent.selectedPlatform"
+          v-model:model="agent.selectedModel"
+          :disabled="agent.streaming"
+          :effort="agent.selectedEffort"
+          @send="agent.submit"
+          @stop="agent.stopStream"
+        />
+      </div>
     </section>
   </main>
 </template>

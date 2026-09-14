@@ -3,12 +3,19 @@ import DOMPurify from 'dompurify'
 import MarkdownIt from 'markdown-it'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
+import TodoPlan from './TodoPlan.vue'
+import ToolActivity from './ToolActivity.vue'
+
 const props = defineProps({
   items: {
     type: Array,
     default: () => [],
   },
   narrations: {
+    type: Array,
+    default: () => [],
+  },
+  timeline: {
     type: Array,
     default: () => [],
   },
@@ -23,13 +30,21 @@ const props = defineProps({
 })
 
 const visibleItems = computed(() => props.items)
-const expanded = ref(props.items.some((item) => item.status === 'in_progress'))
+const expanded = ref(props.items.some((item) => item.status === 'in_progress') || props.timeline.some((entry) => (
+  entry.type === 'tools' && (entry.items || []).some((item) => ['pending', 'in_progress'].includes(item.status))
+)))
+const userInteracted = ref(false)
 const now = ref(Date.now())
 let timer = null
 const markdown = new MarkdownIt({ html: false, linkify: true, breaks: true })
 
 const isRunning = computed(() => props.items.some((item) => item.status === 'in_progress'))
-const hasError = computed(() => props.items.some((item) => item.status === 'error'))
+const timelineToolItems = computed(() => props.timeline
+  .filter((entry) => entry.type === 'tools')
+  .flatMap((entry) => entry.items || []))
+const isTimelineRunning = computed(() => timelineToolItems.value.some((item) => ['pending', 'in_progress'].includes(item.status)))
+const hasError = computed(() => props.items.some((item) => item.status === 'error') || timelineToolItems.value.some((item) => item.status === 'error'))
+const activityRunning = computed(() => isRunning.value || isTimelineRunning.value)
 const activeItem = computed(() => [...props.items].reverse().find((item) => item.status === 'in_progress'))
 const elapsedMs = computed(() => {
   if (!props.startedAt) return null
@@ -37,7 +52,7 @@ const elapsedMs = computed(() => {
 })
 
 const summary = computed(() => {
-  if (isRunning.value) return activeItem.value?.title || '正在执行任务'
+  if (isRunning.value || isTimelineRunning.value) return activeItem.value?.title || '正在执行任务'
   if (hasError.value) return '任务执行失败'
   return '所有任务已执行完成'
 })
@@ -58,10 +73,10 @@ function syncTimer(running) {
   timer = running ? setInterval(() => { now.value = Date.now() }, 1000) : null
 }
 
-watch(isRunning, (running, wasRunning) => {
+watch(activityRunning, (running, wasRunning) => {
   syncTimer(running)
   if (running && !wasRunning) expanded.value = true
-  if (!running && wasRunning) expanded.value = false
+  if (!running && wasRunning && !userInteracted.value) expanded.value = false
 }, { immediate: true })
 
 onBeforeUnmount(() => {
@@ -81,20 +96,28 @@ function narrationText(narration) {
 function renderMarkdown(narration) {
   return DOMPurify.sanitize(markdown.render(narrationText(narration)))
 }
+
+function timelineItems() {
+  if (props.timeline.length) return props.timeline
+  return [
+    ...props.items.map((item) => ({ ...item, type: 'step' })),
+    ...props.narrations.map((item) => ({ ...item, type: 'text' })),
+  ]
+}
 </script>
 
 <template>
   <section
-    v-if="visibleItems.length || narrations.length"
+    v-if="visibleItems.length || narrations.length || timeline.length"
     class="process-activity"
-    :class="{ running: isRunning, failed: hasError }"
+    :class="{ running: activityRunning, failed: hasError }"
     aria-label="任务执行流程"
   >
     <button
       type="button"
       class="process-activity-toggle"
       :aria-expanded="expanded"
-      @click="expanded = !expanded"
+      @click="userInteracted = true; expanded = !expanded"
     >
       <span>{{ summary }}</span>
       <span v-if="elapsedMs != null" class="process-elapsed">耗时 {{ formatElapsed(elapsedMs) }}</span>
@@ -102,26 +125,29 @@ function renderMarkdown(narration) {
     </button>
 
     <div v-if="expanded" class="process-steps">
-      <div
-        v-for="item in visibleItems"
-        :key="item.id"
-        class="process-step"
-        :class="item.status"
-      >
-        <span class="process-step-icon" aria-hidden="true">
-          <span v-if="item.status === 'in_progress'" class="process-spinner"></span>
-          <span v-else>{{ stateIcon(item.status) }}</span>
-        </span>
-        <span>{{ item.title }}</span>
-      </div>
-      <div v-if="narrations.length" class="process-narrations">
+      <template v-for="entry in timelineItems()" :key="entry.id">
+        <div v-if="entry.type === 'step'" class="process-step" :class="entry.status">
+          <span class="process-step-icon" aria-hidden="true">
+            <span v-if="entry.status === 'in_progress'" class="process-spinner"></span>
+            <span v-else>{{ stateIcon(entry.status) }}</span>
+          </span>
+          <span>{{ entry.title }}</span>
+        </div>
         <div
-          v-for="(narration, index) in narrations"
-          :key="narration.id || index"
+          v-else-if="entry.type === 'text'"
           class="process-narration"
-          v-html="renderMarkdown(narration)"
+          v-html="renderMarkdown(entry.text)"
         ></div>
-      </div>
+        <ToolActivity
+          v-else-if="entry.type === 'tools'"
+          :items="entry.items || []"
+          :narrations="entry.narrations || []"
+        />
+        <TodoPlan
+          v-else-if="entry.type === 'todo'"
+          :todos="entry.todos || []"
+        />
+      </template>
     </div>
   </section>
 </template>

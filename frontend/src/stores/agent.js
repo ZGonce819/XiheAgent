@@ -68,6 +68,11 @@ function isVisibleToolEvent(event) {
     || Boolean(detail.tool)
 }
 
+function isTodoToolEvent(event) {
+  const detail = parseEventDetail(event?.detail)
+  return detail.tool === 'write_todos' || String(event?.title || '') === 'write_todos'
+}
+
 function todoRunId(event) {
   const parts = String(event.id || '').split(':')
   const index = parts.indexOf('todos')
@@ -110,36 +115,46 @@ function historyTimeline(threadId, runEvents) {
   }
 
   const timeline = []
-  const emittedTodoRuns = new Set()
-  let currentToolMessage = null
   let processMessage = null
   let pendingNarrations = []
   let pendingNarrationRunId = ''
+  let currentToolsEntry = null
 
-  const appendProcessNarrations = (narrations) => {
-    if (!narrations.length) return
+  const ensureProcess = (event = {}) => {
     if (!processMessage) {
       processMessage = {
         id: `${threadId}-process-history`,
         author: 'agent',
-        timestamp: narrations[0].timestamp || nowIso(),
+        timestamp: event.created_at || nowIso(),
         chunks: [{
-          kind: 'process',
-          runId: 'history',
-          startedAt: millis(narrations[0].timestamp),
-          finishedAt: null,
-          items: [],
-          narrations: [],
+          kind: 'process', runId: 'history', startedAt: millis(event.created_at), finishedAt: null,
+          items: [], narrations: [], timeline: [],
         }],
       }
-      timeline.unshift(processMessage)
+      timeline.push(processMessage)
     }
     const chunk = processMessage.chunks[0]
+    if (!Array.isArray(chunk.timeline)) chunk.timeline = []
+    return chunk
+  }
+
+  const addEntry = (entry) => {
+    const chunk = ensureProcess(entry)
+    const index = chunk.timeline.findIndex((item) => item.id === entry.id)
+    if (index >= 0) chunk.timeline[index] = { ...chunk.timeline[index], ...entry }
+    else chunk.timeline.push(entry)
+    return chunk
+  }
+
+  const appendProcessNarrations = (narrations) => {
+    if (!narrations.length) return
+    const chunk = ensureProcess({ created_at: narrations[0].timestamp })
     if (!Array.isArray(chunk.narrations)) chunk.narrations = []
     for (const narration of narrations) {
       if (!chunk.narrations.some((entry) => entry.id === narration.id)) {
         chunk.narrations.push({ id: narration.id, text: narration.text })
       }
+      addEntry({ id: narration.id, type: 'text', text: narration.text, createdAt: narration.timestamp })
     }
   }
 
@@ -163,27 +178,18 @@ function historyTimeline(threadId, runEvents) {
     const eventId = String(event.id || '')
 
     if (PROCESS_EVENT_KEYS.has(eventKey(event))) {
-      currentToolMessage = null
+      currentToolsEntry = null
+      const keepLastAsAnswer = ['plan', 'done', 'failed'].includes(eventKey(event))
+      // If a provider sends the terminal process event before any other
+      // process event, create the wrapper first so the final answer still
+      // appears after the execution panel rather than before it.
+      if (keepLastAsAnswer && pendingNarrations.length && !processMessage) {
+        ensureProcess(event)
+      }
       if (pendingNarrations.length) {
-        flushPendingNarrations({ keepLastAsAnswer: ['plan', 'done', 'failed'].includes(eventKey(event)) })
+        flushPendingNarrations({ keepLastAsAnswer })
       }
-      if (!processMessage) {
-        processMessage = {
-          id: `${threadId}-process-history`,
-          author: 'agent',
-          timestamp: event.created_at || nowIso(),
-          chunks: [{
-            kind: 'process',
-            runId: 'history',
-            startedAt: millis(event.created_at),
-            finishedAt: null,
-            items: [],
-            narrations: [],
-          }],
-        }
-        timeline.push(processMessage)
-      }
-      const chunk = processMessage.chunks[0]
+      const chunk = ensureProcess(event)
       const createdAt = millis(event.created_at)
       const updatedAt = millis(event.updated_at)
       if (createdAt != null && (chunk.startedAt == null || createdAt < chunk.startedAt)) {
@@ -192,16 +198,18 @@ function historyTimeline(threadId, runEvents) {
       if (updatedAt != null && (chunk.finishedAt == null || updatedAt > chunk.finishedAt)) {
         chunk.finishedAt = updatedAt
       }
-      chunk.items.push({
+      const item = {
         id: eventId,
         title: String(event.title || '任务处理'),
         status: String(event.status || 'completed'),
-      })
+      }
+      if (!chunk.items.some((entry) => entry.id === item.id)) chunk.items.push(item)
+      addEntry({ id: item.id, type: 'step', ...item, createdAt: event.created_at })
       continue
     }
 
     if (eventId.includes(':stream:') && eventId.includes(':assistant:') && detail.text) {
-      currentToolMessage = null
+      currentToolsEntry = null
       const runId = streamRunId(eventId)
       if (pendingNarrations.length && pendingNarrationRunId && runId !== pendingNarrationRunId) {
         flushPendingNarrations()
@@ -216,49 +224,55 @@ function historyTimeline(threadId, runEvents) {
     }
 
     if (event.kind === 'todo') {
-      currentToolMessage = null
-      if (pendingNarrations.length) flushPendingNarrations()
-      const runId = todoRunId(event)
-      const latestEvent = latestTodoByRun.get(runId)
-      if (!latestEvent || emittedTodoRuns.has(runId)) continue
-      const todos = parseEventDetail(latestEvent.detail).todos
-      if (!Array.isArray(todos) || !todos.length) continue
-      emittedTodoRuns.add(runId)
-      timeline.push({
-        id: `${threadId}-live-plan-${runId}`,
-        author: 'agent',
-        timestamp: event.created_at || nowIso(),
-        chunks: [{ kind: 'todo', todos }],
-      })
+      currentToolsEntry = null
       continue
     }
 
-    if (!isVisibleToolEvent(event)) continue
+    if (!isVisibleToolEvent(event)) {
+      currentToolsEntry = null
+      continue
+    }
     if (pendingNarrations.length) flushPendingNarrations()
     const item = normalizeToolItem(event)
     if (item.toolName === 'write_todos' || item.title === 'write_todos') {
-      currentToolMessage = null
       continue
     }
-    if (!currentToolMessage) {
-      currentToolMessage = {
-        id: `${threadId}-tool-history-${item.id}`,
-        author: 'agent',
-        timestamp: item.createdAt,
-        chunks: [{
-          kind: 'tools',
-          groupId: `history-${item.id}`,
-          runId: streamRunId(eventId),
-          narrations: [],
-          items: [],
-        }],
-      }
-      timeline.push(currentToolMessage)
+    const chunk = ensureProcess(event)
+    const groupId = item.groupId || ''
+    let toolsEntry = groupId
+      ? chunk.timeline.find((entry) => entry.type === 'tools' && entry.groupId === groupId)
+      : currentToolsEntry
+    if (!toolsEntry) {
+      const fallbackGroupId = groupId || `history-${item.id}`
+      toolsEntry = { id: `${threadId}-tool-history-${fallbackGroupId}`, type: 'tools', groupId: fallbackGroupId, runId: streamRunId(eventId), narrations: [], items: [], createdAt: item.createdAt }
+      chunk.timeline.push(toolsEntry)
     }
-    currentToolMessage.chunks[0].items.push(item)
+    currentToolsEntry = toolsEntry
+    const itemIndex = toolsEntry.items.findIndex((entry) => entry.id === item.id)
+    if (itemIndex >= 0) toolsEntry.items[itemIndex] = { ...toolsEntry.items[itemIndex], ...item }
+    else toolsEntry.items.push(item)
   }
 
   flushPendingNarrations({ keepLastAsAnswer: true })
+
+  const processChunk = processMessage?.chunks?.find((chunk) => chunk.kind === 'process')
+  if (processChunk) {
+    let latestTodo = null
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      if (events[index].kind === 'todo' && latestTodoByRun.has(todoRunId(events[index]))) {
+        latestTodo = latestTodoByRun.get(todoRunId(events[index]))
+        break
+      }
+    }
+    const todos = latestTodo ? parseEventDetail(latestTodo.detail).todos : null
+    if (Array.isArray(todos) && todos.length) {
+      addEntry({
+        id: `${threadId}-history-todo-final`, type: 'todo',
+        todos: todos.map((todo) => ({ ...todo, status: todo.status === 'error' ? 'error' : 'completed' })),
+      })
+    }
+    processChunk.finishedAt = processChunk.finishedAt || Date.now()
+  }
 
   return timeline
 }
@@ -378,6 +392,7 @@ function createProcessMessage() {
         status: 'in_progress',
       }],
       narrations: [],
+      timeline: [],
     }],
   }
 }
@@ -405,6 +420,7 @@ function processChunk(messages, threadId, runId) {
         finishedAt: null,
         items: [],
         narrations: [],
+        timeline: [],
       }],
     }
     messages.push(message)
@@ -414,7 +430,16 @@ function processChunk(messages, threadId, runId) {
   const chunk = message.chunks.find((entry) => entry.kind === 'process')
   chunk.runId = runId
   if (!Array.isArray(chunk.narrations)) chunk.narrations = []
+  if (!Array.isArray(chunk.timeline)) chunk.timeline = []
   return chunk
+}
+
+function appendProcessTimeline(chunk, entry) {
+  if (!chunk || !entry) return
+  if (!Array.isArray(chunk.timeline)) chunk.timeline = []
+  const index = chunk.timeline.findIndex((item) => item.id === entry.id)
+  if (index >= 0) chunk.timeline[index] = { ...chunk.timeline[index], ...entry }
+  else chunk.timeline.push(entry)
 }
 
 function markProcessConnected(messages, threadId) {
@@ -441,6 +466,7 @@ function upsertProcessActivity(messages, threadId, data) {
   const existingIndex = chunk.items.findIndex((entry) => entry.id === item.id)
   if (existingIndex >= 0) chunk.items[existingIndex] = { ...chunk.items[existingIndex], ...item }
   else chunk.items.push(item)
+  appendProcessTimeline(chunk, { id: item.id, type: 'step', ...item })
 }
 
 function finishProcessActivity(messages, status = 'completed') {
@@ -452,6 +478,20 @@ function finishProcessActivity(messages, status = 'completed') {
       chunk.items = chunk.items.map((item) => (
         item.status === 'in_progress' ? { ...item, status } : item
       ))
+      chunk.timeline = (chunk.timeline || []).map((entry) => {
+        if (entry.type === 'step') {
+          return entry.status === 'in_progress' ? { ...entry, status } : entry
+        }
+        if (entry.type === 'tools') {
+          return {
+            ...entry,
+            items: (entry.items || []).map((item) => (
+              ['pending', 'in_progress'].includes(item.status) ? { ...item, status } : item
+            )),
+          }
+        }
+        return entry
+      })
     }
   }
 }
@@ -474,6 +514,7 @@ function foldEarlierAssistantMessages(messages, threadId, runId, currentMessageI
     if (!chunk.narrations.some((entry) => entry.id === candidate.message.id)) {
       chunk.narrations.push({ id: candidate.message.id, text: candidate.text })
     }
+    appendProcessTimeline(chunk, { id: candidate.message.id, type: 'text', text: candidate.text })
   }
 }
 
@@ -499,49 +540,61 @@ function upsertToolActivity(messages, threadId, data) {
   const item = normalizeToolItem(data)
   if (item.toolName === 'write_todos' || item.title === 'write_todos') return
 
-  let message = messages.find((entry) => entry.chunks?.some((chunk) => (
-    chunk.kind === 'tools' && chunk.items?.some((existing) => existing.id === item.id)
-  )))
-  if (!message) {
-    removeEmptyAgentMessages(messages)
-    const groupId = item.groupId || item.id
-    const groupedMessage = messages.find((entry) => entry.chunks?.some((chunk) => (
-      chunk.kind === 'tools' && chunk.groupId === groupId
-    )))
-    const previousMessage = messages[messages.length - 1]
-    const previousToolChunk = groupedMessage
-      ? groupedMessage.chunks.find((chunk) => chunk.kind === 'tools')
-      : !item.groupId && previousMessage?.chunks?.length === 1 && previousMessage.chunks[0].kind === 'tools'
-        ? previousMessage.chunks[0]
-        : null
-
-    if (previousToolChunk) {
-      previousToolChunk.items.push(item)
-      return
-    }
-
-    const runId = String(data.run_id || '')
-
-    message = {
-      id: `${threadId}-live-tool-group-${item.id}`,
-      author: 'agent',
-      timestamp: nowIso(),
-      chunks: [{ kind: 'tools', groupId, runId, narrations: [], items: [item] }],
-    }
-    messages.push(message)
-    return
+  const runId = String(data.run_id || 'current')
+  const process = processChunk(messages, threadId, runId)
+  const groupId = item.groupId || ''
+  let toolsEntry = groupId
+    ? process.timeline.find((entry) => entry.type === 'tools' && entry.groupId === groupId)
+    : process.timeline[process.timeline.length - 1]?.type === 'tools'
+      ? process.timeline[process.timeline.length - 1]
+      : null
+  if (!toolsEntry) {
+    const fallbackGroupId = groupId || item.id
+    toolsEntry = { id: `${threadId}-live-tool-group-${fallbackGroupId}`, type: 'tools', groupId: fallbackGroupId, runId, narrations: [], items: [] }
+    appendProcessTimeline(process, toolsEntry)
   }
-
-  const chunk = message.chunks.find((entry) => entry.kind === 'tools')
-  const existingIndex = chunk.items.findIndex((entry) => entry.id === item.id)
-  const existing = chunk.items[existingIndex]
-  chunk.items[existingIndex] = {
+  const existingIndex = toolsEntry.items.findIndex((entry) => entry.id === item.id)
+  const existing = existingIndex >= 0 ? toolsEntry.items[existingIndex] : {}
+  const merged = {
     ...existing,
     ...item,
     args: Object.keys(item.args).length ? item.args : existing.args,
     toolName: item.toolName || existing.toolName,
     elapsedMs: item.elapsedMs ?? existing.elapsedMs,
     detailText: item.detailText || existing.detailText,
+  }
+  if (existingIndex >= 0) toolsEntry.items[existingIndex] = merged
+  else toolsEntry.items.push(merged)
+}
+
+function moveTodosIntoProcess(messages) {
+  let latestUserIndex = -1
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].author === 'user') {
+      latestUserIndex = index
+      break
+    }
+  }
+  const processIndex = messages.findLastIndex((message, index) => (
+    index > latestUserIndex && message.chunks?.some((chunk) => chunk.kind === 'process')
+  ))
+  if (processIndex < 0) return
+  const processMessage = messages[processIndex]
+  const todoMessages = messages.filter((message, index) => (
+    index > latestUserIndex
+    && message.chunks?.some((chunk) => chunk.kind === 'todo')
+  ))
+  if (!todoMessages.length) return
+  const process = processMessage.chunks.find((chunk) => chunk.kind === 'process')
+  const todoChunks = todoMessages.flatMap((message) => message.chunks.filter((chunk) => chunk.kind === 'todo'))
+  const latest = todoChunks[todoChunks.length - 1]
+  if (!latest?.todos?.length) return
+  appendProcessTimeline(process, {
+    id: `${processMessage.id}-todo-final`, type: 'todo',
+    todos: latest.todos.map((todo) => ({ ...todo, status: todo.status === 'error' ? 'error' : 'completed' })),
+  })
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (todoMessages.includes(messages[index])) messages.splice(index, 1)
   }
 }
 
@@ -733,11 +786,6 @@ export const useAgentStore = defineStore('agent', {
             }
 
             if (event === 'todo_delta') {
-              foldEarlierAssistantMessages(
-                this.messages,
-                eventThreadId,
-                String(data.run_id || ''),
-              )
               upsertTodoMessage(
                 this.messages,
                 data.message_id || `todo-${Date.now()}`,
@@ -748,7 +796,7 @@ export const useAgentStore = defineStore('agent', {
 
             if (event === 'tool_update') {
               upsertProcessActivity(this.messages, eventThreadId, data)
-              if (isVisibleToolEvent(data)) {
+              if (isVisibleToolEvent(data) && !isTodoToolEvent(data)) {
                 foldEarlierAssistantMessages(
                   this.messages,
                   eventThreadId,
@@ -802,7 +850,9 @@ export const useAgentStore = defineStore('agent', {
             if (event === 'done') {
               removeEmptyAgentMessages(this.messages)
               foldCompletedRunNarrations(this.messages)
-              finishProcessActivity(this.messages)
+              const failed = this.currentThread?.status === 'error' || !!this.error
+              if (!failed) moveTodosIntoProcess(this.messages)
+              finishProcessActivity(this.messages, failed ? 'error' : 'completed')
               if (this.currentThread && this.currentThread.status === 'running') {
                 this.currentThread.status = 'finished'
               }

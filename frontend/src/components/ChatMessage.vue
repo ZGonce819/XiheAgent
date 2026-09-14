@@ -46,6 +46,10 @@ function processChunks() {
 function errorChunks() {
   return (props.message.chunks || []).filter((chunk) => chunk.kind === 'error')
 }
+
+function hasEmbeddedTimelineEntry(type) {
+  return processChunks().some((chunk) => (chunk.timeline || []).some((entry) => entry.type === type))
+}
 </script>
 
 <template>
@@ -66,6 +70,7 @@ function errorChunks() {
         :key="`process-${index}`"
         :items="chunk.items || []"
         :narrations="chunk.narrations || []"
+        :timeline="chunk.timeline || []"
         :started-at="chunk.startedAt"
         :finished-at="chunk.finishedAt"
       />
@@ -79,12 +84,14 @@ function errorChunks() {
 
       <TodoPlan
         v-for="(chunk, index) in todoChunks()"
+        v-if="!hasEmbeddedTimelineEntry('todo')"
         :key="`todo-${index}`"
         :todos="chunk.todos || []"
       />
 
       <ToolActivity
         v-for="(chunk, index) in toolChunks()"
+        v-if="!hasEmbeddedTimelineEntry('tools')"
         :key="`tools-${index}`"
         :items="chunk.items || []"
         :narrations="chunk.narrations || []"
