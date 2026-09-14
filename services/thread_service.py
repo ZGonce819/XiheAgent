@@ -210,7 +210,7 @@ def thread_payload(thread: dict[str, Any]) -> dict[str, Any]:
     run_events = thread.get("run_events") or []
     return {
         "id": thread["thread_id"],
-        "title": thread.get("title") or "xihe-agent Task",
+        "title": thread.get("title") or "XiheAgent Task",
         "repo": full_name,
         "repoFullName": full_name,
         "repoUrl": repo_url,

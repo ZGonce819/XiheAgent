@@ -36,7 +36,7 @@ def dashboard_me() -> dict[str, Any]:
         包含登录名、邮箱、头像和管理员状态的字典。
     """
     return {
-        "login": "xihe-agent",
+        "login": "XiheAgent",
         "email": None,
         "avatar_url": None,
         "is_admin": True,

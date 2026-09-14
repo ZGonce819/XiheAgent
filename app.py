@@ -17,7 +17,7 @@ configure_logging()
 from api import dashboard_router, router  # noqa: E402
 
 app = FastAPI(
-    title="xihe-agent Backend",
+    title="XiheAgent Backend",
     version="0.1.0",
 )
 

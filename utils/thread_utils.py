@@ -69,7 +69,7 @@ def pr_payload(thread: dict[str, Any]) -> dict[str, Any] | None:
         number = 0
     return {
         "number": number,
-        "title": thread.get("title") or "xihe-agent Pull Request",
+        "title": thread.get("title") or "XiheAgent Pull Request",
         "state": "open",
         "headRef": thread.get("branch_name") or "",
         "baseRef": "master",
