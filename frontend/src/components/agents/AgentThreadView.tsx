@@ -7,6 +7,7 @@ import type { ModelSelection } from "@/lib/agents/useModelOptions";
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar";
 import { AgentsShell } from "@/components/agents/AgentsSidebar";
 import { MessageView } from "@/components/agents/ported";
+import { RunWorkflowSteps } from "@/components/agents/RunWorkflowSteps";
 import { useCancelAgentThread, useSendAgentMessage } from "@/lib/agents/queries";
 import { addPendingPrompt, dropPendingPrompts, getPendingPrompts } from "@/lib/agents/pendingPrompts";
 import { useAgentThreadStream } from "@/lib/agents/useThreadStream";
@@ -49,6 +50,11 @@ function isPendingPromptConfirmed(entry: PendingPrompt, messages: Array<Message>
 
 function liveStatusFor(thread: AgentThread, hasPendingPrompt: boolean): string | null {
   if (thread.status !== "running") return null;
+
+  const activeEvent = [...(thread.runEvents ?? [])].reverse().find(
+    (event) => event.status === "in_progress" || event.status === "pending",
+  );
+  if (activeEvent) return activeEvent.title;
 
   for (const message of [...thread.messages].reverse()) {
     for (const chunk of [...message.chunks].reverse()) {
@@ -154,6 +160,16 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                 contentWidthClass="max-w-3xl"
                 liveStatus={liveStatus}
               />
+              {thread.runEvents && thread.runEvents.length > 0 && (
+                <div className="shrink-0 px-4">
+                  <div className="mx-auto w-full min-w-0 max-w-3xl">
+                    <RunWorkflowSteps
+                      runEvents={thread.runEvents}
+                      isRunning={hasActiveRun}
+                    />
+                  </div>
+                </div>
+              )}
               <div className="shrink-0 px-4 pb-4">
                 <div className="mx-auto w-full min-w-0 max-w-3xl">
                   {runFailed ? (
@@ -194,6 +210,14 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                   {sendError}
                 </p>
               ) : null}
+              {thread.runEvents && thread.runEvents.length > 0 && (
+                <div className="w-full max-w-3xl">
+                  <RunWorkflowSteps
+                    runEvents={thread.runEvents}
+                    isRunning={hasActiveRun}
+                  />
+                </div>
+              )}
               <div className="w-full max-w-3xl">
                 <AgentPromptBar
                   placeholder="发送第一条指令"

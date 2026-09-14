@@ -13,6 +13,18 @@ watch(
   () => agent.messages.map((message) => {
     const length = message.chunks?.map((chunk) => {
       if (chunk.kind === 'todo') return JSON.stringify(chunk.todos || [])
+      if (chunk.kind === 'tools') {
+        return JSON.stringify({
+          items: (chunk.items || []).map((item) => [item.id, item.status, item.elapsedMs]),
+          narrations: chunk.narrations || [],
+        })
+      }
+      if (chunk.kind === 'process') {
+        return JSON.stringify({
+          items: (chunk.items || []).map((item) => [item.id, item.title, item.status]),
+          narrations: chunk.narrations || [],
+        })
+      }
       return chunk.text || ''
     }).join('').length || 0
     return `${message.id}:${length}`

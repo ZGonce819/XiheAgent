@@ -44,6 +44,7 @@ def run_plan_response_task(
     previous_plan_message: dict[str, Any] | None = None,
     revision_prompt: str | None = None,
     event_sink: RuntimeEventSink | None = None,
+    run_id: str | None = None,
 ) -> dict[str, Any]:
     """为编码需求生成技术方案，并把方案作为普通回答直接展示。
 
@@ -100,7 +101,7 @@ def run_plan_response_task(
         repo_name=repo.repo,
         latest_run_status="running",
     )
-    run_id = str(uuid.uuid4())
+    run_id = run_id or str(uuid.uuid4())
     store.record_run(run_id=run_id, thread_id=thread_id, status="running")
     record_event(thread_id, "agent", "构建方案生成 Agent", status="in_progress")
     # 方案任务也使用 DeepAgent，是因为它需要读取仓库结构、测试方式、关键文件等上下文。

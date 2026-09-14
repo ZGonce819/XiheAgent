@@ -87,6 +87,7 @@ def make_checkpointer(settings: Settings | None = None) -> Any:
     url = build_redis_url(settings)
     logger.info("创建 Redis checkpointer：%s:%s/%s", settings.redis_host, settings.redis_port, settings.redis_checkpoint_db)
     saver = RedisSaver(url)
+    saver.setup()
     return saver
 
 

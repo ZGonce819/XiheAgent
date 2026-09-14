@@ -5,22 +5,26 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from database.mysql import ConnectionManager, utc_now
+
+logger = logging.getLogger(__name__)
 
 
 class RunEventRepo(ConnectionManager):
     """run_events 表数据访问层。"""
 
     def ensure_table(self) -> None:
-        """创建 run_events 表（如不存在）。
+        """创建 run_events 表（如不存在）并迁移列定义。
 
         表结构包含 event id 主键、thread_id 索引、事件类型、标题、状态、详情和时间戳。
+        若已存在 ``id VARCHAR(64)`` 的旧表，自动扩容到 ``VARCHAR(256)``。
         """
         self.execute("""
             CREATE TABLE IF NOT EXISTS run_events (
-                id VARCHAR(64) PRIMARY KEY,
+                id VARCHAR(256) PRIMARY KEY,
                 thread_id VARCHAR(64) NOT NULL,
                 kind VARCHAR(64) NOT NULL,
                 title VARCHAR(500) NOT NULL,
@@ -31,6 +35,18 @@ class RunEventRepo(ConnectionManager):
                 INDEX idx_thread_id (thread_id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """)
+        # 旧表 id 列可能仍为 VARCHAR(64)，先查再改，避免不必要的 ALTER TABLE。
+        col = self.fetch_one(
+            "SELECT CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'run_events' AND COLUMN_NAME = 'id'",
+        )
+        if col and col.get("CHARACTER_MAXIMUM_LENGTH", 256) < 256:
+            try:
+                self.execute("ALTER TABLE run_events MODIFY COLUMN id VARCHAR(256) NOT NULL")
+            except Exception:
+                logger.warning("run_events.id 列扩容失败，可手动执行："
+                               "ALTER TABLE run_events MODIFY COLUMN id VARCHAR(256) NOT NULL",
+                               exc_info=True)
 
     def add_run_event(
         self,
@@ -93,7 +109,7 @@ class RunEventRepo(ConnectionManager):
         """清空某个 thread 的临时过程事件。
 
         run_events 只服务当前/最近一次运行的过程展示；
-        历史问答正文保存在 thread_messages，不依赖这里的临时事件。
+        历史问答通过 LangGraph checkpoint 持久化，不依赖这里的临时事件。
 
         Args:
             thread_id: 会话 ID。

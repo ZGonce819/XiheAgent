@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 import { agentsApi } from "./api";
@@ -8,13 +7,41 @@ import type {
   AgentThread,
   Chunk,
   Message,
+  RunEvent,
   TextChunk,
   TodoItem,
+  ToolExecutionChunk,
 } from "./types";
 
 interface StreamPart {
   event?: string;
   data?: unknown;
+}
+
+export function parseSseBlock(block: string): StreamPart | null {
+  let event = "message";
+  const dataLines: string[] = [];
+
+  for (const line of block.split(/\r?\n/)) {
+    if (line.startsWith("event:")) {
+      event = line.slice(6).trim();
+    } else if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).trimStart());
+    }
+  }
+
+  if (dataLines.length === 0) return null;
+  const payload = JSON.parse(dataLines.join("\n")) as unknown;
+
+  // Accept both our standard SSE format (event line + raw JSON) and the
+  // wrapped format used by older clients.
+  if (isRecord(payload) && typeof payload.event === "string" && "data" in payload) {
+    return {
+      event: payload.event,
+      data: payload.data,
+    };
+  }
+  return { event, data: payload };
 }
 
 interface ThreadMetaPayload {
@@ -26,6 +53,7 @@ interface ThreadMetaPayload {
   platformDisplay?: string;
   pr?: AgentThread["pr"];
   updatedAt?: number;
+  runEvents?: Array<RunEvent>;
 }
 
 interface TextDeltaPayload {
@@ -46,6 +74,20 @@ interface TodoDeltaPayload {
   message_id?: string;
   run_id?: string;
   todos?: Array<TodoItem>;
+}
+
+interface ToolUpdatePayload {
+  thread_id?: string;
+  run_id?: string;
+  event_id?: string;
+  kind?: string;
+  title?: string;
+  status?: string;
+  detail?: string | null;
+  tool_kind?: string;
+  tool_group_id?: string | null;
+  is_tool?: boolean;
+  is_process?: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -104,12 +146,12 @@ function findRunMessageIndex(
   role: "user" | "plan" | "assistant",
 ): number {
   if (!runId) return -1;
-  const marker =
-    role === "user"
-      ? `-user-${runId}`
-      : role === "plan"
-        ? `-live-plan-${runId}`
-        : `-live-assistant-${runId}`;
+  if (role === "assistant") {
+    return messages.findLastIndex((message) =>
+      message.id.includes(`-live-assistant-${runId}-`),
+    );
+  }
+  const marker = role === "user" ? `-user-${runId}` : `-live-plan-${runId}`;
   return messages.findIndex((message) => message.id.endsWith(marker));
 }
 
@@ -130,6 +172,28 @@ function ensureAgentMessage(thread: AgentThread, messageId: string): Message {
     timestamp: new Date().toISOString(),
     chunks: [],
   };
+}
+
+function applyMessageStart(
+  thread: AgentThread,
+  data: { message_id?: string; run_id?: string },
+): AgentThread {
+  const messageId = data.message_id;
+  if (!messageId) return thread;
+
+  const messages = thread.messages.slice();
+  const previousIndex = findRunMessageIndex(messages, payloadRunId(data), "assistant");
+  if (previousIndex >= 0 && messages[previousIndex].id !== messageId) {
+    const previous = messages[previousIndex];
+    if (previous.chunks.some((chunk) => chunk.kind === "text" && chunk.text.trim())) {
+      messages[previousIndex] = { ...previous, executionNarration: true };
+    }
+  }
+
+  if (!messages.some((message) => message.id === messageId)) {
+    messages.push(ensureAgentMessage({ ...thread, messages }, messageId));
+  }
+  return { ...thread, messages };
 }
 
 function setTextChunk(message: Message, text: string, mode: "append" | "replace"): Message {
@@ -244,10 +308,175 @@ function applyThreadMeta(thread: AgentThread, data: ThreadMetaPayload): AgentThr
     platformDisplay: data.platformDisplay ?? thread.platformDisplay,
     pr: data.pr ?? thread.pr,
     updatedAt: data.updatedAt ?? thread.updatedAt,
+    runEvents: data.runEvents ?? thread.runEvents,
   };
 }
 
-function handleStreamPart(
+function parseDetail(detail: string | null | undefined): Record<string, unknown> {
+  if (!detail) return {};
+  try {
+    const parsed = JSON.parse(detail) as unknown;
+    return isRecord(parsed) ? parsed : { text: detail };
+  } catch {
+    return { text: detail };
+  }
+}
+
+function toolChunkFromEvent(
+  event: Pick<RunEvent, "id" | "kind" | "title" | "status" | "detail"> & {
+    tool_kind?: string;
+    tool_group_id?: string | null;
+  },
+): ToolExecutionChunk | null {
+  const detail = parseDetail(event.detail);
+  const toolName = String(detail.tool || "");
+  if (toolName === "write_todos" || event.title === "write_todos") return null;
+
+  const args = isRecord(detail.args) ? detail.args : detail;
+  const rawKind = event.tool_kind || event.kind || "other";
+  const validKinds = new Set([
+    "read", "edit", "delete", "move", "search", "execute", "think", "fetch", "slack", "linear", "other",
+  ]);
+  const toolKind = (validKinds.has(rawKind) ? rawKind : "other") as ToolExecutionChunk["toolKind"];
+  let input: Record<string, unknown> | undefined;
+
+  if (toolKind === "read" || toolKind === "search") {
+    const path = args.path || args.file || args.text;
+    if (path) input = { path: String(path) };
+  } else if (["edit", "delete", "move"].includes(toolKind)) {
+    const path = args.file_path || args.path || args.file;
+    if (path) input = { path: String(path) };
+  } else if (toolKind === "execute") {
+    const command = args.command || args.cmd || args.text;
+    if (command) input = { command: String(command) };
+  } else if (Object.keys(args).length > 0) {
+    input = args;
+  }
+
+  const elapsed = Number(detail.elapsed_ms);
+  return {
+    kind: "tool-execution",
+    toolCallId: event.id,
+    title: event.title,
+    toolKind,
+    status: event.status,
+    input,
+    elapsedMs: Number.isFinite(elapsed) ? elapsed : undefined,
+    groupId: event.tool_group_id || undefined,
+  };
+}
+
+function eventText(event: RunEvent): string {
+  const text = parseDetail(event.detail).text;
+  return typeof text === "string" ? text.trim() : "";
+}
+
+function isAssistantStreamEvent(event: RunEvent): boolean {
+  return event.id.includes(":stream:") && event.id.includes(":assistant:") && !!eventText(event);
+}
+
+function isExecutionEvent(event: RunEvent): boolean {
+  if (event.id.includes(":tool:")) return true;
+  if (event.id.includes(":stream:") && event.id.includes(":subagent:")) return true;
+  return !!parseDetail(event.detail).tool;
+}
+
+export function normalizeThreadHistory(thread: AgentThread): AgentThread {
+  const events = thread.runEvents ?? [];
+  if (!events.some(isAssistantStreamEvent)) return thread;
+
+  const rebuiltMessages: Message[] = [];
+  let phase: { id: string; timestamp: string; text: string; tools: ToolExecutionChunk[] } | null = null;
+
+  const flushPhase = (final: boolean) => {
+    if (!phase) return;
+    const chunks: Chunk[] = [];
+    if (phase.text) chunks.push({ kind: "text", text: phase.text });
+    chunks.push(...phase.tools);
+    if (chunks.length > 0) {
+      rebuiltMessages.push({
+        id: phase.id,
+        author: "agent",
+        timestamp: phase.timestamp,
+        chunks,
+        executionNarration: !final,
+      });
+    }
+    phase = null;
+  };
+
+  for (const event of events) {
+    if (isAssistantStreamEvent(event)) {
+      flushPhase(false);
+      phase = {
+        id: `history-${event.id}`,
+        timestamp: event.created_at,
+        text: eventText(event),
+        tools: [],
+      };
+      continue;
+    }
+    if (!isExecutionEvent(event)) continue;
+    const tool = toolChunkFromEvent(event);
+    if (!tool) continue;
+    if (!phase) {
+      phase = {
+        id: `history-tools-${event.id}`,
+        timestamp: event.created_at,
+        text: "",
+        tools: [],
+      };
+    }
+    const existingIndex = phase.tools.findIndex((item) => item.toolCallId === tool.toolCallId);
+    if (existingIndex >= 0) phase.tools[existingIndex] = tool;
+    else phase.tools.push(tool);
+  }
+  // The last assistant stream block is the user-facing answer. Keep it as
+  // normal body text even if a provider reports a trailing tool event.
+  if (phase) {
+    const finalPhase = phase;
+    if (finalPhase.tools.length > 0) {
+      rebuiltMessages.push({
+        id: `${finalPhase.id}-tools`,
+        author: "agent",
+        timestamp: finalPhase.timestamp,
+        chunks: finalPhase.tools,
+        executionNarration: true,
+      });
+    }
+    if (finalPhase.text) {
+      rebuiltMessages.push({
+        id: finalPhase.id,
+        author: "agent",
+        timestamp: finalPhase.timestamp,
+        chunks: [{ kind: "text", text: finalPhase.text }],
+      });
+    }
+    phase = null;
+  }
+
+  let lastUserIndex = -1;
+  for (let index = thread.messages.length - 1; index >= 0; index -= 1) {
+    if (thread.messages[index].author === "user") {
+      lastUserIndex = index;
+      break;
+    }
+  }
+  const prefix = thread.messages.slice(0, lastUserIndex + 1);
+  const suffix = thread.messages.slice(lastUserIndex + 1);
+  const plans = suffix.filter((message) => message.chunks.some((chunk) => chunk.kind === "todo"));
+  const preserved = suffix.filter((message) =>
+    !message.chunks.some((chunk) => chunk.kind === "todo")
+    && message.chunks.some((chunk) => !["text", "tool-execution"].includes(chunk.kind)),
+  );
+
+  return {
+    ...thread,
+    messages: [...prefix, ...plans, ...rebuiltMessages, ...preserved],
+  };
+}
+
+export function handleStreamPart(
   threadId: string,
   part: StreamPart,
   queryClient: QueryClient,
@@ -280,10 +509,8 @@ function handleStreamPart(
   }
 
   if (event === "message_start") {
-    const messageId = String(data.message_id || "");
-    if (!messageId) return;
     updateThread(threadId, queryClient, (thread) =>
-      upsertMessage(thread, ensureAgentMessage(thread, messageId)),
+      applyMessageStart(thread, data as { message_id?: string; run_id?: string }),
     );
     return;
   }
@@ -296,13 +523,117 @@ function handleStreamPart(
   }
 
   if (event === "tool_update") {
-    // 工具事件默认只保留在后端日志 / run_events 中，不进入聊天正文。
-    // 这样页面重点展示任务计划和有价值的 AIMessage 文本。
+    const payload = data as ToolUpdatePayload;
+    if (!payload.title) return;
+    const detail = parseDetail(payload.detail);
+    const toolName = String(detail.tool || "");
+    const runEvent: RunEvent = {
+      id: payload.event_id || `live-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      thread_id: payload.thread_id || threadId,
+      kind: (payload.kind as RunEvent["kind"]) || "other",
+      title: payload.title,
+      status: (payload.status as RunEvent["status"]) || "in_progress",
+      detail: payload.detail ?? null,
+      created_at: new Date().toISOString(),
+    };
+    const toolChunk = toolChunkFromEvent({
+      ...runEvent,
+      tool_kind: payload.tool_kind,
+      tool_group_id: payload.tool_group_id,
+    });
+
+    updateThread(threadId, queryClient, (thread) => {
+      const existingRunEvents = thread.runEvents ?? [];
+      const duplicateIndex = existingRunEvents.findIndex((item) => item.id === runEvent.id);
+      let updatedRunEvents = existingRunEvents;
+      if (duplicateIndex >= 0) {
+        const updated = existingRunEvents.slice();
+        updated[duplicateIndex] = {
+          ...updated[duplicateIndex],
+          ...runEvent,
+          created_at: updated[duplicateIndex].created_at,
+        };
+        updatedRunEvents = updated;
+      } else {
+        updatedRunEvents = [...existingRunEvents, runEvent];
+      }
+
+      let nextThread = { ...thread, runEvents: updatedRunEvents };
+      if (toolName === "write_todos") {
+        const args = isRecord(detail.args) ? detail.args : {};
+        const todos = Array.isArray(args.todos) ? args.todos as Array<TodoItem> : [];
+        return todos.length > 0
+          ? applyTodoDelta(nextThread, {
+              message_id: `${threadId}-live-plan-${payload.run_id || "current"}`,
+              run_id: payload.run_id,
+              todos,
+            })
+          : nextThread;
+      }
+      if (payload.is_process || !toolChunk || !isExecutionEvent(runEvent)) return nextThread;
+
+      let messages = thread.messages.slice();
+      let targetMessageIndex = messages.findIndex((message) =>
+        message.chunks.some((chunk) =>
+          chunk.kind === "tool-execution" && chunk.toolCallId === toolChunk.toolCallId,
+        ),
+      );
+      if (targetMessageIndex < 0) {
+        targetMessageIndex = messages.findLastIndex((message) =>
+          message.chunks.some((chunk) =>
+            chunk.kind === "tool-execution"
+            && !!toolChunk.groupId
+            && chunk.groupId === toolChunk.groupId,
+          ),
+        );
+      }
+      if (targetMessageIndex < 0) {
+        const candidateIndex = findRunMessageIndex(messages, payload.run_id || null, "assistant");
+        const candidate = candidateIndex >= 0 ? messages[candidateIndex] : null;
+        const candidateGroups = candidate?.chunks
+          .filter((chunk): chunk is ToolExecutionChunk => chunk.kind === "tool-execution")
+          .map((chunk) => chunk.groupId)
+          .filter(Boolean) ?? [];
+        if (candidate && (candidateGroups.length === 0 || candidateGroups.includes(toolChunk.groupId))) {
+          targetMessageIndex = candidateIndex;
+        }
+      }
+      if (targetMessageIndex < 0) {
+        const newAgentMessage: Message = {
+          id: `${threadId}-live-assistant-${payload.run_id || "current"}-${toolChunk.groupId || toolChunk.toolCallId}`,
+          author: "agent",
+          timestamp: new Date().toISOString(),
+          chunks: [],
+          executionNarration: true,
+        };
+        const planIndex = findRunMessageIndex(messages, payload.run_id || null, "plan");
+        const userIndex = findRunMessageIndex(messages, payload.run_id || null, "user");
+        const insertAt = planIndex >= 0 ? planIndex + 1 : userIndex >= 0 ? userIndex + 1 : messages.length;
+        messages = insertOrReplaceAt(messages, newAgentMessage, insertAt);
+        targetMessageIndex = messages.findIndex((message) => message.id === newAgentMessage.id);
+      }
+
+      const msg = messages[targetMessageIndex];
+      const existingChunkIndex = msg.chunks.findIndex(
+        (chunk) => chunk.kind === "tool-execution" && chunk.toolCallId === toolChunk.toolCallId,
+      );
+      const updatedChunks = msg.chunks.slice();
+      if (existingChunkIndex >= 0) {
+        updatedChunks[existingChunkIndex] = { ...updatedChunks[existingChunkIndex], ...toolChunk };
+      } else {
+        updatedChunks.push(toolChunk);
+      }
+      messages[targetMessageIndex] = { ...msg, chunks: updatedChunks, executionNarration: true };
+      nextThread = { ...nextThread, messages };
+      return nextThread;
+    });
     return;
   }
 
   if (event === "done") {
-    updateThread(threadId, queryClient, (thread) => ({ ...thread, status: "finished" }));
+    updateThread(threadId, queryClient, (thread) =>
+      normalizeThreadHistory({ ...thread, status: "finished" }),
+    );
     invalidateThreadList(queryClient);
     return;
   }
@@ -312,62 +643,46 @@ function handleStreamPart(
   }
 }
 
-export function useAgentThreadStream(threadId: string, enabled: boolean) {
-  const queryClient = useQueryClient();
+export async function processStreamResponse(
+  response: Response,
+  queryClient: QueryClient,
+): Promise<string | null> {
+  if (!response.body) return null;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let capturedThreadId: string | null = null;
 
-  useEffect(() => {
-    if (!enabled) return;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
 
-    const controller = new AbortController();
-    let cancelled = false;
-
-    async function consume() {
+    let boundary = buffer.indexOf("\n\n");
+    while (boundary !== -1) {
+      const block = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
       try {
-        const res = await fetch(agentsApi.streamUrl(threadId), {
-          credentials: "include",
-          signal: controller.signal,
-          headers: { Accept: "text/event-stream" },
-        });
-        if (!res.ok || !res.body) return;
-
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        while (!cancelled) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-
-          let boundary = buffer.indexOf("\n\n");
-          while (boundary !== -1) {
-            const block = buffer.slice(0, boundary);
-            buffer = buffer.slice(boundary + 2);
-            for (const line of block.split("\n")) {
-              if (!line.startsWith("data: ")) continue;
-              const raw = line.slice(6);
-              try {
-                handleStreamPart(threadId, JSON.parse(raw) as StreamPart, queryClient);
-              } catch {
-                // 单个事件解析失败时不刷新整条会话，避免旧快照覆盖本地流式内容。
-                console.debug("failed to parse agent stream event", raw);
-              }
-            }
-            boundary = buffer.indexOf("\n\n");
+        const parsed = parseSseBlock(block);
+        if (parsed) {
+          const data = isRecord(parsed.data) ? parsed.data : {};
+          if (!capturedThreadId) {
+            const candidate = data.thread_id || data.id;
+            if (typeof candidate === "string" && candidate) capturedThreadId = candidate;
           }
+          if (capturedThreadId) handleStreamPart(capturedThreadId, parsed, queryClient);
         }
-      } catch (error) {
-        if (!controller.signal.aborted) {
-          console.debug("agent thread stream closed", error);
-        }
+      } catch {
+        console.debug("failed to parse stream event", block);
       }
+      boundary = buffer.indexOf("\n\n");
     }
+  }
 
-    void consume();
+  return capturedThreadId;
+}
 
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [enabled, queryClient, threadId]);
+export function useAgentThreadStream(_threadId: string, _enabled: boolean) {
+  // Stream is consumed directly by sendMessage/createThread mutations
+  // via processStreamResponse. No separate SSE connection needed.
 }

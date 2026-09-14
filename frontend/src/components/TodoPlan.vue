@@ -1,10 +1,16 @@
 <script setup>
-defineProps({
+import { computed } from 'vue'
+
+const props = defineProps({
   todos: {
     type: Array,
     default: () => [],
   },
 })
+
+const completed = computed(() => props.todos.filter((item) => item.status === 'completed').length)
+const active = computed(() => props.todos.find((item) => item.status === 'in_progress'))
+const progress = computed(() => props.todos.length ? Math.round((completed.value / props.todos.length) * 100) : 0)
 
 function icon(status) {
   if (status === 'completed') return '✓'
@@ -16,9 +22,17 @@ function icon(status) {
 <template>
   <section class="todo-card">
     <header>
-      <span>☷</span>
-      <strong>{{ todos.filter((item) => item.status === 'completed').length }} out of {{ todos.length }} tasks completed</strong>
+      <span class="todo-list-icon" aria-hidden="true">☷</span>
+      <div class="todo-heading">
+        <strong>任务计划</strong>
+        <small v-if="active">正在进行：{{ active.content }}</small>
+        <small v-else>{{ completed }}/{{ todos.length }} 项已完成</small>
+      </div>
+      <span class="todo-count">{{ completed }}/{{ todos.length }}</span>
     </header>
+    <div class="todo-progress" aria-hidden="true">
+      <span :style="{ width: `${progress}%` }"></span>
+    </div>
     <ol>
       <li
         v-for="(todo, index) in todos"

@@ -3,6 +3,8 @@ import MarkdownIt from 'markdown-it'
 import DOMPurify from 'dompurify'
 
 import TodoPlan from './TodoPlan.vue'
+import ToolActivity from './ToolActivity.vue'
+import ProcessActivity from './ProcessActivity.vue'
 
 const props = defineProps({
   message: {
@@ -22,11 +24,23 @@ function renderMarkdown(text) {
 }
 
 function textChunks() {
-  return (props.message.chunks || []).filter((chunk) => chunk.kind === 'text')
+  const chunks = props.message.chunks || []
+  const hasTodo = chunks.some((chunk) => chunk.kind === 'todo')
+  return chunks.filter((chunk) => (
+    chunk.kind === 'text' && !(hasTodo && String(chunk.text || '').trim() === '任务计划')
+  ))
 }
 
 function todoChunks() {
   return (props.message.chunks || []).filter((chunk) => chunk.kind === 'todo')
+}
+
+function toolChunks() {
+  return (props.message.chunks || []).filter((chunk) => chunk.kind === 'tools')
+}
+
+function processChunks() {
+  return (props.message.chunks || []).filter((chunk) => chunk.kind === 'process')
 }
 
 function errorChunks() {
@@ -47,6 +61,15 @@ function errorChunks() {
     </div>
 
     <template v-else>
+      <ProcessActivity
+        v-for="(chunk, index) in processChunks()"
+        :key="`process-${index}`"
+        :items="chunk.items || []"
+        :narrations="chunk.narrations || []"
+        :started-at="chunk.startedAt"
+        :finished-at="chunk.finishedAt"
+      />
+
       <div
         v-for="(chunk, index) in textChunks()"
         :key="`text-${index}`"
@@ -58,6 +81,13 @@ function errorChunks() {
         v-for="(chunk, index) in todoChunks()"
         :key="`todo-${index}`"
         :todos="chunk.todos || []"
+      />
+
+      <ToolActivity
+        v-for="(chunk, index) in toolChunks()"
+        :key="`tools-${index}`"
+        :items="chunk.items || []"
+        :narrations="chunk.narrations || []"
       />
 
       <div

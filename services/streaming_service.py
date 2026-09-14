@@ -22,6 +22,7 @@ from typing import Any
 
 from fastapi.responses import StreamingResponse
 
+from agent.runtime.events import clear_sse_callback, register_sse_callback
 from agent.runtime.task_router import get_task, initialize_task_record, run_agent_task
 from config.app_config import get_settings
 from config.constants import SSE_HEADERS
@@ -50,7 +51,8 @@ def sse_part(event: str, data: dict[str, Any]) -> str:
         符合 SSE 协议的文本片段字符串。
     """
 
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
+    encoded = json.dumps(data, ensure_ascii=False, default=str)
+    return f"event: {event}\ndata: {encoded}\n\n"
 
 
 def build_streaming_response(
@@ -84,9 +86,13 @@ def build_streaming_response(
     settings = get_settings()
     use_redis = settings.use_redis_stream
 
+    run_id = str(uuid.uuid4())
+
     async def event_iter():
         queue: asyncio.Queue[tuple[str, dict[str, Any]]] = asyncio.Queue()
         loop = asyncio.get_running_loop()
+        tool_group_index = 0
+        active_tool_group_id: str | None = None
 
         def send_event(event: str, data: dict[str, Any]) -> None:
             """统一事件发送：Redis Stream 模式走 Redis，否则走 asyncio.Queue。"""
@@ -98,6 +104,7 @@ def build_streaming_response(
                 loop.call_soon_threadsafe(queue.put_nowait, (event, payload))
 
         def event_sink(event: str, data: dict[str, Any]) -> None:
+            nonlocal active_tool_group_id
             payload = dict(data)
             if event == "text_delta":
                 payload["content"] = user_visible_stream_text(
@@ -105,7 +112,71 @@ def build_streaming_response(
                 )
                 if not payload["content"].strip():
                     return
+            if event in {"text_delta", "todo_delta"}:
+                active_tool_group_id = None
             send_event(event, payload)
+
+        def sse_callback(
+            callback_thread_id: str,
+            key: str,
+            kind: str,
+            title: str,
+            status: str,
+            detail: str | None,
+        ) -> None:
+            nonlocal active_tool_group_id, tool_group_index
+            # 根据 kind 字段推断 toolKind，供前端创建 ToolExecutionChunk
+            # 映射关系：backend kind -> AcpToolKind
+            kind_to_tool_kind = {
+                "think": "think",
+                "execute": "execute",
+                "fetch": "fetch",
+                "search": "search",
+                "read": "read",
+                "edit": "edit",
+                "delete": "delete",
+                "move": "move",
+            }
+            tool_kind = kind_to_tool_kind.get(kind, "other")
+            process_key = key.split(":", 1)[0]
+            is_process = process_key in {
+                "created",
+                "intent",
+                "repo",
+                "workspace",
+                "sync",
+                "agent",
+                "model",
+                "plan",
+                "done",
+                "failed",
+            }
+
+            tool_group_id: str | None = None
+            if key.startswith("tool:"):
+                if active_tool_group_id is None:
+                    tool_group_index += 1
+                    active_tool_group_id = f"{run_id}:tools:{tool_group_index}"
+                tool_group_id = active_tool_group_id
+            elif is_process:
+                active_tool_group_id = None
+
+            send_event("tool_update", {
+                "thread_id": callback_thread_id,
+                "run_id": run_id,
+                "event_id": f"{callback_thread_id}:{key}",
+                "event_key": key,
+                "is_tool": key.startswith("tool:"),
+                "is_process": is_process,
+                "tool_group_id": tool_group_id,
+                "kind": kind,
+                "title": title,
+                "status": status,
+                "detail": detail,
+                "tool_kind": tool_kind,
+            })
+
+        register_sse_callback(thread_id, sse_callback)
 
         def worker() -> None:
             try:
@@ -114,6 +185,7 @@ def build_streaming_response(
                     prompt=content,
                     thread_id=thread_id,
                     event_sink=event_sink,
+                    run_id=run_id,
                 )
                 latest = get_task(thread_id) or initial_task
                 send_event("thread_done", thread_meta_payload(latest))
@@ -126,33 +198,17 @@ def build_streaming_response(
                 send_event("error", {"message": str(exc), "detail": str(exc)})
                 send_event("thread_done", thread_meta_payload(latest))
                 send_event("done", {})
+            finally:
+                clear_sse_callback(thread_id)
 
         yield sse_part("thread_snapshot", thread_meta_payload(initial_task))
         yield sse_part(
             "user_message",
             {
                 "thread_id": thread_id,
-                "message_id": f"{thread_id}-user-{uuid.uuid4()}",
+                "message_id": f"{thread_id}-user-{run_id}",
                 "author": "user",
                 "content": content,
-            },
-        )
-        startup_message_id = f"{thread_id}-assistant-startup-{uuid.uuid4()}"
-        yield sse_part(
-            "message_start",
-            {
-                "thread_id": thread_id,
-                "message_id": startup_message_id,
-                "author": "agent",
-            },
-        )
-        yield sse_part(
-            "text_delta",
-            {
-                "thread_id": thread_id,
-                "message_id": startup_message_id,
-                "content": "正在理解需求并准备仓库上下文...\n\n",
-                "mode": "append",
             },
         )
 

@@ -11,10 +11,7 @@ from typing import Any
 from store.event_repo import RunEventRepo
 from store.finding_repo import FindingRepo
 from store.mapping_repo import MappingRepo
-from store.message_repo import MessageRepo
-from store.plan_repo import PlanRepo
 from store.run_repo import RunRepo
-from store.setting_repo import SettingRepo
 from store.thread_repo import ThreadRepo
 
 
@@ -30,10 +27,7 @@ class LocalMySQLStore:
         self.thread_repo = ThreadRepo()
         self.run_repo = RunRepo()
         self.event_repo = RunEventRepo()
-        self.message_repo = MessageRepo()
-        self.plan_repo = PlanRepo()
         self.finding_repo = FindingRepo()
-        self.setting_repo = SettingRepo()
         self.mapping_repo = MappingRepo()
         self._init_schema()
 
@@ -42,10 +36,7 @@ class LocalMySQLStore:
         self.thread_repo.ensure_table()
         self.run_repo.ensure_table()
         self.event_repo.ensure_table()
-        self.message_repo.ensure_table()
-        self.plan_repo.ensure_table()
         self.finding_repo.ensure_table()
-        self.setting_repo.ensure_table()
         self.mapping_repo.ensure_table()
 
     def close(self) -> None:
@@ -53,10 +44,7 @@ class LocalMySQLStore:
         self.thread_repo.close()
         self.run_repo.close()
         self.event_repo.close()
-        self.message_repo.close()
-        self.plan_repo.close()
         self.finding_repo.close()
-        self.setting_repo.close()
         self.mapping_repo.close()
 
     # ── Thread 操作 ──────────────────────────────────────────────────────────
@@ -162,8 +150,6 @@ class LocalMySQLStore:
 
         for cleanup_name, cleanup_fn in [
             ("findings", self.finding_repo.delete_findings_by_thread),
-            ("plans", self.plan_repo.delete_plans_by_thread),
-            ("messages", self.message_repo.delete_messages_by_thread),
             ("events", self.event_repo.clear_run_events),
             ("runs", self.run_repo.delete_runs_by_thread),
         ]:
@@ -274,121 +260,6 @@ class LocalMySQLStore:
         """
         self.event_repo.finish_open_run_events(thread_id, status=status)
 
-    # ── Message 操作 ─────────────────────────────────────────────────────────
-
-    def add_thread_message(
-        self,
-        *,
-        message_id: str,
-        thread_id: str,
-        author: str,
-        content: str,
-        run_id: str | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> None:
-        """追加保存一条 Dashboard 会话消息。
-
-        Args:
-            message_id: 消息唯一标识。
-            thread_id: 所属会话 ID。
-            author: 消息作者。
-            content: 消息正文。
-            run_id: 关联的运行 ID。
-            metadata: 可选的消息元数据。
-        """
-        self.message_repo.add_thread_message(
-            message_id=message_id,
-            thread_id=thread_id,
-            author=author,
-            content=content,
-            run_id=run_id,
-            metadata=metadata,
-        )
-
-    def list_thread_messages(self, thread_id: str) -> list[dict[str, Any]]:
-        """按写入顺序读取会话消息。
-
-        Args:
-            thread_id: 会话唯一标识。
-
-        Returns:
-            消息字典列表。
-        """
-        return self.message_repo.list_thread_messages(thread_id)
-
-    # ── Plan 操作 ────────────────────────────────────────────────────────────
-
-    def add_thread_plan(
-        self,
-        *,
-        plan_id: str,
-        thread_id: str,
-        prompt: str,
-        plan_text: str,
-        plan_path: str,
-        run_id: str | None = None,
-        status: str = "pending",
-    ) -> None:
-        """保存一份编码前技术方案。
-
-        Args:
-            plan_id: 方案唯一标识。
-            thread_id: 所属会话 ID。
-            prompt: 用户原始输入。
-            plan_text: 方案正文。
-            plan_path: 方案 Markdown 文件路径。
-            run_id: 关联的运行 ID。
-            status: 方案状态，默认 ``"pending"``。
-        """
-        self.plan_repo.add_thread_plan(
-            plan_id=plan_id,
-            thread_id=thread_id,
-            prompt=prompt,
-            plan_text=plan_text,
-            plan_path=plan_path,
-            run_id=run_id,
-            status=status,
-        )
-
-    def get_latest_thread_plan(
-        self,
-        thread_id: str,
-        *,
-        status: str | None = None,
-    ) -> dict[str, Any] | None:
-        """读取某个 thread 最新一份技术方案。
-
-        Args:
-            thread_id: 所属会话 ID。
-            status: 可选状态过滤条件。
-
-        Returns:
-            最新的方案记录字典；不存在时返回 ``None``。
-        """
-        return self.plan_repo.get_latest_thread_plan(thread_id, status=status)
-
-    def list_thread_plans(self, thread_id: str) -> list[dict[str, Any]]:
-        """按创建顺序读取方案历史。
-
-        Args:
-            thread_id: 会话唯一标识。
-
-        Returns:
-            方案字典列表。
-        """
-        return self.plan_repo.list_thread_plans(thread_id)
-
-    def approve_thread_plan(self, plan_id: str) -> dict[str, Any] | None:
-        """把指定方案标记为已确认。
-
-        Args:
-            plan_id: 方案唯一标识。
-
-        Returns:
-            更新后的方案字典，不存在时返回 None。
-        """
-        return self.plan_repo.approve_thread_plan(plan_id)
-
     # ── Finding 操作 ─────────────────────────────────────────────────────────
 
     def add_finding(
@@ -436,29 +307,6 @@ class LocalMySQLStore:
             审查发现字典列表。
         """
         return self.finding_repo.list_findings(thread_id)
-
-    # ── Setting 操作 ─────────────────────────────────────────────────────────
-
-    def set_setting(self, key: str, value: Any) -> None:
-        """写入或更新一个配置项。
-
-        Args:
-            key: 配置键名。
-            value: 配置值。
-        """
-        self.setting_repo.set_setting(key, value)
-
-    def get_setting(self, key: str, default: Any = None) -> Any:
-        """读取一个配置项。
-
-        Args:
-            key: 配置键名。
-            default: 键不存在时的默认返回值。
-
-        Returns:
-            配置值，或 ``default``。
-        """
-        return self.setting_repo.get_setting(key, default)
 
     # ── Mapping 操作 ─────────────────────────────────────────────────────────
 

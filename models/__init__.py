@@ -10,10 +10,7 @@
 from models.event import RunEvent
 from models.finding import ReviewFinding
 from models.mapping import RepoWorkspaceMapping
-from models.message import ThreadMessage
-from models.plan import ThreadPlan
 from models.run import Run
-from models.setting import Setting
 from models.thread import Thread
 
 __all__ = [
@@ -21,8 +18,5 @@ __all__ = [
     "ReviewFinding",
     "Run",
     "RunEvent",
-    "Setting",
     "Thread",
-    "ThreadMessage",
-    "ThreadPlan",
 ]

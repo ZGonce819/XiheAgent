@@ -456,6 +456,114 @@ function UserMessage({ message }: { message: Message }) {
   );
 }
 
+function ToolActivityGroup({
+  message,
+  isStreaming,
+  projectPath,
+  ...callbacks
+}: {
+  message: Message;
+  isStreaming?: boolean;
+  projectPath?: string;
+} & ApprovalCallbacks) {
+  const tools = message.chunks.filter(
+    (chunk): chunk is ToolExecutionChunk => chunk.kind === "tool-execution",
+  );
+  const narrations = message.chunks.filter(
+    (chunk): chunk is Extract<Chunk, { kind: "text" }> => chunk.kind === "text" && !!chunk.text.trim(),
+  );
+  const running = tools.some((tool) => tool.status === "pending" || tool.status === "in_progress");
+  const completedCount = tools.filter((tool) => tool.status === "completed").length;
+  const errorCount = tools.filter((tool) => tool.status === "error").length;
+  const mixed = completedCount > 0 && errorCount > 0;
+  const [expanded, setExpanded] = useState(Boolean(isStreaming || running));
+  const wasRunningRef = useRef(Boolean(isStreaming || running));
+
+  useEffect(() => {
+    const active = Boolean(isStreaming || running);
+    if (active) setExpanded(true);
+    if (!active && wasRunningRef.current) setExpanded(false);
+    wasRunningRef.current = active;
+  }, [isStreaming, running]);
+
+  const activeTool = [...tools].reverse().find(
+    (tool) => tool.status === "pending" || tool.status === "in_progress",
+  );
+  const summary = activeTool?.title
+    || (tools.length === 0
+      ? "执行过程"
+      : errorCount > 0
+        ? `${tools.length} 项操作，${errorCount} 项失败`
+        : `已执行 ${tools.length} 项操作`);
+  const borderClass = mixed
+    ? "border-amber-400/60"
+    : errorCount > 0 && completedCount === 0
+      ? "border-red-400/50"
+      : "border-[var(--ui-border)]";
+  const dotClass = mixed
+    ? "bg-amber-400"
+    : errorCount > 0 && completedCount === 0
+      ? "bg-red-400"
+      : running
+        ? "bg-[var(--ui-accent)] animate-pulse"
+        : "bg-green-500";
+
+  return (
+    <div className={`my-1 overflow-hidden rounded-lg border bg-[var(--ui-panel)] ${borderClass}`}>
+      <button
+        type="button"
+        onClick={() => setExpanded((value) => !value)}
+        className="grid min-h-8 w-full grid-cols-[12px_minmax(0,1fr)_16px] items-center gap-2 px-2.5 py-1.5 text-left hover:bg-[var(--ui-panel-2)]"
+        aria-expanded={expanded}
+      >
+        <span className={`h-2 w-2 justify-self-center rounded-full ${dotClass}`} aria-hidden />
+        <span className="flex min-w-0 items-baseline gap-2">
+          <span className="truncate text-xs text-[color:var(--ui-text-muted)]">{summary}</span>
+          {tools.length > 0 && (
+            <span className="shrink-0 text-[10px] text-[color:var(--ui-text-dim)]">
+              {tools.length} 条记录
+            </span>
+          )}
+        </span>
+        {expanded ? (
+          <ChevronUp className="h-3.5 w-3.5 justify-self-center text-[color:var(--ui-text-dim)]" />
+        ) : (
+          <ChevronDown className="h-3.5 w-3.5 justify-self-center text-[color:var(--ui-text-dim)]" />
+        )}
+      </button>
+
+      {expanded && (
+        <div className="max-h-64 overflow-y-auto border-t border-[var(--ui-border)] px-2.5 py-1.5">
+          {narrations.length > 0 && (
+            <div className="max-h-40 overflow-y-auto border-b border-[var(--ui-border)] pb-1.5 text-xs leading-5 text-[color:var(--ui-text-muted)]">
+              {narrations.map((chunk, index) => (
+                <div key={`narration-${index}`} className={index > 0 ? "mt-1.5" : ""}>
+                  <Markdown content={chunk.text} />
+                </div>
+              ))}
+            </div>
+          )}
+          {tools.map((tool, index) => (
+            <div
+              key={tool.toolCallId || index}
+              className={index > 0 || narrations.length > 0 ? "border-t border-[var(--ui-border)] first:border-t-0" : ""}
+            >
+              <ToolExecution
+                chunk={tool}
+                projectPath={projectPath}
+                onApprove={callbacks.onApprove}
+                onReject={callbacks.onReject}
+                onAutoApprove={callbacks.onAutoApprove}
+                onOpenDiff={callbacks.onOpenDiff}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AgentMessage({
   message,
   isStreaming,
@@ -507,9 +615,7 @@ function AgentMessage({
 
     if (isLive) {
       const next: Record<string, boolean> = {};
-      for (const id of exploredGroupIds) {
-        next[id] = true;
-      }
+      for (const id of exploredGroupIds) next[id] = true;
       setExpandedExploredGroups(next);
       wasExplorationLiveRef.current = true;
       return;
@@ -521,17 +627,36 @@ function AgentMessage({
       for (const id of exploredGroupIds) {
         next[id] = shouldAutoCollapse ? false : (prev[id] ?? false);
       }
-
-      const prevKeys = Object.keys(prev);
-      const nextKeys = Object.keys(next);
-      if (prevKeys.length !== nextKeys.length) return next;
-      for (const key of nextKeys) {
-        if (prev[key] !== next[key]) return next;
-      }
-      return prev;
+      return next;
     });
     wasExplorationLiveRef.current = false;
   }, [hasExploredGroups, isStreaming, exploredGroupIds, message.id]);
+
+  const hasToolActivity = message.executionNarration
+    || message.chunks.some((chunk) => chunk.kind === "tool-execution");
+  if (hasToolActivity) {
+    const remainingChunks = message.chunks.filter(
+      (chunk) => chunk.kind !== "text" && chunk.kind !== "tool-execution",
+    );
+    return (
+      <div className="my-2 min-w-0 space-y-2">
+        <ToolActivityGroup
+          message={message}
+          isStreaming={isStreaming}
+          projectPath={projectPath}
+          {...callbacks}
+        />
+        {remainingChunks.map((chunk, index) => (
+          <ChunkRenderer
+            key={getChunkRenderKey(chunk, index)}
+            chunk={chunk}
+            projectPath={projectPath}
+            {...callbacks}
+          />
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="my-2 min-w-0 space-y-2">

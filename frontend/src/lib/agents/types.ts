@@ -74,6 +74,7 @@ export interface ToolExecutionChunk {
   diffData?: DiffData
   diffs?: Array<DiffData>
   locations?: Array<AcpToolLocation>
+  groupId?: string
 }
 
 export interface TextChunk {
@@ -124,6 +125,7 @@ export interface Message {
   timestamp: string
   chunks: Array<Chunk>
   hidden?: boolean
+  executionNarration?: boolean
 }
 
 export interface Project {
@@ -154,6 +156,21 @@ export interface AgentSchedule {
   updatedAt?: string | null
 }
 
+export type RunEventKind = "think" | "execute" | "search" | "other" | "todo"
+
+export type RunEventStatus = "pending" | "in_progress" | "completed" | "error"
+
+export interface RunEvent {
+  id: string
+  thread_id: string
+  kind: RunEventKind
+  title: string
+  status: RunEventStatus
+  detail?: string | null
+  created_at: string
+  updated_at?: string
+}
+
 export interface AgentThread {
   id: string
   title: string
@@ -170,6 +187,7 @@ export interface AgentThread {
   createdAt: number
   updatedAt: number
   messages: Array<Message>
+  runEvents?: Array<RunEvent>
   pr?: {
     number: number
     title: string

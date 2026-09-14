@@ -67,10 +67,9 @@ function formatToolDisplay(
   switch (toolKind) {
     case "read": {
       if (path) {
-        const displayPath = stripProjectPath(path, projectPath);
-        return `读取(${displayPath})`;
+        return `读取文件(${getFileName(path)})`;
       }
-      return title;
+      return "读取文件";
     }
     case "search": {
       if (path) {
@@ -252,7 +251,7 @@ export const ToolExecution = memo(function ToolExecution({
     return (
       <div className="my-1 text-[12px] leading-5">
         <DiffView diffData={diffData} />
-        <span className="text-[color:var(--ui-text-dim)]">等待批准...</span>
+        <span className="text-[color:var(--ui-text-muted)]">等待批准...</span>
       </div>
     );
   }
@@ -266,7 +265,7 @@ export const ToolExecution = memo(function ToolExecution({
     );
     return (
       <div className="my-0.5 text-[12px] leading-5">
-        <span className="text-yellow-400">正在编辑 {getFileName(path)}...</span>
+        <span className="text-[color:var(--ui-text-muted)]">正在编辑 {getFileName(path)}...</span>
       </div>
     );
   }
@@ -275,9 +274,7 @@ export const ToolExecution = memo(function ToolExecution({
   const statusTextClass =
     status === "error"
       ? "text-red-400"
-      : status === "in_progress" || status === "pending"
-        ? "text-yellow-400"
-        : "text-[color:var(--ui-text-muted)]";
+      : "text-[color:var(--ui-text-muted)]";
 
   return (
     <div className="my-0.5 text-[12px] leading-5">

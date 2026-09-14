@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Navigate, createFileRoute } from "@tanstack/react-router";
 
 import { AgentThreadView } from "@/components/agents/AgentThreadView";
@@ -12,7 +13,12 @@ export const Route = createFileRoute("/agents/$threadId")({
 function AgentThreadPage() {
   const { threadId } = Route.useParams();
   const session = useSession();
-  const threadQuery = useAgentThread(threadId);
+  const [pollMs, setPollMs] = useState<number | false>(false);
+  const threadQuery = useAgentThread(threadId, { refetchInterval: pollMs });
+
+  useEffect(() => {
+    setPollMs(threadQuery.data?.status === "running" ? 3_000 : false);
+  }, [threadQuery.data?.status]);
 
   if (session.isLoading) return null;
   if (!session.data) return <Navigate to="/login" />;
@@ -20,7 +26,7 @@ function AgentThreadPage() {
   if (threadQuery.isLoading) {
     return (
       <main className="agents-ui flex h-svh items-center justify-center bg-[var(--ui-bg)] p-6">
-        <Skeleton className="h-40 w-full max-w-md" />
+        <Skeleton className="h-40 w-full max-w-3xl" />
       </main>
     );
   }

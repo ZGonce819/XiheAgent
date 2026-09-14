@@ -3,8 +3,14 @@ import { useNavigate } from "@tanstack/react-router"
 
 import { agentsApi } from "./api"
 import { addPendingPrompt, dropPendingPrompts } from "./pendingPrompts"
+import {
+  handleStreamPart,
+  normalizeThreadHistory,
+  parseSseBlock,
+  processStreamResponse,
+} from "./useThreadStream"
 import type { ScheduleUpdateRequest } from "./api"
-import type { ImageChunk } from "./types"
+import type { AgentThread, ImageChunk } from "./types"
 
 function messageText(message: { chunks: Array<{ kind: string; text?: string }> }): string {
   return message.chunks
@@ -37,10 +43,33 @@ export function useAgentThreads() {
   })
 }
 
-export function useAgentThread(threadId: string) {
+export function useAgentThread(
+  threadId: string,
+  options?: { refetchInterval?: number | false },
+) {
+  const queryClient = useQueryClient()
   return useQuery({
     queryKey: agentThreadKeys.detail(threadId),
-    queryFn: () => agentsApi.getThread(threadId),
+    queryFn: async () => {
+      const cached = queryClient.getQueryData<AgentThread>(agentThreadKeys.detail(threadId))
+
+      // 缓存正在运行 → SSE 正在实时更新，不能拉服务端（checkpoint 可能还没写入本轮）
+      if (cached?.status === "running") {
+        return cached
+      }
+
+      const serverThread = await agentsApi.getThread(threadId)
+      const key = agentThreadKeys.detail(threadId)
+      const cachedAfterCheck = queryClient.getQueryData<AgentThread>(key)
+      if (!cachedAfterCheck) return normalizeThreadHistory(serverThread)
+
+      if (cachedAfterCheck.status === "running") {
+        return cachedAfterCheck
+      }
+
+      return normalizeThreadHistory(serverThread)
+    },
+    refetchInterval: options?.refetchInterval,
   })
 }
 
@@ -90,28 +119,60 @@ export function useCreateAgentThread() {
   const navigate = useNavigate()
 
   return useMutation({
-    mutationFn: agentsApi.createThread,
-    onSuccess: (thread, variables) => {
-      const alreadyConfirmed = thread.messages.some(
-        (message) =>
-          message.author === "user" && messageText(message) === variables.prompt
-      )
-      if (alreadyConfirmed) {
-        dropPendingPrompts(thread.id, () => true)
-      } else {
-        addPendingPrompt(
-          thread.id,
-          variables.prompt,
-          thread.messages.length,
-          variables.images
-        )
+    mutationFn: async (body: {
+      prompt: string
+      images?: Array<ImageChunk>
+      repo?: string | null
+      repo_explicitly_none?: boolean
+      model_id?: string | null
+      effort?: string | null
+    }) => {
+      const response = await agentsApi.createThread(body)
+      if (!response.body) return null
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ""
+      let capturedThreadId: string | null = null
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+
+        let boundary = buffer.indexOf("\n\n")
+        while (boundary !== -1) {
+          const block = buffer.slice(0, boundary)
+          buffer = buffer.slice(boundary + 2)
+          try {
+            const parsed = parseSseBlock(block)
+            if (parsed) {
+              const data =
+                parsed.data && typeof parsed.data === "object" && !Array.isArray(parsed.data)
+                  ? parsed.data as Record<string, unknown>
+                  : {}
+              const candidate = data.thread_id || data.id
+              if (!capturedThreadId && typeof candidate === "string" && candidate) {
+                capturedThreadId = candidate
+                addPendingPrompt(capturedThreadId, body.prompt, 0, body.images)
+              }
+              if (capturedThreadId) handleStreamPart(capturedThreadId, parsed, queryClient)
+            }
+          } catch {
+            // Ignore malformed individual events and continue consuming the stream.
+          }
+          boundary = buffer.indexOf("\n\n")
+        }
       }
-      queryClient.setQueryData(agentThreadKeys.detail(thread.id), {
-        ...thread,
-        status: thread.status === "idle" ? "running" : thread.status,
-      })
+
+      if (capturedThreadId) {
+        navigate({ to: "/agents/$threadId", params: { threadId: capturedThreadId } })
+      }
+      return capturedThreadId
+    },
+    onSuccess: (threadId) => {
+      if (!threadId) return
       invalidateThreadList(queryClient)
-      navigate({ to: "/agents/$threadId", params: { threadId: thread.id } })
     },
   })
 }
@@ -127,23 +188,36 @@ export function useSendAgentMessage(threadId: string) {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (vars: SendAgentMessageVariables) =>
-      agentsApi.sendMessage(threadId, {
+    mutationFn: async (vars: SendAgentMessageVariables) => {
+      // 取消正在排队的 query，防止 polling 在 SSE 流开始之前拉取旧数据
+      await queryClient.cancelQueries({ queryKey: agentThreadKeys.detail(threadId) })
+
+      // 立即把状态标记为 running，这样后续 polling query 看到 running 就会跳过服务端拉取
+      queryClient.setQueryData<AgentThread>(agentThreadKeys.detail(threadId), (prev) => {
+        if (!prev) return prev
+        return { ...prev, status: "running" }
+      })
+
+      const cached = queryClient.getQueryData<AgentThread>(agentThreadKeys.detail(threadId))
+      const response = await agentsApi.sendMessage(threadId, {
         content: vars.content,
         images: vars.images,
+        repo: cached?.repoUrl || cached?.repo || null,
         model_id: vars.model_id,
         effort: vars.effort,
-      }),
+      })
+      await processStreamResponse(response, queryClient)
+      return queryClient.getQueryData<AgentThread>(agentThreadKeys.detail(threadId))
+    },
     onSuccess: (thread) => {
+      if (!thread) return
       queryClient.setQueryData(
         agentThreadKeys.detail(threadId),
         (prev: typeof thread | undefined) => {
           if (!prev) return thread
           return {
             ...thread,
-            // 发送新消息后，实时内容由 SSE 增量追加。这里不能用刚返回的
-            // checkpoint 快照覆盖本地消息，否则用户刚输入的内容和上一轮输出会闪烁或消失。
-            messages: prev.messages,
+            messages: thread.messages,
           }
         }
       )

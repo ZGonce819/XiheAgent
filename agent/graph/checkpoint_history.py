@@ -20,9 +20,12 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
 from typing import Any
+
+import base64
 
 from config.constants import MIN_MESSAGE_LENGTH
 from utils.message_utils import message_content_to_text
@@ -47,6 +50,7 @@ def _extract_user_prompt(messages: list[Any]) -> str:
         if msg_type not in {"human", "user"}:
             continue
         text = message_content_to_text(getattr(message, "content", ""))
+        text = _extract_visible_user_input(text)
         if len(text) >= MIN_MESSAGE_LENGTH:
             return text
     return ""
@@ -151,20 +155,284 @@ def visible_checkpoint_messages(checkpoint: dict[str, Any] | None) -> list[dict[
             continue
 
         text = message_content_to_text(getattr(message, "content", ""))
+        if msg_type in {"human", "user"}:
+            text = _extract_visible_user_input(text)
         if not text:
             continue
 
-        # 过滤过短的过程消息。
-        if msg_type in {"human", "user"} and _is_short_process_message(text):
-            continue
-
-        # 内容哈希去重。
-        content_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
-        if content_hash in seen_hashes:
-            continue
-        seen_hashes.add(content_hash)
-
         role = "user" if msg_type in {"human", "user"} else "assistant"
+        # 只对 assistant 消息做内容哈希去重，用户消息即使内容相同也必须保留，
+        # 因为多轮对话中用户可能反复输入"确认"等短文本，每条都是独立轮次。
+        if role == "assistant":
+            content_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
+            if content_hash in seen_hashes:
+                continue
+            seen_hashes.add(content_hash)
+
+        message_id = stable_history_message_id(text, index)
+        result.append({
+            "id": message_id,
+            "role": role,
+            "content": text,
+        })
+
+    return result
+
+
+def _msg_class_from_lc_dict(msg: dict[str, Any]) -> str:
+    """从 LangChain 序列化字典中提取消息类名。
+
+    Args:
+        msg: LangChain 序列化后的消息字典。
+
+    Returns:
+        消息类名（如 ``HumanMessage``、``AIMessage``），无法识别时返回空字符串。
+    """
+    msg_id = msg.get("id")
+    if isinstance(msg_id, list) and msg_id:
+        return str(msg_id[-1]).lower()
+    return ""
+
+
+def _msg_id_from_lc_dict(msg: dict[str, Any]) -> str:
+    """从 LangChain 序列化字典中提取消息唯一 ID。
+
+    Args:
+        msg: LangChain 序列化后的消息字典。
+
+    Returns:
+        消息 ID 字符串；无法提取时返回空字符串。
+    """
+    kwargs = msg.get("kwargs")
+    if isinstance(kwargs, dict):
+        value = kwargs.get("id")
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def _extract_visible_user_input(text: str) -> str:
+    """从 HumanMessage 内容中提取用户可见输入部分。
+
+    当前项目通过 ``ContextInjectionMiddleware`` 把用户原始输入包装成包含
+    "用户可见输入"和"内部执行上下文"的复合文本。前端展示时只需要用户原始输入，
+    不应把仓库地址、任务类型等内部上下文展示给用户。
+
+    Args:
+        text: HumanMessage 的完整文本内容。
+
+    Returns:
+        用户可见输入部分；无法识别格式时返回原文本。
+    """
+    marker = "用户可见输入："
+    if marker not in text:
+        return text
+    start = text.index(marker) + len(marker)
+    rest = text[start:].lstrip("\n").lstrip()
+    sep = "内部执行上下文："
+    sep_pos = rest.find(sep)
+    if sep_pos >= 0:
+        return rest[:sep_pos].rstrip()
+    return rest.rstrip()
+
+
+def _build_checkpoint_lineage(
+    redis_client: Any, thread_id: str
+) -> list[str]:
+    """构建从根到最新 checkpoint 的祖先链。
+
+    LangGraph 的 checkpoint 通过 ``parent_checkpoint_id`` 形成父子链。
+    当图多次执行时（例如用户发送多轮消息），会产生多条分支。
+    只有沿着最新 checkpoint 回溯到根的路径上的 writes 才是有效消息，
+    其他分支上的 writes 是过期/废弃的，不应展示。
+
+    Args:
+        redis_client: Redis 客户端实例。
+        thread_id: LangGraph checkpoint 的会话标识。
+
+    Returns:
+        按从根到最新顺序排列的 checkpoint_id 列表。
+    """
+    # 1. 找到最新 checkpoint 的指针 key。
+    latest_pattern = f"checkpoint_latest:{thread_id}:*"
+    latest_checkpoint_key: str | None = None
+    try:
+        latest_keys = redis_client.keys(latest_pattern)
+        if latest_keys:
+            raw = latest_keys[0]
+            latest_key_str = raw.decode() if isinstance(raw, bytes) else raw
+            # checkpoint_latest key 存储的是纯字符串值（指向实际 checkpoint key）。
+            pointed = redis_client.get(latest_key_str)
+            if pointed:
+                latest_checkpoint_key = pointed.decode() if isinstance(pointed, bytes) else pointed
+    except Exception:
+        logger.warning("查找最新 checkpoint 失败：thread_id=%s", thread_id, exc_info=True)
+        return []
+
+    if not latest_checkpoint_key:
+        return []
+
+    # 2. 读取最新 checkpoint 获取其 checkpoint_id。
+    try:
+        latest_data = redis_client.json().get(latest_checkpoint_key)
+    except Exception:
+        logger.warning("读取最新 checkpoint 失败：key=%s", latest_checkpoint_key, exc_info=True)
+        return []
+
+    if not isinstance(latest_data, dict):
+        return []
+
+    latest_checkpoint_id = str(latest_data.get("checkpoint_id", ""))
+    if not latest_checkpoint_id:
+        return []
+
+    # 3. 扫描该 thread 的所有 checkpoint，构建 checkpoint_id → parent_checkpoint_id 映射。
+    cp_pattern = f"checkpoint:{thread_id}:*"
+    parent_of: dict[str, str] = {}
+    checkpoint_ids_set: set[str] = set()
+
+    try:
+        cp_keys = redis_client.keys(cp_pattern)
+    except Exception:
+        logger.warning("扫描 checkpoint 失败：thread_id=%s", thread_id, exc_info=True)
+        return []
+
+    for key in cp_keys:
+        key_str = key.decode() if isinstance(key, bytes) else key
+        if key_str.startswith("checkpoint_latest:"):
+            continue
+        try:
+            data = redis_client.json().get(key_str)
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        cp_id = str(data.get("checkpoint_id", ""))
+        parent_id = str(data.get("parent_checkpoint_id", "") or "")
+        if not cp_id:
+            continue
+        checkpoint_ids_set.add(cp_id)
+        if parent_id:
+            parent_of[cp_id] = parent_id
+
+    if latest_checkpoint_id not in checkpoint_ids_set:
+        return []
+
+    # 4. 从最新 checkpoint 沿 parent 链回溯到根，收集 lineage 上的所有 checkpoint_id。
+    lineage_ordered: list[str] = []
+    current = latest_checkpoint_id
+    visited: set[str] = set()
+    while current and current not in visited:
+        visited.add(current)
+        lineage_ordered.append(current)
+        current = parent_of.get(current, "")
+
+    lineage_ordered.reverse()
+    return lineage_ordered
+
+
+def extract_messages_from_writes(redis_client: Any, thread_id: str) -> list[dict[str, str]]:
+    """从 Redis checkpoint write 条目中重建可见消息列表。
+
+    当前版本的 Redis checkpointer 把消息以 ``checkpoint_write:*`` 键的形式存储，
+    但不会把累积结果写入 ``channel_values.messages``。本函数先构建 checkpoint
+    祖先链（从根到最新），只处理祖先链上的 writes，避免不同执行分支的 writes
+    混在一起导致消息重复。
+
+    Args:
+        redis_client: Redis 客户端实例（来自 checkpointer 或直连）。
+        thread_id: LangGraph checkpoint 的会话标识。
+
+    Returns:
+        可见消息字典列表，每项包含 ``id``、``role``、``content``。
+    """
+    lineage = _build_checkpoint_lineage(redis_client, thread_id)
+    if not lineage:
+        return []
+
+    lineage_set = set(lineage)
+    lineage_order = {cp_id: i for i, cp_id in enumerate(lineage)}
+
+    pattern = f"checkpoint_write:{thread_id}:*"
+    keys: list[bytes] = []
+    try:
+        keys = list(redis_client.keys(pattern))
+    except Exception:
+        logger.warning("扫描 checkpoint writes 失败：thread_id=%s", thread_id, exc_info=True)
+        return []
+
+    message_writes: list[tuple[int, int, list[dict[str, Any]]]] = []
+    for key in keys:
+        key_str = key.decode() if isinstance(key, bytes) else key
+        try:
+            data = redis_client.json().get(key_str)
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        if data.get("channel") != "messages":
+            continue
+
+        checkpoint_id = str(data.get("checkpoint_id", ""))
+        if checkpoint_id not in lineage_set:
+            continue
+
+        blob = data.get("blob")
+        if not isinstance(blob, str) or not blob:
+            continue
+        idx = int(data.get("idx", 0))
+        try:
+            decoded_bytes = base64.b64decode(blob)
+            messages = json.loads(decoded_bytes.decode("utf-8"))
+        except Exception:
+            logger.debug("解码 checkpoint write blob 失败：key=%s", key_str, exc_info=True)
+            continue
+        if isinstance(messages, list):
+            order = lineage_order.get(checkpoint_id, 0)
+            message_writes.append((order, idx, messages))
+
+    message_writes.sort(key=lambda x: (x[0], x[1]))
+
+    all_messages: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for _order, _idx, msgs in message_writes:
+        for msg in msgs:
+            if not isinstance(msg, dict):
+                continue
+            msg_class = _msg_class_from_lc_dict(msg)
+            if msg_class in {"removemessage", "remove"}:
+                continue
+            msg_uid = _msg_id_from_lc_dict(msg)
+            if msg_uid and msg_uid in seen_ids:
+                continue
+            if msg_uid:
+                seen_ids.add(msg_uid)
+            all_messages.append(msg)
+
+    result: list[dict[str, str]] = []
+    seen_hashes: set[str] = set()
+    for index, msg in enumerate(all_messages):
+        msg_class = _msg_class_from_lc_dict(msg)
+        if msg_class in {"toolmessage", "tool"}:
+            continue
+        if msg_class in {"systemmessage", "system"}:
+            continue
+
+        kwargs = msg.get("kwargs", {})
+        content = kwargs.get("content", "") if isinstance(kwargs, dict) else ""
+        text = message_content_to_text(content)
+        if msg_class in {"humanmessage", "human", "user"}:
+            text = _extract_visible_user_input(text)
+        if not text:
+            continue
+
+        role = "user" if msg_class in {"humanmessage", "human", "user"} else "assistant"
+        if role == "assistant":
+            content_hash = hashlib.sha256(text.encode()).hexdigest()[:16]
+            if content_hash in seen_hashes:
+                continue
+            seen_hashes.add(content_hash)
+
         message_id = stable_history_message_id(text, index)
         result.append({
             "id": message_id,

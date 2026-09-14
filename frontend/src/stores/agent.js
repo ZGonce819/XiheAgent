@@ -32,9 +32,249 @@ function findLocalUserMessage(messages, text) {
   })
 }
 
-function normalizeThreadMessages(messages) {
+function parseEventDetail(detail) {
+  if (!detail) return {}
+  if (typeof detail === 'object') return detail
+  try {
+    const parsed = JSON.parse(detail)
+    return parsed && typeof parsed === 'object' ? parsed : { text: String(detail) }
+  } catch {
+    return { text: String(detail) }
+  }
+}
+
+function normalizeToolItem(event) {
+  const detail = parseEventDetail(event.detail)
+  return {
+    id: String(event.event_id || event.id || `${event.kind || 'other'}:${event.title || 'tool'}`),
+    title: String(event.title || detail.tool || '工具调用'),
+    kind: String(event.tool_kind || event.kind || 'other'),
+    status: String(event.status || 'in_progress'),
+    toolName: String(detail.tool || ''),
+    args: detail.args && typeof detail.args === 'object' ? detail.args : {},
+    elapsedMs: Number.isFinite(Number(detail.elapsed_ms)) ? Number(detail.elapsed_ms) : null,
+    detailText: detail.text ? String(detail.text) : '',
+    createdAt: event.created_at || nowIso(),
+    groupId: String(event.tool_group_id || ''),
+  }
+}
+
+function isVisibleToolEvent(event) {
+  const id = String(event.event_id || event.id || '')
+  const detail = parseEventDetail(event.detail)
+  return event.is_tool === true
+    || id.includes(':tool:')
+    || id.includes(':stream:') && id.includes(':subagent:')
+    || Boolean(detail.tool)
+}
+
+function todoRunId(event) {
+  const parts = String(event.id || '').split(':')
+  const index = parts.indexOf('todos')
+  return index >= 0 ? parts[index + 1] || '' : ''
+}
+
+const PROCESS_EVENT_KEYS = new Set([
+  'created',
+  'intent',
+  'repo',
+  'workspace',
+  'sync',
+  'agent',
+  'model',
+  'plan',
+  'done',
+  'failed',
+])
+
+function eventKey(event) {
+  return String(event.id || '').split(':')[1] || ''
+}
+
+function millis(value) {
+  const parsed = Date.parse(value || '')
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function streamRunId(eventId) {
+  const parts = String(eventId || '').split(':')
+  const streamIndex = parts.indexOf('stream')
+  return streamIndex >= 0 ? parts[streamIndex + 1] || '' : ''
+}
+
+function historyTimeline(threadId, runEvents) {
+  const events = Array.isArray(runEvents) ? runEvents : []
+  const latestTodoByRun = new Map()
+  for (const event of events) {
+    if (event.kind === 'todo') latestTodoByRun.set(todoRunId(event), event)
+  }
+
+  const timeline = []
+  const emittedTodoRuns = new Set()
+  let currentToolMessage = null
+  let processMessage = null
+  let pendingNarrations = []
+  let pendingNarrationRunId = ''
+
+  const appendProcessNarrations = (narrations) => {
+    if (!narrations.length) return
+    if (!processMessage) {
+      processMessage = {
+        id: `${threadId}-process-history`,
+        author: 'agent',
+        timestamp: narrations[0].timestamp || nowIso(),
+        chunks: [{
+          kind: 'process',
+          runId: 'history',
+          startedAt: millis(narrations[0].timestamp),
+          finishedAt: null,
+          items: [],
+          narrations: [],
+        }],
+      }
+      timeline.unshift(processMessage)
+    }
+    const chunk = processMessage.chunks[0]
+    if (!Array.isArray(chunk.narrations)) chunk.narrations = []
+    for (const narration of narrations) {
+      if (!chunk.narrations.some((entry) => entry.id === narration.id)) {
+        chunk.narrations.push({ id: narration.id, text: narration.text })
+      }
+    }
+  }
+
+  const flushPendingNarrations = ({ keepLastAsAnswer = false } = {}) => {
+    const answer = keepLastAsAnswer ? pendingNarrations.pop() : null
+    appendProcessNarrations(pendingNarrations)
+    if (answer) {
+      timeline.push({
+        id: answer.id,
+        author: 'agent',
+        timestamp: answer.timestamp,
+        chunks: [{ kind: 'text', text: answer.text }],
+      })
+    }
+    pendingNarrations = []
+    pendingNarrationRunId = ''
+  }
+
+  for (const event of events) {
+    const detail = parseEventDetail(event.detail)
+    const eventId = String(event.id || '')
+
+    if (PROCESS_EVENT_KEYS.has(eventKey(event))) {
+      currentToolMessage = null
+      if (pendingNarrations.length) {
+        flushPendingNarrations({ keepLastAsAnswer: ['plan', 'done', 'failed'].includes(eventKey(event)) })
+      }
+      if (!processMessage) {
+        processMessage = {
+          id: `${threadId}-process-history`,
+          author: 'agent',
+          timestamp: event.created_at || nowIso(),
+          chunks: [{
+            kind: 'process',
+            runId: 'history',
+            startedAt: millis(event.created_at),
+            finishedAt: null,
+            items: [],
+            narrations: [],
+          }],
+        }
+        timeline.push(processMessage)
+      }
+      const chunk = processMessage.chunks[0]
+      const createdAt = millis(event.created_at)
+      const updatedAt = millis(event.updated_at)
+      if (createdAt != null && (chunk.startedAt == null || createdAt < chunk.startedAt)) {
+        chunk.startedAt = createdAt
+      }
+      if (updatedAt != null && (chunk.finishedAt == null || updatedAt > chunk.finishedAt)) {
+        chunk.finishedAt = updatedAt
+      }
+      chunk.items.push({
+        id: eventId,
+        title: String(event.title || '任务处理'),
+        status: String(event.status || 'completed'),
+      })
+      continue
+    }
+
+    if (eventId.includes(':stream:') && eventId.includes(':assistant:') && detail.text) {
+      currentToolMessage = null
+      const runId = streamRunId(eventId)
+      if (pendingNarrations.length && pendingNarrationRunId && runId !== pendingNarrationRunId) {
+        flushPendingNarrations()
+      }
+      pendingNarrationRunId = runId
+      pendingNarrations.push({
+        id: `${threadId}-history-${eventId}`,
+        timestamp: event.created_at || nowIso(),
+        text: String(detail.text),
+      })
+      continue
+    }
+
+    if (event.kind === 'todo') {
+      currentToolMessage = null
+      if (pendingNarrations.length) flushPendingNarrations()
+      const runId = todoRunId(event)
+      const latestEvent = latestTodoByRun.get(runId)
+      if (!latestEvent || emittedTodoRuns.has(runId)) continue
+      const todos = parseEventDetail(latestEvent.detail).todos
+      if (!Array.isArray(todos) || !todos.length) continue
+      emittedTodoRuns.add(runId)
+      timeline.push({
+        id: `${threadId}-live-plan-${runId}`,
+        author: 'agent',
+        timestamp: event.created_at || nowIso(),
+        chunks: [{ kind: 'todo', todos }],
+      })
+      continue
+    }
+
+    if (!isVisibleToolEvent(event)) continue
+    if (pendingNarrations.length) flushPendingNarrations()
+    const item = normalizeToolItem(event)
+    if (item.toolName === 'write_todos' || item.title === 'write_todos') {
+      currentToolMessage = null
+      continue
+    }
+    if (!currentToolMessage) {
+      currentToolMessage = {
+        id: `${threadId}-tool-history-${item.id}`,
+        author: 'agent',
+        timestamp: item.createdAt,
+        chunks: [{
+          kind: 'tools',
+          groupId: `history-${item.id}`,
+          runId: streamRunId(eventId),
+          narrations: [],
+          items: [],
+        }],
+      }
+      timeline.push(currentToolMessage)
+    }
+    currentToolMessage.chunks[0].items.push(item)
+  }
+
+  flushPendingNarrations({ keepLastAsAnswer: true })
+
+  return timeline
+}
+
+function messageText(message) {
+  return (message.chunks || [])
+    .filter((chunk) => chunk.kind === 'text')
+    .map((chunk) => String(chunk.text || ''))
+    .join('')
+    .trim()
+}
+
+function normalizeThreadMessages(messages, runEvents = [], threadId = '') {
   if (!Array.isArray(messages)) return []
-  return messages
+  const events = Array.isArray(runEvents) ? runEvents : []
+  const normalized = messages
     .filter((message) => message && Array.isArray(message.chunks))
     .map((message) => ({
       id: String(message.id || `${message.author || 'message'}-${Date.now()}`),
@@ -43,6 +283,42 @@ function normalizeThreadMessages(messages) {
       chunks: message.chunks,
       hidden: !!message.hidden,
     }))
+
+  const timeline = historyTimeline(threadId, events)
+  if (!timeline.length) return normalized
+
+  let latestUserIndex = -1
+  for (let index = normalized.length - 1; index >= 0; index -= 1) {
+    if (normalized[index].author === 'user') {
+      latestUserIndex = index
+      break
+    }
+  }
+
+  const hasStreamAnswer = events.some((event) => (
+    String(event.id || '').includes(':stream:')
+    && String(event.id || '').includes(':assistant:')
+    && Boolean(parseEventDetail(event.detail).text)
+  ))
+  const preservedSuffix = normalized.slice(latestUserIndex + 1).filter((message) => {
+    if ((message.chunks || []).some((chunk) => chunk.kind === 'todo')) return false
+    if (hasStreamAnswer && messageText(message)) return false
+    return true
+  })
+  return [
+    ...normalized.slice(0, latestUserIndex + 1),
+    ...timeline,
+    ...preservedSuffix,
+  ]
+}
+
+function removeEmptyAgentMessages(messages) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message.author === 'agent' && (!message.chunks || message.chunks.length === 0)) {
+      messages.splice(index, 1)
+    }
+  }
 }
 
 function ensureAgentMessage(messages, messageId) {
@@ -64,8 +340,209 @@ function upsertTodoMessage(messages, messageId, todos) {
   message.author = 'agent'
   message.chunks = [
     { kind: 'text', text: '任务计划' },
-    { kind: 'todo', todos },
+    {
+      kind: 'todo',
+      todos: todos.map((todo) => ({
+        content: String(todo.content || todo.task || todo.title || '').trim(),
+        status: ['completed', 'done'].includes(todo.status)
+          ? 'completed'
+          : ['in_progress', 'in-progress', 'active', 'doing'].includes(todo.status)
+            ? 'in_progress'
+            : 'pending',
+      })).filter((todo) => todo.content),
+    },
   ]
+}
+
+function todosFromToolUpdate(data) {
+  const detail = parseEventDetail(data.detail)
+  if (detail.tool !== 'write_todos') return null
+  const todos = detail.args?.todos || detail.args?.items
+  return Array.isArray(todos) ? todos : null
+}
+
+function createProcessMessage() {
+  const timestamp = Date.now()
+  return {
+    id: `local-process-${timestamp}`,
+    author: 'agent',
+    timestamp: nowIso(),
+    chunks: [{
+      kind: 'process',
+      runId: 'pending',
+      startedAt: timestamp,
+      finishedAt: null,
+      items: [{
+        id: `local-process-connect-${timestamp}`,
+        title: '正在连接服务',
+        status: 'in_progress',
+      }],
+      narrations: [],
+    }],
+  }
+}
+
+function processChunk(messages, threadId, runId) {
+  let message = messages.find((entry) => (
+    entry.author === 'agent'
+    && entry.chunks?.some((chunk) => chunk.kind === 'process' && chunk.runId === runId)
+  ))
+  if (!message) {
+    message = [...messages].reverse().find((entry) => (
+      entry.author === 'agent'
+      && entry.chunks?.some((chunk) => chunk.kind === 'process' && chunk.runId === 'pending')
+    ))
+  }
+  if (!message) {
+    message = {
+      id: `${threadId}-process-${runId}`,
+      author: 'agent',
+      timestamp: nowIso(),
+      chunks: [{
+        kind: 'process',
+        runId,
+        startedAt: Date.now(),
+        finishedAt: null,
+        items: [],
+        narrations: [],
+      }],
+    }
+    messages.push(message)
+  }
+
+  message.id = `${threadId}-process-${runId}`
+  const chunk = message.chunks.find((entry) => entry.kind === 'process')
+  chunk.runId = runId
+  if (!Array.isArray(chunk.narrations)) chunk.narrations = []
+  return chunk
+}
+
+function markProcessConnected(messages, threadId) {
+  const chunk = processChunk(messages, threadId, 'pending')
+  if (chunk.items.length === 1 && String(chunk.items[0].id).startsWith('local-process-connect-')) {
+    chunk.items[0] = {
+      ...chunk.items[0],
+      title: '正在识别任务类型',
+    }
+  }
+}
+
+function upsertProcessActivity(messages, threadId, data) {
+  if (data.is_process !== true) return
+  const runId = String(data.run_id || 'current')
+  const chunk = processChunk(messages, threadId, runId)
+  chunk.items = chunk.items.filter((item) => !String(item.id).startsWith('local-process-connect-'))
+
+  const item = {
+    id: String(data.event_id || `${threadId}:${data.event_key || data.title}`),
+    title: String(data.title || '正在处理'),
+    status: String(data.status || 'in_progress'),
+  }
+  const existingIndex = chunk.items.findIndex((entry) => entry.id === item.id)
+  if (existingIndex >= 0) chunk.items[existingIndex] = { ...chunk.items[existingIndex], ...item }
+  else chunk.items.push(item)
+}
+
+function finishProcessActivity(messages, status = 'completed') {
+  const finishedAt = Date.now()
+  for (const message of messages) {
+    for (const chunk of message.chunks || []) {
+      if (chunk.kind !== 'process') continue
+      chunk.finishedAt = finishedAt
+      chunk.items = chunk.items.map((item) => (
+        item.status === 'in_progress' ? { ...item, status } : item
+      ))
+    }
+  }
+}
+
+function foldEarlierAssistantMessages(messages, threadId, runId, currentMessageId = '') {
+  if (!threadId || !runId) return
+  const prefix = `${threadId}-live-assistant-${runId}-`
+  const candidates = []
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index]
+    if (!String(message.id || '').startsWith(prefix) || message.id === currentMessageId) continue
+    const text = messageText(message)
+    if (text) candidates.push({ index, message, text })
+  }
+  for (let offset = candidates.length - 1; offset >= 0; offset -= 1) {
+    messages.splice(candidates[offset].index, 1)
+  }
+  const chunk = processChunk(messages, threadId, runId)
+  for (const candidate of candidates) {
+    if (!chunk.narrations.some((entry) => entry.id === candidate.message.id)) {
+      chunk.narrations.push({ id: candidate.message.id, text: candidate.text })
+    }
+  }
+}
+
+function foldCompletedRunNarrations(messages) {
+  const runIds = new Set()
+  for (const message of messages) {
+    const match = String(message.id || '').match(/-live-assistant-(.+)-\d+$/)
+    if (match?.[1]) runIds.add(match[1])
+  }
+  for (const runId of runIds) {
+    const prefix = `-live-assistant-${runId}-`
+    const last = [...messages].reverse().find((message) => (
+      String(message.id || '').includes(prefix) && messageText(message)
+    ))
+    if (!last) continue
+    const threadId = String(last.id).split(prefix)[0]
+    foldEarlierAssistantMessages(messages, threadId, runId, last.id)
+  }
+}
+
+function upsertToolActivity(messages, threadId, data) {
+  if (!isVisibleToolEvent(data)) return
+  const item = normalizeToolItem(data)
+  if (item.toolName === 'write_todos' || item.title === 'write_todos') return
+
+  let message = messages.find((entry) => entry.chunks?.some((chunk) => (
+    chunk.kind === 'tools' && chunk.items?.some((existing) => existing.id === item.id)
+  )))
+  if (!message) {
+    removeEmptyAgentMessages(messages)
+    const groupId = item.groupId || item.id
+    const groupedMessage = messages.find((entry) => entry.chunks?.some((chunk) => (
+      chunk.kind === 'tools' && chunk.groupId === groupId
+    )))
+    const previousMessage = messages[messages.length - 1]
+    const previousToolChunk = groupedMessage
+      ? groupedMessage.chunks.find((chunk) => chunk.kind === 'tools')
+      : !item.groupId && previousMessage?.chunks?.length === 1 && previousMessage.chunks[0].kind === 'tools'
+        ? previousMessage.chunks[0]
+        : null
+
+    if (previousToolChunk) {
+      previousToolChunk.items.push(item)
+      return
+    }
+
+    const runId = String(data.run_id || '')
+
+    message = {
+      id: `${threadId}-live-tool-group-${item.id}`,
+      author: 'agent',
+      timestamp: nowIso(),
+      chunks: [{ kind: 'tools', groupId, runId, narrations: [], items: [item] }],
+    }
+    messages.push(message)
+    return
+  }
+
+  const chunk = message.chunks.find((entry) => entry.kind === 'tools')
+  const existingIndex = chunk.items.findIndex((entry) => entry.id === item.id)
+  const existing = chunk.items[existingIndex]
+  chunk.items[existingIndex] = {
+    ...existing,
+    ...item,
+    args: Object.keys(item.args).length ? item.args : existing.args,
+    toolName: item.toolName || existing.toolName,
+    elapsedMs: item.elapsedMs ?? existing.elapsedMs,
+    detailText: item.detailText || existing.detailText,
+  }
 }
 
 function appendTextDelta(messages, messageId, content, mode = 'append') {
@@ -87,6 +564,7 @@ function mergeThreadMeta(target, source) {
   target.platform = source.platform || target.platform
   target.platformDisplay = source.platformDisplay || target.platformDisplay
   target.pr = source.pr || target.pr
+  target.runEvents = source.runEvents || target.runEvents
   target.updatedAt = source.updatedAt || target.updatedAt
 }
 
@@ -157,7 +635,7 @@ export const useAgentStore = defineStore('agent', {
       if (thread.platform) {
         this.selectedPlatform = thread.platform
       }
-      this.messages = normalizeThreadMessages(thread.messages)
+      this.messages = normalizeThreadMessages(thread.messages, thread.runEvents, thread.id)
     },
     async createThread() {
       if (this.streaming) return
@@ -194,6 +672,7 @@ export const useAgentStore = defineStore('agent', {
       this.controller = new AbortController()
       const localUserMessage = createTextMessage('user', prompt, 'local-user')
       this.messages.push(localUserMessage)
+      this.messages.push(createProcessMessage())
 
       try {
         const initialThreadId = this.currentThread?.id || null
@@ -237,6 +716,7 @@ export const useAgentStore = defineStore('agent', {
                 mergeThreadMeta(this.currentThread, data)
               }
               this.activeRunThreadId = data.id || data.thread_id || eventThreadId || this.activeRunThreadId
+              if (event === 'thread_snapshot') markProcessConnected(this.messages, eventThreadId)
               return
             }
 
@@ -253,6 +733,11 @@ export const useAgentStore = defineStore('agent', {
             }
 
             if (event === 'todo_delta') {
+              foldEarlierAssistantMessages(
+                this.messages,
+                eventThreadId,
+                String(data.run_id || ''),
+              )
               upsertTodoMessage(
                 this.messages,
                 data.message_id || `todo-${Date.now()}`,
@@ -261,12 +746,42 @@ export const useAgentStore = defineStore('agent', {
               return
             }
 
+            if (event === 'tool_update') {
+              upsertProcessActivity(this.messages, eventThreadId, data)
+              if (isVisibleToolEvent(data)) {
+                foldEarlierAssistantMessages(
+                  this.messages,
+                  eventThreadId,
+                  String(data.run_id || ''),
+                )
+              }
+              const fallbackTodos = todosFromToolUpdate(data)
+              if (fallbackTodos) {
+                upsertTodoMessage(
+                  this.messages,
+                  `${eventThreadId}-live-plan-${data.run_id || 'current'}`,
+                  fallbackTodos,
+                )
+              }
+              upsertToolActivity(this.messages, eventThreadId, data)
+              return
+            }
+
             if (event === 'message_start') {
-              if (data.message_id) ensureAgentMessage(this.messages, data.message_id)
+              if (data.message_id) {
+                foldEarlierAssistantMessages(
+                  this.messages,
+                  eventThreadId,
+                  String(data.run_id || ''),
+                  data.message_id,
+                )
+                ensureAgentMessage(this.messages, data.message_id)
+              }
               return
             }
 
             if (event === 'text_delta') {
+              removeEmptyAgentMessages(this.messages)
               appendTextDelta(
                 this.messages,
                 data.message_id || `assistant-${Date.now()}`,
@@ -277,12 +792,17 @@ export const useAgentStore = defineStore('agent', {
             }
 
             if (event === 'error') {
+              removeEmptyAgentMessages(this.messages)
+              finishProcessActivity(this.messages, 'error')
               this.error = data.message || data.detail || 'Agent 执行失败'
               if (this.currentThread) this.currentThread.status = 'error'
               return
             }
 
             if (event === 'done') {
+              removeEmptyAgentMessages(this.messages)
+              foldCompletedRunNarrations(this.messages)
+              finishProcessActivity(this.messages)
               if (this.currentThread && this.currentThread.status === 'running') {
                 this.currentThread.status = 'finished'
               }

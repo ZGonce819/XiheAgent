@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -21,6 +22,9 @@ logger = logging.getLogger(__name__)
 def fetch_visible_messages(thread_id: str) -> list[dict[str, str]]:
     """通过 thread_id 从 checkpoint 获取可见消息列表。
 
+    优先从 ``channel_values.messages`` 读取；如果为空（当前 Redis checkpointer
+    版本不内联写入该字段），则回退到扫描 ``checkpoint_write:*`` 条目重建消息。
+
     Args:
         thread_id: LangGraph checkpoint 的会话标识。
 
@@ -31,21 +35,92 @@ def fetch_visible_messages(thread_id: str) -> list[dict[str, str]]:
     try:
         from agent.graph.graph import get_checkpointer
 
-        checkpoint = get_checkpointer().get({"configurable": {"thread_id": thread_id}})
+        checkpointer = get_checkpointer()
+        checkpoint = checkpointer.get({"configurable": {"thread_id": thread_id}})
+        messages = visible_checkpoint_messages(checkpoint)
+        if messages:
+            return messages
+
+        from agent.graph.checkpoint_history import extract_messages_from_writes
+
+        redis_client = getattr(checkpointer, "client", None) or getattr(
+            checkpointer, "_redis", None
+        )
+        if redis_client is None:
+            return []
+        return extract_messages_from_writes(redis_client, thread_id)
     except Exception:
         logger.warning("读取 checkpoint 失败：thread_id=%s", thread_id, exc_info=True)
         return []
-    return visible_checkpoint_messages(checkpoint)
+
+
+def _messages_from_run_events(
+    thread_id: str,
+    run_events: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """从 run_events 中重建前端可展示的任务计划消息。
+
+    实时流式传输时，前端通过 SSE 接收 ``todo_delta`` 事件并构建任务计划消息。
+    刷新页面后这些 SSE 事件不再可用，需要从 ``run_events`` 表中重建任务计划，
+    使历史视图也能展示 Agent 的执行计划。
+
+    Agent 的最终文本回复已保存在 checkpoint 中，不需要从 run_events 重建。
+
+    Args:
+        thread_id: 会话 ID。
+        run_events: 该会话的运行事件列表。
+
+    Returns:
+        重建的任务计划消息字典列表。
+    """
+
+    messages: list[dict[str, Any]] = []
+    latest_todo_by_run: dict[str, tuple[dict[str, Any], list[dict[str, Any]]]] = {}
+
+    for event in run_events:
+        event_id = str(event.get("id") or "")
+        kind = str(event.get("kind") or "")
+        detail = event.get("detail")
+
+        if kind != "todo" or not detail:
+            continue
+
+        parts = event_id.split(":")
+        try:
+            todos_index = parts.index("todos")
+            run_id = parts[todos_index + 1]
+        except (ValueError, IndexError):
+            continue
+        try:
+            parsed = json.loads(detail) if isinstance(detail, str) else detail
+        except (json.JSONDecodeError, TypeError):
+            continue
+        todos = parsed.get("todos") if isinstance(parsed, dict) else None
+        if not todos:
+            continue
+
+        latest_todo_by_run[run_id] = (event, todos)
+
+    for run_id, (event, todos) in latest_todo_by_run.items():
+        message_id = f"{thread_id}-live-plan-{run_id}"
+        messages.append({
+            "id": message_id,
+            "author": "agent",
+            "timestamp": event.get("created_at"),
+            "chunks": [
+                {"kind": "text", "text": "任务计划"},
+                {"kind": "todo", "todos": todos},
+            ],
+        })
+
+    return messages
 
 
 def message_payload(thread: dict[str, Any]) -> list[dict[str, Any]]:
     """生成前端可展示的消息列表。
 
-    历史正文只从 LangGraph checkpoint 读取。Store 仍然可以写入业务数据、
-    run_events、review findings 等内容，但不再参与聊天正文拼接，避免 checkpoint
-    和 Store 双数据源导致页面重复、覆盖或乱序。
-
-    当前轮实时过程由 POST SSE 直接推送增量事件；刷新页面后再由 checkpoint 恢复稳定历史。
+    历史正文从 LangGraph checkpoint 读取，同时从 ``run_events`` 重建任务计划和
+    Agent 流式文本段落，使刷新页面后仍能展示运行过程中的中间状态。
 
     Args:
         thread: 包含 ``thread_id`` 等字段的会话字典。
@@ -55,37 +130,68 @@ def message_payload(thread: dict[str, Any]) -> list[dict[str, Any]]:
     """
 
     created_at = thread.get("created_at")
-    messages: list[dict[str, Any]] = []
     thread_id = str(thread["thread_id"])
+
+    messages: list[dict[str, Any]] = []
     for index, message in enumerate(fetch_visible_messages(thread_id)):
         content = str(message.get("content") or "").strip()
         if not content:
             continue
-        content = content.strip()
-        if not content:
-            continue
-        author = (
-            message.get("author")
-            if message.get("author") in {"user", "agent", "system", "tool"}
-            else "agent"
-        )
+        role = message.get("role") or ""
+        author = "user" if role == "user" else "agent"
         messages.append(
             {
-                "id": message.get("message_id") or f"{thread_id}-history-fallback-{index}",
+                "id": message.get("id") or f"{thread_id}-history-fallback-{index}",
                 "author": author,
                 "timestamp": message.get("created_at") or created_at,
                 "chunks": [{"kind": "text", "text": content}],
             }
         )
+
+    run_events = thread.get("run_events") or []
+    event_messages = _messages_from_run_events(thread_id, run_events)
+    if event_messages:
+        user_index = -1
+        for i, msg in enumerate(messages):
+            if msg.get("author") == "user":
+                user_index = i
+        if user_index >= 0:
+            messages[user_index + 1:user_index + 1] = event_messages
+        else:
+            messages.extend(event_messages)
+
+    if not messages:
+        user_prompt = (thread.get("user_prompt") or "").strip()
+        if user_prompt:
+            messages.append(
+                {
+                    "id": f"{thread_id}-fallback-prompt",
+                    "author": "user",
+                    "timestamp": created_at,
+                    "chunks": [{"kind": "text", "text": user_prompt}],
+                }
+            )
+    elif not any(m.get("author") == "user" for m in messages):
+        user_prompt = (thread.get("user_prompt") or "").strip()
+        if user_prompt:
+            messages.insert(
+                0,
+                {
+                    "id": f"{thread_id}-fallback-prompt",
+                    "author": "user",
+                    "timestamp": created_at,
+                    "chunks": [{"kind": "text", "text": user_prompt}],
+                },
+            )
     return messages
 
 
 def thread_payload(thread: dict[str, Any]) -> dict[str, Any]:
-    """组装完整的 thread DTO，包含 messages、PR、状态等全部字段。
-    
+    """组装完整的 thread DTO，包含 messages、run_events、PR、状态等全部字段。
+
     Args:
         thread: 包含会话原始字段的字典。
-    
+
     Returns:
         前端需要的完整 thread DTO 字典。
     """
@@ -100,6 +206,8 @@ def thread_payload(thread: dict[str, Any]) -> dict[str, Any]:
             platform_display = get_platform_display_name(platform)
         except Exception:
             pass
+
+    run_events = thread.get("run_events") or []
     return {
         "id": thread["thread_id"],
         "title": thread.get("title") or "xihe-agent Task",
@@ -116,6 +224,7 @@ def thread_payload(thread: dict[str, Any]) -> dict[str, Any]:
         "createdAt": iso_to_millis(thread.get("created_at")),
         "updatedAt": iso_to_millis(thread.get("updated_at")),
         "messages": message_payload(thread),
+        "runEvents": run_events,
         "pr": pr_payload(thread),
         "latestPlan": None,
         "diffStats": None,

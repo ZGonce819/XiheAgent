@@ -96,18 +96,31 @@ export const agentsApi = {
   getThread: (threadId: string) =>
     agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}`),
   createThread: (body: ThreadCreateRequest) =>
-    agentsRequest<AgentThread>("/threads", {
+    fetch(`${API_BASE}/dashboard/api/threads/stream-message`, {
       method: "POST",
-      body: JSON.stringify(body),
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        content: body.prompt,
+        repo: body.repo,
+        images: body.images,
+        model_id: body.model_id,
+        effort: body.effort,
+      }),
+    }).then((res) => {
+      if (!res.ok) throw new Error(res.statusText)
+      return res
     }),
   sendMessage: (threadId: string, body: ThreadMessageRequest) =>
-    agentsRequest<AgentThread>(
-      `/threads/${encodeURIComponent(threadId)}/messages`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      }
-    ),
+    fetch(`${API_BASE}/dashboard/api/threads/${encodeURIComponent(threadId)}/stream-message`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((res) => {
+      if (!res.ok) throw new Error(res.statusText)
+      return res
+    }),
   cancelThread: (threadId: string) =>
     agentsRequest<AgentThread>(
       `/threads/${encodeURIComponent(threadId)}/cancel`,

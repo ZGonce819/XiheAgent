@@ -19,12 +19,9 @@ Example:
 from database.mysql import ConnectionManager, utc_now
 from store.finding_repo import FindingRepo
 from store.mapping_repo import MappingRepo
-from store.message_repo import MessageRepo
 from store.mysql_store import LocalMySQLStore
-from store.plan_repo import PlanRepo
 from store.event_repo import RunEventRepo
 from store.run_repo import RunRepo
-from store.setting_repo import SettingRepo
 from store.thread_repo import ThreadRepo
 
 __all__ = [
@@ -32,11 +29,8 @@ __all__ = [
     "FindingRepo",
     "LocalMySQLStore",
     "MappingRepo",
-    "MessageRepo",
-    "PlanRepo",
     "RunEventRepo",
     "RunRepo",
-    "SettingRepo",
     "ThreadRepo",
     "utc_now",
 ]

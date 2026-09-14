@@ -7,10 +7,15 @@ tools 在执行过程中需要向前端写入步骤状态，但不能反向依�
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 from store import LocalMySQLStore
 
 _event_store: LocalMySQLStore | None = None
+_sse_callbacks: dict[
+    str,
+    Callable[[str, str, str, str, str, str | None], None],
+] = {}
 logger = logging.getLogger(__name__)
 
 
@@ -27,6 +32,26 @@ def _get_event_store() -> LocalMySQLStore:
     if _event_store is None:
         _event_store = LocalMySQLStore()
     return _event_store
+
+
+def register_sse_callback(
+    thread_id: str,
+    callback: Callable[[str, str, str, str, str, str | None], None],
+) -> None:
+    """为指定会话注册 SSE 推送回调。
+
+    Args:
+        thread_id: 回调所属会话 ID。
+        callback: 接收 ``(thread_id, key, kind, title, status, detail)`` 的回调函数。
+    """
+
+    _sse_callbacks[thread_id] = callback
+
+
+def clear_sse_callback(thread_id: str) -> None:
+    """清除指定会话的 SSE 推送回调。"""
+
+    _sse_callbacks.pop(thread_id, None)
 
 
 def record_event(
@@ -61,5 +86,16 @@ def record_event(
             status=status,
             detail=detail,
         )
+        callback = _sse_callbacks.get(thread_id)
+        if callback is not None:
+            try:
+                callback(thread_id, key, kind, title, status, detail)
+            except Exception:
+                logger.debug("SSE 推送回调失败：thread_id=%s key=%s", thread_id, key)
     except Exception:
-        logger.exception("记录运行步骤失败：thread_id=%s key=%s title=%s", thread_id, key, title)
+        logger.exception(
+            "记录运行步骤失败：thread_id=%s key=%s title=%s",
+            thread_id,
+            key,
+            title,
+        )

@@ -248,7 +248,7 @@ def _replace_section(memory: str, heading: str, items: list[str]) -> str:
         re.M | re.S,
     )
     if pattern.search(memory):
-        return pattern.sub(section, memory, count=1)
+        return pattern.sub(lambda _: section, memory, count=1)
     return f"{memory.rstrip()}\n\n{section}"
 
 

@@ -13,7 +13,7 @@ from deepagents import create_deep_agent
 from deepagents.backends import CompositeBackend, StoreBackend
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from deepagents.middleware.summarization import create_summarization_tool_middleware
-from langchain.agents.middleware import ModelCallLimitMiddleware
+from langchain.agents.middleware import ModelCallLimitMiddleware, TodoListMiddleware
 from langchain_core.language_models import BaseChatModel
 from langgraph.graph.state import RunnableConfig
 from langgraph.store.base import BaseStore
@@ -32,6 +32,7 @@ from agent.middleware import (
     MessageSanitizeMiddleware,
     SanitizeToolInputsMiddleware,
     ToolErrorMiddleware,
+    ToolTrackingMiddleware,
 )
 from agent.runtime.task_intent import TaskKind
 from backends import create_backend
@@ -362,6 +363,8 @@ def get_agent(config: RunnableConfig):
             ContextInjectionMiddleware(),
             MessageSanitizeMiddleware(),
             SanitizeToolInputsMiddleware(backend=backend),
+            TodoListMiddleware(),
+            ToolTrackingMiddleware(backend=backend),
             create_summarization_tool_middleware(main_model, agent_backend),
             ModelCallLimitMiddleware(
                 run_limit=MODEL_CALL_RECURSION_LIMIT,

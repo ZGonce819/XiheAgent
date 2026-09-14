@@ -33,7 +33,11 @@ from agent.runtime.events import record_event
 from agent.runtime.planning_router import run_plan_response_task
 from agent.runtime.streaming_runtime import run_agent_with_event_stream
 from agent.runtime.sync_router import run_pull_only_task, run_workspace_listing_task
-from agent.runtime.task_intent import classify_task_kind, is_pull_only_task, is_workspace_listing_task
+from agent.runtime.task_intent import (
+    classify_task_kind,
+    is_pull_only_task,
+    is_workspace_listing_task,
+)
 from utils import extract_final_assistant_text
 from utils.gitee_utils import mask_token
 from utils.platform_utils import parse_repo_url
@@ -41,6 +45,16 @@ from utils.platform_utils import parse_repo_url
 logger = logging.getLogger(__name__)
 
 RuntimeEventSink = Callable[[str, dict[str, Any]], None]
+
+TASK_KIND_LABELS = {
+    "coding": "开发实现",
+    "planning": "方案规划",
+    "analysis": "项目分析",
+    "qa": "问题解答",
+    "sync": "仓库同步",
+    "inspect": "工作区查看",
+    "review": "代码审查",
+}
 
 
 def initialize_task_record(
@@ -80,6 +94,7 @@ def run_agent_task(
     prompt: str,
     thread_id: str | None = None,
     event_sink: RuntimeEventSink | None = None,
+    run_id: str | None = None,
 ) -> dict[str, Any]:
     """运行一次普通 Agent 任务的总入口。
 
@@ -93,14 +108,25 @@ def run_agent_task(
     5. 任务结束后更新 Store 状态和仓库级长期记忆。
     """
 
+    thread_id = thread_id or str(uuid.uuid4())
+
     if is_workspace_listing_task(prompt):
+        record_event(thread_id, "intent", "已识别任务类型：工作区查看", status="completed")
         return run_workspace_listing_task(repo_url=repo_url, prompt=prompt, thread_id=thread_id)
 
     if is_pull_only_task(prompt):
+        record_event(thread_id, "intent", "已识别任务类型：仓库同步", status="completed")
         return run_pull_only_task(repo_url=repo_url, prompt=prompt, thread_id=thread_id)
 
+    record_event(thread_id, "intent", "正在识别任务类型", status="in_progress")
     task_kind = classify_task_kind(prompt)
-    thread_id = thread_id or str(uuid.uuid4())
+    task_kind_label = TASK_KIND_LABELS.get(task_kind, task_kind)
+    record_event(
+        thread_id,
+        "intent",
+        f"已识别任务类型：{task_kind_label}",
+        status="completed",
+    )
     store = get_store()
     existing_thread = store.get_thread(thread_id)
     approved_plan_text: str | None = None
@@ -127,15 +153,19 @@ def run_agent_task(
                 previous_plan_message=plan_message,
                 revision_prompt=prompt,
                 event_sink=event_sink,
+                run_id=run_id,
             )
     if existing_thread and approved_plan_text is None and is_approval_prompt(prompt):
-        task_kind = classify_task_kind(prompt)
+        logger.warning("用户确认实施但未找到待确认方案：thread_id=%s", thread_id)
+        record_event(thread_id, "plan:not_found", "未找到待确认的技术方案", kind="other", status="error")
+        store.update_thread_status(thread_id, "failed")
+        raise ValueError("未找到待确认的技术方案，请重新描述您的需求")
 
     if approved_plan_text is not None:
         task_kind = "coding"
 
     if task_kind == "coding" and approved_plan_text is None:
-        return run_plan_response_task(repo_url=repo_url, prompt=prompt, thread_id=thread_id, event_sink=event_sink)
+        return run_plan_response_task(repo_url=repo_url, prompt=prompt, thread_id=thread_id, event_sink=event_sink, run_id=run_id)
 
     store.clear_run_events(thread_id)
     if approved_plan_text is not None:
@@ -155,7 +185,7 @@ def run_agent_task(
         repo_name=repo.repo,
         latest_run_status="running",
     )
-    run_id = str(uuid.uuid4())
+    run_id = run_id or str(uuid.uuid4())
     store.record_run(run_id=run_id, thread_id=thread_id, status="running")
     logger.info("业务 Store 已记录运行：thread_id=%s run_id=%s", thread_id, run_id)
     record_event(thread_id, "agent", "构建 Agent 运行图", status="in_progress")

@@ -155,8 +155,18 @@ def _text_delta_from_event(event: Any) -> str:
         block = payload.get("delta") or {}
         if not isinstance(block, dict):
             continue
-        if block.get("type") == "text-delta":
-            deltas.append(str(block.get("text") or ""))
+        block_type = str(block.get("type") or "")
+        if block_type in {"text-delta", "text_delta"}:
+            deltas.append(str(block.get("text") or block.get("content") or ""))
+            continue
+        if block_type == "block-delta":
+            fields = block.get("fields")
+            if isinstance(fields, dict) and str(fields.get("type") or "") in {
+                "text-delta",
+                "text_delta",
+                "text",
+            }:
+                deltas.append(str(fields.get("text") or fields.get("content") or ""))
     return "".join(deltas)
 
 
@@ -397,7 +407,14 @@ def _extract_todos(tool_call: Any) -> list[dict[str, str]]:
     return todos
 
 
-def _record_write_todos(thread_id: str, run_id: str, tool_call: Any, index: int) -> bool:
+def _record_write_todos(
+    thread_id: str,
+    run_id: str,
+    tool_call: Any,
+    index: int,
+    *,
+    event_sink: StreamEventSink | None = None,
+) -> bool:
     """只把 DeepAgents 内置 write_todos 转成结构化任务清单事件。
 
     Args:
@@ -405,6 +422,7 @@ def _record_write_todos(thread_id: str, run_id: str, tool_call: Any, index: int)
         run_id: 当前运行 ID。
         tool_call: 工具调用对象。
         index: 工具调用序号，用于生成事件 ID。
+        event_sink: 可选的 SSE 事件推送回调。
 
     Returns:
         ``True`` 表示是 write_todos 并已处理；``False`` 表示不是。
@@ -417,13 +435,13 @@ def _record_write_todos(thread_id: str, run_id: str, tool_call: Any, index: int)
     if not todos:
         return True
     call_id = str(_safe_field(tool_call, "id", "") or _safe_field(tool_call, "tool_call_id", "") or index)
-    record_event(
+    _record_todos(
         thread_id,
-        f"todos:{run_id}:{call_id}",
-        "任务清单",
-        kind="todo",
+        run_id,
+        call_id,
+        todos,
         status="completed",
-        detail=json.dumps({"todos": todos}, ensure_ascii=False),
+        event_sink=event_sink,
     )
     return True
 
@@ -801,7 +819,7 @@ def _consume_raw_event_stream(
         tool_call = _tool_call_from_event(event)
         if tool_call is not None:
             tool_call_index += 1
-            if _record_write_todos(thread_id, run_id, tool_call, tool_call_index):
+            if _record_write_todos(thread_id, run_id, tool_call, tool_call_index, event_sink=event_sink):
                 saw_write_todos = True
                 continue
             logger.debug(

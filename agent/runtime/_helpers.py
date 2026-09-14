@@ -11,7 +11,7 @@ import json
 import logging
 from typing import Any
 
-from agent.graph.checkpoint_history import visible_checkpoint_messages
+from agent.graph.checkpoint_history import extract_messages_from_writes, visible_checkpoint_messages
 from agent.graph.graph import get_checkpointer, get_langgraph_store
 from agent.memory.repo import ensure_repo_memory_initialized
 from server import get_agent
@@ -39,6 +39,13 @@ def _get_visible_messages(thread_id: str) -> list[dict[str, Any]]:
         logger.exception("读取 checkpoint 失败：thread_id=%s", thread_id)
         return []
     messages = visible_checkpoint_messages(checkpoint)
+    if not messages:
+        try:
+            redis_client = getattr(get_checkpointer(), "client", None) or getattr(get_checkpointer(), "_redis", None)
+            if redis_client is not None:
+                messages = extract_messages_from_writes(redis_client, thread_id)
+        except Exception:
+            logger.debug("从 Redis writes 恢复消息失败：thread_id=%s", thread_id, exc_info=True)
     result: list[dict[str, Any]] = []
     for msg in messages:
         result.append({
@@ -365,24 +372,49 @@ def latest_confirmable_plan_from_checkpoint(thread_id: str) -> dict[str, Any] | 
         未找到可确认方案时返回 ``None``。
     """
 
+    candidates = []
     for message in reversed(_get_visible_messages(thread_id)):
         if message.get("author") != "agent":
             continue
         content = str(message.get("content") or "").strip()
-        if not is_confirmable_plan_text(content):
+        if not content:
             continue
-        return {
-            "message_id": message.get("message_id") or f"checkpoint-plan:{thread_id}",
-            "thread_id": thread_id,
-            "run_id": None,
-            "author": "agent",
-            "content": content,
-            "metadata": {
-                "task_kind": "planning",
-                "awaiting_confirmation": True,
-                "source": "checkpoint",
-            },
-        }
+        if is_confirmable_plan_text(content):
+            return {
+                "message_id": message.get("message_id") or f"checkpoint-plan:{thread_id}",
+                "thread_id": thread_id,
+                "run_id": None,
+                "author": "agent",
+                "content": content,
+                "metadata": {
+                    "task_kind": "planning",
+                    "awaiting_confirmation": True,
+                    "source": "checkpoint",
+                },
+            }
+        candidates.append(message)
+
+    if candidates:
+        fallback = candidates[0]
+        fallback_content = str(fallback.get("content") or "").strip()
+        if len(fallback_content) >= 200:
+            logger.info(
+                "方案关键词匹配失败，使用最后一条长消息作为待确认方案：thread_id=%s len=%d",
+                thread_id,
+                len(fallback_content),
+            )
+            return {
+                "message_id": fallback.get("message_id") or f"checkpoint-plan:{thread_id}",
+                "thread_id": thread_id,
+                "run_id": None,
+                "author": "agent",
+                "content": fallback_content,
+                "metadata": {
+                    "task_kind": "planning",
+                    "awaiting_confirmation": True,
+                    "source": "checkpoint",
+                },
+            }
     return None
 
 
