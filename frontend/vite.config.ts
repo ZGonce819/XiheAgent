@@ -28,8 +28,8 @@ const config = defineConfig({
       },
       manifest: {
         id: "/",
-        name: "xihe-agent",
-        short_name: "xihe-agent",
+        name: "XiheAgent",
+        short_name: "XiheAgent",
         description: "Enterprise AI coding service.",
         start_url: "/",
         scope: "/",

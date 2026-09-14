@@ -3,7 +3,7 @@ export function Logo({ className = "h-5" }: { className?: string }) {
     <span
       className={`font-heading text-sm font-semibold tracking-tight text-current ${className}`}
     >
-      xihe-agent
+      XiheAgent
     </span>
   );
 }

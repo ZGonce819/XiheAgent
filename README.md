@@ -1,8 +1,8 @@
-# xihe-agent (羲和) — AI Coding Assistant
+# XiheAgent (羲和) — AI Coding Assistant
 
 ![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)
 
-羲和（xihe-agent）是一个基于 FastAPI + LangGraph + DeepAgents 构建的 AI 编码助手，支持 Gitee / GitHub / Codeup 多平台仓库集成、多轮对话、代码审查、自动化任务编排等功能。
+羲和（XiheAgent）是一个基于 FastAPI + LangGraph + DeepAgents 构建的 AI 编码助手，支持 Gitee / GitHub / Codeup 多平台仓库集成、多轮对话、代码审查、自动化任务编排等功能。
 
 ## 核心特性
 
@@ -182,7 +182,7 @@ opensandbox-server -h
 docker pull sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:v1.0.2
 ```
 
-#### 7. xihe-agent 启用沙盒
+#### 7. XiheAgent 启用沙盒
 
 在 `.env` 中添加：
 ```ini
@@ -197,7 +197,7 @@ SANDBOX_PORT=8080
 pip install -e ".[sandbox]"
 ```
 
-**注意：** 如果不启用沙盒，xihe-agent 会自动降级使用 `LocalShellBackend`（本地 Shell 执行），适合开发和个人使用场景。
+**注意：** 如果不启用沙盒，XiheAgent 会自动降级使用 `LocalShellBackend`（本地 Shell 执行），适合开发和个人使用场景。
 
 ### 安装 Python 依赖
 

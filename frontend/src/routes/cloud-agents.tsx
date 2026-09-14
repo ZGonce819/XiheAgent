@@ -140,8 +140,8 @@ function CloudAgentsPage() {
   return (
     <AppShell
       user={session.data}
-      title="xihe-agent 智能体"
-      description="Configure how xihe-agent picks a model, Gitee repository, and PR defaults."
+      title="XiheAgent 智能体"
+      description="Configure how XiheAgent picks a model, Gitee repository, and PR defaults."
     >
       <SettingsSection title="Defaults">
         <div className="divide-y divide-border">

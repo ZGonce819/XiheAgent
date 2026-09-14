@@ -87,7 +87,7 @@ onBeforeUnmount(() => {
     <section class="workspace">
       <header class="workspace-header">
         <div>
-          <h1>xihe-agent</h1>
+          <h1>XiheAgent</h1>
           <p>
             <span class="dot" :class="{ running: agent.streaming }"></span>
             {{ agent.streaming ? 'Agent 正在运行' : 'FastAPI + DeepAgents' }}
@@ -104,7 +104,7 @@ onBeforeUnmount(() => {
         <div v-if="agent.loading" class="empty-state">正在加载会话...</div>
         <div v-else-if="!agent.messages.length" class="empty-state">
           <div class="empty-icon">⚡</div>
-          <h2>让 xihe-agent 构建、修复或检查代码仓库</h2>
+          <h2>让 XiheAgent 构建、修复或检查代码仓库</h2>
           <p>输入技术方案、代码实施、PR 审查等指令，前端会按顺序展示用户输入、任务计划和 AI 输出。</p>
           <div class="empty-hints">
             <div class="hint-item">

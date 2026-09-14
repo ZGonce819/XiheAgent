@@ -43,7 +43,7 @@ export function SlackConnectDialog() {
               </Dialog.Title>
             </div>
             <Dialog.Description className="text-sm text-muted-foreground">
-              Connect Slack only if you plan to trigger xihe-agent from Slack.
+              Connect Slack only if you plan to trigger XiheAgent from Slack.
               Manual Gitee tasks use the service-side repository token.
             </Dialog.Description>
             <div className="mt-2 flex justify-end gap-2">
