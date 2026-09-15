@@ -182,6 +182,8 @@ export interface SendAgentMessageVariables {
   images?: Array<ImageChunk>
   model_id?: string | null
   effort?: string | null
+  edit_message_id?: string | null
+  rollback_confirmed?: boolean
 }
 
 export function useSendAgentMessage(threadId: string) {
@@ -205,6 +207,8 @@ export function useSendAgentMessage(threadId: string) {
         repo: cached?.repoUrl || cached?.repo || null,
         model_id: vars.model_id,
         effort: vars.effort,
+        edit_message_id: vars.edit_message_id,
+        rollback_confirmed: vars.rollback_confirmed,
       })
       await processStreamResponse(response, queryClient)
       return queryClient.getQueryData<AgentThread>(agentThreadKeys.detail(threadId))

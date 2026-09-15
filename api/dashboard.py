@@ -19,13 +19,32 @@ from agent.runtime import (
 )
 from config.app_config import get_settings
 from config.env_config import get_env
-from schemas.request_schema import DashboardThreadMessageRequest
+from schemas.request_schema import DashboardThreadMessageRequest, DashboardEditPreviewRequest
+from services.thread_service import fetch_visible_messages
 from services.streaming_service import build_streaming_response
 from services.thread_service import thread_payload
 from utils.platform_utils import (normalize_repo_url)
 from utils.redis_utils import cleanup_stream
 
 dashboard_router = APIRouter(prefix="/dashboard/api")
+
+
+def _is_latest_user_message(message_id: str, thread_id: str, messages: list[dict[str, Any]], original_content: str | None = None) -> bool:
+    """校验消息确实是当前线程最后一条用户消息。
+
+    实时 SSE 消息使用 ``<thread>-user-<run>`` ID，历史 checkpoint 可能使用
+    LangChain 原始 UUID。两种 ID 都只允许匹配最后一条用户消息；线程前缀
+    只是兼容实时消息，不会放宽到任意旧消息。
+    """
+    user_messages = [message for message in messages if message.get("role") == "user"]
+    if not user_messages:
+        return False
+    latest_id = str(user_messages[-1].get("id") or "")
+    if latest_id == message_id or message_id.startswith(f"{thread_id}-user-"):
+        return True
+    if original_content is not None:
+        return str(user_messages[-1].get("content") or "").strip() == original_content.strip()
+    return False
 
 
 @dashboard_router.get("/me")
@@ -144,7 +163,44 @@ async def dashboard_stream_existing_message(
         repo_url = normalize_repo_url(body.repo, fallback=(task or {}).get("repo_url"))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return build_streaming_response(thread_id=thread_id, repo_url=repo_url, content=body.content)
+    if body.edit_message_id:
+        if not body.rollback_confirmed:
+            raise HTTPException(status_code=400, detail="请先确认回退影响")
+        messages = fetch_visible_messages(thread_id)
+        if not _is_latest_user_message(body.edit_message_id, thread_id, messages, body.edit_message_content):
+            raise HTTPException(status_code=409, detail="只能编辑最近一条用户消息")
+    try:
+        return build_streaming_response(
+            thread_id=thread_id,
+            repo_url=repo_url,
+            content=body.content,
+            rollback_message_id=body.edit_message_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@dashboard_router.post("/threads/{thread_id}/edit-preview")
+def dashboard_edit_preview(thread_id: str, body: DashboardEditPreviewRequest) -> dict[str, Any]:
+    task = get_task(thread_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="thread not found")
+    messages = fetch_visible_messages(thread_id)
+    if not _is_latest_user_message(body.message_id, thread_id, messages, body.original_content):
+        raise HTTPException(status_code=409, detail="只能编辑最近一条用户消息")
+    index = next((i for i, message in enumerate(messages) if message.get("id") == body.message_id), len(messages) - 1)
+    return {
+        "message_id": body.message_id,
+        "messages_to_replace": max(0, len(messages) - index),
+        "runs_to_replace": 1 if task.get("latest_run") else 0,
+        "code_changes_detected": any(
+            event.get("kind") in {"edit", "delete", "move"}
+            for event in (task.get("run_events") or [])
+        ),
+        "requires_rollback": bool(task.get("run_events") or len(messages) > index + 1),
+    }
 
 
 @dashboard_router.delete("/threads/{thread_id}", status_code=204)

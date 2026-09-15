@@ -95,6 +95,7 @@ def run_agent_task(
     thread_id: str | None = None,
     event_sink: RuntimeEventSink | None = None,
     run_id: str | None = None,
+    checkpoint_id: str | None = None,
 ) -> dict[str, Any]:
     """运行一次普通 Agent 任务的总入口。
 
@@ -154,6 +155,7 @@ def run_agent_task(
                 revision_prompt=prompt,
                 event_sink=event_sink,
                 run_id=run_id,
+                checkpoint_id=checkpoint_id,
             )
     if existing_thread and approved_plan_text is None and is_approval_prompt(prompt):
         logger.warning("用户确认实施但未找到待确认方案：thread_id=%s", thread_id)
@@ -165,7 +167,7 @@ def run_agent_task(
         task_kind = "coding"
 
     if task_kind == "coding" and approved_plan_text is None:
-        return run_plan_response_task(repo_url=repo_url, prompt=prompt, thread_id=thread_id, event_sink=event_sink, run_id=run_id)
+        return run_plan_response_task(repo_url=repo_url, prompt=prompt, thread_id=thread_id, event_sink=event_sink, run_id=run_id, checkpoint_id=checkpoint_id)
 
     store.clear_run_events(thread_id)
     if approved_plan_text is not None:
@@ -209,6 +211,7 @@ def run_agent_task(
             ),
             task_kind=task_kind,
             event_sink=event_sink,
+            checkpoint_id=checkpoint_id,
         )
         store.finish_open_run_events(thread_id, status="completed")
         store.update_thread_status(thread_id, "completed")

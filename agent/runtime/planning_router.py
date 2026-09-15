@@ -45,6 +45,7 @@ def run_plan_response_task(
     revision_prompt: str | None = None,
     event_sink: RuntimeEventSink | None = None,
     run_id: str | None = None,
+    checkpoint_id: str | None = None,
 ) -> dict[str, Any]:
     """为编码需求生成技术方案，并把方案作为普通回答直接展示。
 
@@ -126,6 +127,7 @@ def run_plan_response_task(
             ),
             task_kind="planning",
             event_sink=event_sink,
+            checkpoint_id=checkpoint_id,
         )
         store.finish_open_run_events(thread_id, status="completed")
         messages = result.get("messages", [])

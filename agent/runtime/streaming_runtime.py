@@ -877,6 +877,7 @@ def run_agent_with_event_stream(
     content: str,
     task_kind: str | None = None,
     event_sink: StreamEventSink | None = None,
+    checkpoint_id: str | None = None,
 ) -> dict[str, Any]:
     """使用官方 v3 event streaming 驱动 DeepAgent。
 
@@ -902,10 +903,13 @@ def run_agent_with_event_stream(
         AgentRunLimitExceeded: 运行保护阈值被突破时。
     """
 
+    configurable = {"thread_id": thread_id}
+    if checkpoint_id:
+        configurable["checkpoint_id"] = checkpoint_id
     stream = agent.stream_events(
         {"messages": [{"role": "user", "content": content}]},
         version="v3",
-        config={"configurable": {"thread_id": thread_id}},
+        config={"configurable": configurable},
     )
     record_event(thread_id, "model", "调用大模型", kind="other", status="in_progress")
     # raw protocol events 是当前版本里唯一能拿到 token/chunk 的通道。

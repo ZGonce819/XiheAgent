@@ -594,6 +594,154 @@ textarea {
   box-shadow: var(--shadow-sm);
 }
 
+.user-message-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  max-width: 75%;
+}
+
+.message-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: 4px;
+  padding-right: 4px;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.message-user:hover .message-actions,
+.message-actions:focus-within {
+  opacity: 1;
+}
+
+.message-icon-button,
+.message-action-button {
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 2px 5px;
+  font-size: var(--text-xs);
+}
+
+.message-icon-button:hover,
+.message-action-button:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-accent);
+}
+
+.message-icon-button svg {
+  display: block;
+  width: 15px;
+  height: 15px;
+}
+
+.user-edit-box {
+  width: min(75vw, 720px);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-tertiary);
+  box-shadow: var(--shadow-sm);
+}
+
+.user-edit-input {
+  width: 100%;
+  min-height: 90px;
+  resize: vertical;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--color-text-primary);
+}
+
+.user-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.message-model-select {
+  margin-right: auto;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  padding: 3px 6px;
+}
+
+.message-action-primary {
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+}
+
+.dialog-backdrop {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--space-6);
+  background: rgb(15 20 25 / 0.28);
+}
+
+.confirm-dialog {
+  width: min(100%, 430px);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-tertiary);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-5);
+}
+
+.confirm-dialog h2 {
+  margin: 0 0 var(--space-3);
+  color: var(--color-text-primary);
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.confirm-dialog-message {
+  margin: 0;
+  white-space: pre-line;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.7;
+}
+
+.confirm-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+}
+
+.dialog-button {
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  padding: var(--space-2) var(--space-4);
+}
+
+.dialog-button-secondary {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+}
+
+.dialog-button-primary {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+}
+
 .markdown-body {
   line-height: 1.8;
   overflow-wrap: anywhere;

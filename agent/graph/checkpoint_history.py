@@ -169,7 +169,7 @@ def visible_checkpoint_messages(checkpoint: dict[str, Any] | None) -> list[dict[
                 continue
             seen_hashes.add(content_hash)
 
-        message_id = stable_history_message_id(text, index)
+        message_id = str(getattr(message, "id", "") or stable_history_message_id(text, index))
         result.append({
             "id": message_id,
             "role": role,
@@ -433,7 +433,7 @@ def extract_messages_from_writes(redis_client: Any, thread_id: str) -> list[dict
                 continue
             seen_hashes.add(content_hash)
 
-        message_id = stable_history_message_id(text, index)
+        message_id = _msg_id_from_lc_dict(msg) or stable_history_message_id(text, index)
         result.append({
             "id": message_id,
             "role": role,
@@ -441,3 +441,67 @@ def extract_messages_from_writes(redis_client: Any, thread_id: str) -> list[dict
         })
 
     return result
+
+
+def checkpoint_before_latest_user(redis_client: Any, thread_id: str) -> str | None:
+    """Return the checkpoint immediately before the latest user message.
+
+    ``None`` means the latest user message is the first turn, so callers should
+    start the thread from an empty checkpoint. Writes are scanned along the
+    active lineage and message ids are deduplicated because some saver versions
+    persist cumulative message lists.
+    """
+
+    lineage = _build_checkpoint_lineage(redis_client, thread_id)
+    if not lineage:
+        return None
+
+    order = {checkpoint_id: index for index, checkpoint_id in enumerate(lineage)}
+    user_checkpoints: list[str] = []
+    seen_users: set[str] = set()
+    entries: list[tuple[int, int, str, list[dict[str, Any]]]] = []
+
+    for raw_key in redis_client.keys(f"checkpoint_write:{thread_id}:*"):
+        key = raw_key.decode() if isinstance(raw_key, bytes) else raw_key
+        try:
+            data = redis_client.json().get(key)
+        except Exception:
+            continue
+        if not isinstance(data, dict) or data.get("channel") != "messages":
+            continue
+        checkpoint_id = str(data.get("checkpoint_id") or "")
+        if checkpoint_id not in order:
+            continue
+        blob = data.get("blob")
+        if not isinstance(blob, str) or not blob:
+            continue
+        try:
+            decoded = json.loads(base64.b64decode(blob).decode("utf-8"))
+        except Exception:
+            continue
+        if isinstance(decoded, list):
+            entries.append((order[checkpoint_id], int(data.get("idx", 0)), checkpoint_id, decoded))
+
+    entries.sort(key=lambda item: (item[0], item[1]))
+    for _order, _idx, checkpoint_id, messages in entries:
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            message_class = _msg_class_from_lc_dict(message)
+            if message_class not in {"humanmessage", "human", "user"}:
+                continue
+            kwargs = message.get("kwargs")
+            content = kwargs.get("content", "") if isinstance(kwargs, dict) else ""
+            identity = _msg_id_from_lc_dict(message) or hashlib.sha256(
+                message_content_to_text(content).encode()
+            ).hexdigest()
+            if identity in seen_users:
+                continue
+            seen_users.add(identity)
+            user_checkpoints.append(checkpoint_id)
+
+    if not user_checkpoints:
+        return None
+    latest_user_checkpoint = user_checkpoints[-1]
+    latest_index = order[latest_user_checkpoint]
+    return lineage[latest_index - 1] if latest_index > 0 else None

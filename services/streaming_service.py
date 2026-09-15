@@ -24,6 +24,8 @@ from fastapi.responses import StreamingResponse
 
 from agent.runtime.events import clear_sse_callback, register_sse_callback
 from agent.runtime.task_router import get_task, initialize_task_record, run_agent_task
+from agent.graph.checkpoint_history import checkpoint_before_latest_user
+from agent.graph.graph import get_checkpointer
 from config.app_config import get_settings
 from config.constants import SSE_HEADERS
 from services.thread_service import thread_meta_payload
@@ -60,6 +62,7 @@ def build_streaming_response(
     thread_id: str,
     repo_url: str,
     content: str,
+    rollback_message_id: str | None = None,
 ) -> StreamingResponse:
     """构造 POST SSE 流式响应。
 
@@ -75,6 +78,26 @@ def build_streaming_response(
     Returns:
         FastAPI ``StreamingResponse``，媒体类型为 ``text/event-stream``。
     """
+
+    checkpoint_id: str | None = None
+    if rollback_message_id:
+        checkpointer = get_checkpointer()
+        redis_client = getattr(checkpointer, "_redis", None) or getattr(checkpointer, "client", None)
+        if redis_client is not None:
+            checkpoint_id = checkpoint_before_latest_user(redis_client, thread_id)
+        # A first-turn edit has no parent checkpoint. Removing only the graph
+        # state gives the edited prompt a clean branch while preserving the
+        # dashboard thread and its audit records.
+        if checkpoint_id is None:
+            # 某些 RedisSaver 版本在分支运行后无法枚举旧父节点。此时
+            # 当前请求已经通过前端确认了回退影响，清理图状态并从编辑后的
+            # 消息建立新分支，保证连续编辑仍可用。
+            if redis_client is None:
+                raise RuntimeError("无法访问会话 checkpoint，已拒绝回退")
+            try:
+                checkpointer.delete_thread(thread_id)
+            except Exception as exc:
+                raise RuntimeError("无法清理首轮 checkpoint，已拒绝回退") from exc
 
     initialize_task_record(repo_url=repo_url, prompt=content, thread_id=thread_id)
     initial_task = get_task(thread_id)
@@ -186,6 +209,7 @@ def build_streaming_response(
                     thread_id=thread_id,
                     event_sink=event_sink,
                     run_id=run_id,
+                    checkpoint_id=checkpoint_id,
                 )
                 latest = get_task(thread_id) or initial_task
                 send_event("thread_done", thread_meta_payload(latest))
@@ -202,6 +226,8 @@ def build_streaming_response(
                 clear_sse_callback(thread_id)
 
         yield sse_part("thread_snapshot", thread_meta_payload(initial_task))
+        if rollback_message_id:
+            yield sse_part("rollback", {"message_id": rollback_message_id})
         yield sse_part(
             "user_message",
             {

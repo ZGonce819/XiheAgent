@@ -637,13 +637,22 @@ export const useAgentStore = defineStore('agent', {
     error: '',
     controller: null,
     activeRunThreadId: null,
+    confirmDialog: null,
+    confirmResolver: null,
   }),
   getters: {
     currentThreadId: (state) => state.currentThread?.id || null,
+    latestUserMessageId: (state) => [...state.messages].reverse().find((message) => message.author === 'user')?.id || null,
     modelOptions: (state) => state.options?.models || [],
     canSend: (state) => !state.streaming,
   },
   actions: {
+    resolveConfirm(value) {
+      const resolver = this.confirmResolver
+      this.confirmResolver = null
+      this.confirmDialog = null
+      resolver?.(Boolean(value))
+    },
     async bootstrap() {
       this.loading = true
       this.error = ''
@@ -747,7 +756,54 @@ export const useAgentStore = defineStore('agent', {
         await this.refreshThreads()
       }
     },
-    async consumeMessageStream(threadId, prompt) {
+    async editMessage({ message, content }) {
+      // 页面只会给最后一条用户消息显示编辑入口；这里不再用本地 ID
+      // 做第二次严格比较，因为 SSE 回退后会重新分配消息 ID。
+      if (this.streaming || !message || message.author !== 'user') return
+      const index = this.messages.findIndex((item) => item.id === message.id)
+      if (index < 0) return
+      let impact = '没有需要回退的任务或代码变更。\n是否使用编辑后的内容重新发送？'
+      try {
+        const response = await fetch(`/dashboard/api/threads/${encodeURIComponent(this.currentThreadId)}/edit-preview`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message_id: message.id, original_content: messageText(message) }),
+        })
+        if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || '无法获取回退影响')
+        const preview = await response.json()
+        impact = preview.requires_rollback
+          ? `将回退 ${preview.messages_to_replace} 条消息和 ${preview.runs_to_replace} 次任务执行。${preview.code_changes_detected ? '\n检测到代码变更，回退可能产生冲突。' : ''}\n请确认已了解影响后继续。`
+          : impact
+      } catch (error) {
+        this.error = error.message || '无法获取回退影响'
+        return
+      }
+      const confirmed = await new Promise((resolve) => {
+        this.confirmResolver = resolve
+        this.confirmDialog = { title: '确认回退并重新发送', message: impact }
+      })
+      if (!confirmed) return
+      const oldMessages = this.messages.slice(0, index)
+      this.messages = oldMessages
+      this.error = ''
+      this.streaming = true
+      this.controller = new AbortController()
+      this.messages.push(createTextMessage('user', content, 'local-user'))
+      this.messages.push(createProcessMessage())
+      try {
+        await this.consumeMessageStream(this.currentThreadId, content, {
+          edit_message_id: message.id,
+          edit_message_content: (message.chunks || []).filter((chunk) => chunk.kind === 'text').map((chunk) => chunk.text || '').join(''),
+          rollback_confirmed: true,
+        })
+      } catch (error) {
+        if (error.name !== 'AbortError') this.error = error.message || 'Agent 执行失败'
+      } finally {
+        this.streaming = false
+        this.controller = null
+        await this.refreshThreads()
+      }
+    },
+    async consumeMessageStream(threadId, prompt, extra = {}) {
       await streamAgentMessage(
         threadId,
         {
@@ -755,6 +811,7 @@ export const useAgentStore = defineStore('agent', {
           repo: this.selectedRepo || DEFAULT_REPO,
           model_id: this.selectedModel || null,
           effort: this.selectedEffort || null,
+          ...extra,
         },
         {
           signal: this.controller.signal,
@@ -771,6 +828,13 @@ export const useAgentStore = defineStore('agent', {
               }
               this.activeRunThreadId = data.id || data.thread_id || eventThreadId || this.activeRunThreadId
               if (event === 'thread_snapshot') markProcessConnected(this.messages, eventThreadId)
+              return
+            }
+
+            if (event === 'rollback') {
+              const rollbackId = String(data.message_id || '')
+              const rollbackIndex = this.messages.findIndex((message) => message.id === rollbackId)
+              if (rollbackIndex >= 0) this.messages.splice(rollbackIndex)
               return
             }
 

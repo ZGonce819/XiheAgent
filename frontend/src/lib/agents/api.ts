@@ -16,6 +16,16 @@ export interface ThreadMessageRequest {
   images?: Array<ImageChunk>
   model_id?: string | null
   effort?: string | null
+  edit_message_id?: string | null
+  rollback_confirmed?: boolean
+}
+
+export interface EditPreview {
+  message_id: string
+  messages_to_replace: number
+  runs_to_replace: number
+  code_changes_detected: boolean
+  requires_rollback: boolean
 }
 
 export interface ScheduleCreateRequest {
@@ -95,6 +105,11 @@ export const agentsApi = {
     }),
   getThread: (threadId: string) =>
     agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}`),
+  previewEdit: (threadId: string, messageId: string) =>
+    agentsRequest<EditPreview>(`/threads/${encodeURIComponent(threadId)}/edit-preview`, {
+      method: "POST",
+      body: JSON.stringify({ message_id: messageId }),
+    }),
   createThread: (body: ThreadCreateRequest) =>
     fetch(`${API_BASE}/dashboard/api/threads/stream-message`, {
       method: "POST",

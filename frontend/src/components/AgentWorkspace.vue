@@ -127,6 +127,11 @@ onBeforeUnmount(() => {
           v-for="message in agent.messages"
           :key="message.id"
           :message="message"
+          :editable="!agent.streaming && message.author === 'user' && message.id === agent.latestUserMessageId"
+          :model-options="agent.modelOptions"
+          :selected-model="agent.selectedModel"
+          @edit="agent.editMessage"
+          @model-change="agent.selectedModel = $event"
         />
 
         <div v-if="agent.error" class="error-banner">{{ agent.error }}</div>
@@ -157,5 +162,16 @@ onBeforeUnmount(() => {
         />
       </div>
     </section>
+
+    <div v-if="agent.confirmDialog" class="dialog-backdrop" role="presentation" @click.self="agent.resolveConfirm(false)">
+      <section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title">
+        <h2 id="confirm-dialog-title">{{ agent.confirmDialog.title }}</h2>
+        <p class="confirm-dialog-message">{{ agent.confirmDialog.message }}</p>
+        <div class="confirm-dialog-actions">
+          <button type="button" class="dialog-button dialog-button-secondary" @click="agent.resolveConfirm(false)">取消</button>
+          <button type="button" class="dialog-button dialog-button-primary" @click="agent.resolveConfirm(true)">确定</button>
+        </div>
+      </section>
+    </div>
   </main>
 </template>

@@ -41,7 +41,8 @@ def _get_visible_messages(thread_id: str) -> list[dict[str, Any]]:
     messages = visible_checkpoint_messages(checkpoint)
     if not messages:
         try:
-            redis_client = getattr(get_checkpointer(), "client", None) or getattr(get_checkpointer(), "_redis", None)
+            checkpointer = get_checkpointer()
+            redis_client = getattr(checkpointer, "_redis", None) or getattr(checkpointer, "client", None)
             if redis_client is not None:
                 messages = extract_messages_from_writes(redis_client, thread_id)
         except Exception:

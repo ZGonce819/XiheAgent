@@ -12,6 +12,7 @@ import { useCancelAgentThread, useSendAgentMessage } from "@/lib/agents/queries"
 import { addPendingPrompt, dropPendingPrompts, getPendingPrompts } from "@/lib/agents/pendingPrompts";
 import { useAgentThreadStream } from "@/lib/agents/useThreadStream";
 import { useModelOptions } from "@/lib/agents/useModelOptions";
+import { agentsApi } from "@/lib/agents/api";
 
 interface AgentThreadViewProps {
   user: SessionUser;
@@ -136,6 +137,40 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   const runFailed = thread.status === "error";
   const sendError = sendMessage.error instanceof Error ? sendMessage.error.message : null;
   const liveStatus = liveStatusFor(thread, pendingPrompts.length > 0);
+  const latestUserMessage = useMemo(() => {
+    for (let index = displayMessages.length - 1; index >= 0; index -= 1) {
+      if (displayMessages[index]?.author === "user") return displayMessages[index];
+    }
+    return null;
+  }, [displayMessages]);
+  const handleEditMessage = async (message: Message, content: string) => {
+    if (hasActiveRun || sendMessage.isPending) {
+      window.alert("请先停止当前运行，再编辑消息。");
+      return;
+    }
+    if (!latestUserMessage || message.id !== latestUserMessage.id) return;
+    let impact = "没有需要回退的任务或代码变更。\n是否使用编辑后的内容重新发送？";
+    try {
+      const preview = await agentsApi.previewEdit(thread.id, message.id);
+      impact = preview.requires_rollback
+        ? `将回退 ${preview.messages_to_replace} 条消息和 ${preview.runs_to_replace} 次任务执行。\n${preview.code_changes_detected ? "检测到代码变更，回退可能产生冲突。\n" : ""}\n请确认已了解影响后继续。`
+        : "没有需要回退的任务或代码变更。\n是否使用编辑后的内容重新发送？";
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "无法获取回退影响，请稍后重试。");
+      return;
+    }
+    if (!window.confirm(impact)) return;
+    const insertAt = Math.max(0, displayMessages.findIndex((item) => item.id === message.id));
+    setPendingPrompts(addPendingPrompt(thread.id, content, insertAt, message.chunks.filter((chunk): chunk is ImageChunk => chunk.kind === "image")));
+    sendMessage.mutate({
+      content,
+      images: message.chunks.filter((chunk): chunk is ImageChunk => chunk.kind === "image"),
+      model_id: activeSelection?.modelId ?? null,
+      effort: activeSelection?.effort ?? null,
+      edit_message_id: message.id,
+      rollback_confirmed: true,
+    });
+  };
   const handleSubmit = (content: string, images: Array<ImageChunk>) => {
     const insertAt = displayMessages.length;
     const nextPendingPrompts = addPendingPrompt(thread.id, content, insertAt, images);
@@ -159,6 +194,11 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                 isStreaming={isStreaming}
                 contentWidthClass="max-w-3xl"
                 liveStatus={liveStatus}
+                editableMessageId={!hasActiveRun ? latestUserMessage?.id : null}
+                onEditMessage={handleEditMessage}
+                models={models}
+                selection={activeSelection}
+                onSelectionChange={setSelection}
               />
               {thread.runEvents && thread.runEvents.length > 0 && (
                 <div className="shrink-0 px-4">

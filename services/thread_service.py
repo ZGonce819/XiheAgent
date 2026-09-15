@@ -43,8 +43,8 @@ def fetch_visible_messages(thread_id: str) -> list[dict[str, str]]:
 
         from agent.graph.checkpoint_history import extract_messages_from_writes
 
-        redis_client = getattr(checkpointer, "client", None) or getattr(
-            checkpointer, "_redis", None
+        redis_client = getattr(checkpointer, "_redis", None) or getattr(
+            checkpointer, "client", None
         )
         if redis_client is None:
             return []

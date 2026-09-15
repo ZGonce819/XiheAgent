@@ -494,6 +494,16 @@ export function handleStreamPart(
     return;
   }
 
+  if (event === "rollback") {
+    const messageId = typeof data.message_id === "string" ? data.message_id : "";
+    if (!messageId) return;
+    updateThread(threadId, queryClient, (thread) => {
+      const index = thread.messages.findIndex((message) => message.id === messageId);
+      return index < 0 ? thread : { ...thread, messages: thread.messages.slice(0, index) };
+    });
+    return;
+  }
+
   if (event === "todo_delta") {
     updateThread(threadId, queryClient, (thread) =>
       applyTodoDelta(thread, data as TodoDeltaPayload),

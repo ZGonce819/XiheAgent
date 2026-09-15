@@ -1,6 +1,6 @@
 // @ts-nocheck — ported from open-swe-app (Electron); strict checks applied when wiring cloud APIs.
 import { useRef, useEffect, useLayoutEffect, useCallback, memo, useMemo, useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, Copy, Pencil, ArrowUp, X } from "lucide-react";
 import { diffLines } from "diff";
 import { MultiFileDiff } from "@pierre/diffs/react";
 import { diffOptions } from "@/components/agents/utils/diffUtils";
@@ -17,6 +17,8 @@ import type {
   Project,
   DiffData,
 } from "@/lib/agents/types";
+import type { ModelOption } from "@/lib/api";
+import type { ModelSelection } from "@/lib/agents/useModelOptions";
 
 type RenderItem =
   | { type: "text-chunk"; key: string; chunk: Chunk }
@@ -329,6 +331,11 @@ interface MessageViewProps extends ApprovalCallbacks {
   onShowScrollToBottomChange?: (show: boolean) => void;
   scrollControlRef?: React.MutableRefObject<MessageViewScrollControl | null>;
   liveStatus?: string | null;
+  editableMessageId?: string | null;
+  onEditMessage?: (message: Message, content: string) => void;
+  models?: Array<ModelOption>;
+  selection?: ModelSelection | null;
+  onSelectionChange?: (next: ModelSelection) => void;
 }
 
 const BUSY_TEXTS: { present: string; past: string }[] = [
@@ -393,7 +400,7 @@ function ChunkRenderer({
   }
 }
 
-function UserMessage({ message }: { message: Message }) {
+function UserMessage({ message, editable = false, onEdit, models = [], selection = null, onSelectionChange }: { message: Message; editable?: boolean; onEdit?: (message: Message, content: string) => void; models?: Array<ModelOption>; selection?: ModelSelection | null; onSelectionChange?: (next: ModelSelection) => void }) {
   const text = message.chunks
     .filter((c) => c.kind === "text")
     .map((c) => (c as { kind: "text"; text: string }).text)
@@ -403,6 +410,8 @@ function UserMessage({ message }: { message: Message }) {
   const textRef = useRef<HTMLDivElement>(null);
   const [scrolledFromTop, setScrolledFromTop] = useState(false);
   const [scrolledFromBottom, setScrolledFromBottom] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(text);
 
   const updateScrollIndicators = useCallback(() => {
     const el = textRef.current;
@@ -423,7 +432,7 @@ function UserMessage({ message }: { message: Message }) {
     .join(", ");
 
   return (
-    <div className="flex justify-end my-4">
+    <div className="group flex justify-end my-4">
       <div className="max-w-[78%]">
         {images.length > 0 && (
           <div className="flex gap-2 mb-2 flex-wrap justify-end">
@@ -439,7 +448,21 @@ function UserMessage({ message }: { message: Message }) {
             ))}
           </div>
         )}
-        {text && (
+        {editing ? (
+          <div className="w-[min(78vw,720px)] rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3 shadow-sm">
+            <textarea autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} className="min-h-24 w-full resize-none bg-transparent text-[13px] leading-5 text-[color:var(--ui-text)] outline-none" />
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <select value={selection ? selection.modelId + "::" + selection.effort : ""} onChange={(event) => { const parts = event.target.value.split("::"); if (parts[0] && parts[1]) onSelectionChange?.({ modelId: parts[0], effort: parts[1] }); }} className="max-w-[220px] rounded-md bg-transparent px-1 py-1 text-xs text-[color:var(--ui-text-muted)] outline-none" aria-label="选择模型">
+                <option value="">默认模型</option>
+                {models.flatMap((model) => model.efforts.map((effort) => <option key={model.id + "::" + effort} value={model.id + "::" + effort}>{model.label} {effort}</option>))}
+              </select>
+              <div className="flex items-center gap-2">
+              <button type="button" onClick={() => setEditing(false)} className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs text-[color:var(--ui-text-muted)] hover:bg-[var(--ui-panel-2)]"><X className="size-3.5" />取消</button>
+              <button type="button" disabled={!draft.trim()} onClick={() => { if (draft.trim()) { onEdit?.(message, draft.trim()); setEditing(false); } }} className="inline-flex items-center gap-1 rounded-md bg-[var(--ui-accent)] px-2.5 py-1 text-xs text-white disabled:opacity-40"><ArrowUp className="size-3.5" />发送</button>
+              </div>
+            </div>
+          </div>
+        ) : text && (
           <div className="inline-block max-w-full rounded-2xl bg-[var(--ui-accent-bubble)] overflow-hidden">
             <div
               ref={textRef}
@@ -451,6 +474,11 @@ function UserMessage({ message }: { message: Message }) {
             </div>
           </div>
         )}
+        <div className="mt-1 flex items-center justify-end gap-2 pr-1 text-[11px] text-[color:var(--ui-text-dim)] opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+          <span>{message.timestamp ? new Date(message.timestamp).toLocaleString(undefined, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }) : ""}</span>
+          <button type="button" onClick={() => void navigator.clipboard?.writeText(text)} aria-label="复制消息" title="复制" className="rounded p-1 hover:bg-[var(--ui-panel-2)]"><Copy className="size-3.5" /></button>
+          {editable && <button type="button" onClick={() => { setDraft(text); setEditing(true); }} aria-label="编辑并重新发送" title="编辑并重新发送" className="rounded p-1 hover:bg-[var(--ui-panel-2)]"><Pencil className="size-3.5" /></button>}
+        </div>
       </div>
     </div>
   );
@@ -779,14 +807,24 @@ const MessageBubble = memo(function MessageBubble({
   message,
   isStreaming,
   projectPath,
+  editable,
+  onEdit,
+  models,
+  selection,
+  onSelectionChange,
   ...callbacks
 }: {
   message: Message;
   isStreaming?: boolean;
   projectPath?: string;
+  editable?: boolean;
+  onEdit?: (message: Message, content: string) => void;
+  models?: Array<ModelOption>;
+  selection?: ModelSelection | null;
+  onSelectionChange?: (next: ModelSelection) => void;
 } & ApprovalCallbacks) {
   if (message.author === "user") {
-    return <UserMessage message={message} />;
+    return <UserMessage message={message} editable={editable} onEdit={onEdit} models={models} selection={selection} onSelectionChange={onSelectionChange} />;
   }
   return (
     <AgentMessage
@@ -868,6 +906,11 @@ export const MessageView = memo(function MessageView({
   onReject,
   onAutoApprove,
   onOpenDiff,
+  editableMessageId,
+  onEditMessage,
+  models,
+  selection,
+  onSelectionChange,
 }: MessageViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -1050,6 +1093,11 @@ export const MessageView = memo(function MessageView({
               onReject={onReject}
               onAutoApprove={onAutoApprove}
               onOpenDiff={onOpenDiff}
+              editable={message.id === editableMessageId && !isStreaming}
+              onEdit={onEditMessage}
+              models={models}
+              selection={selection}
+              onSelectionChange={onSelectionChange}
             />
           ))}
           <ThinkingSpinner isStreaming={isStreaming} liveStatus={liveStatus} />
