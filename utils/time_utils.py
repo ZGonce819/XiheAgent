@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 
 def iso_to_millis(value: str | None) -> int:
@@ -23,6 +23,6 @@ def iso_to_millis(value: str | None) -> int:
     """
 
     if not value:
-        return int(datetime.now().timestamp() * 1000)
+        return int(datetime.now(UTC).timestamp() * 1000)
     normalized = value.replace("Z", "+00:00")
     return int(datetime.fromisoformat(normalized).timestamp() * 1000)
