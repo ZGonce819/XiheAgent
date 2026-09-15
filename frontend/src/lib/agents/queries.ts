@@ -10,7 +10,7 @@ import {
   processStreamResponse,
 } from "./useThreadStream"
 import type { ScheduleUpdateRequest } from "./api"
-import type { AgentThread, ImageChunk } from "./types"
+import type { AgentThread, ImageChunk, Message } from "./types"
 
 function messageText(message: { chunks: Array<{ kind: string; text?: string }> }): string {
   return message.chunks
@@ -183,6 +183,8 @@ export interface SendAgentMessageVariables {
   model_id?: string | null
   effort?: string | null
   edit_message_id?: string | null
+  edit_message_content?: string | null
+  edit_snapshot?: Array<Message>
   rollback_confirmed?: boolean
 }
 
@@ -208,6 +210,8 @@ export function useSendAgentMessage(threadId: string) {
         model_id: vars.model_id,
         effort: vars.effort,
         edit_message_id: vars.edit_message_id,
+        edit_message_content: vars.edit_message_content,
+        edit_snapshot: vars.edit_snapshot,
         rollback_confirmed: vars.rollback_confirmed,
       })
       await processStreamResponse(response, queryClient)

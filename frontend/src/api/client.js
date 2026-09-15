@@ -25,4 +25,7 @@ export const dashboardApi = {
   async deleteThread(threadId) {
     await http.delete(`/threads/${threadId}`)
   },
+  async saveViewSnapshot(threadId, messages) {
+    await http.put(`/threads/${threadId}/view-snapshot`, { messages })
+  },
 }

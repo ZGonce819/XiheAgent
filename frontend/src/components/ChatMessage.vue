@@ -15,8 +15,11 @@ const props = defineProps({
   editable: { type: Boolean, default: false },
   modelOptions: { type: Array, default: () => [] },
   selectedModel: { type: String, default: '' },
+  showVersionNav: { type: Boolean, default: false },
+  versionPosition: { type: Number, default: 1 },
+  versionTotal: { type: Number, default: 1 },
 })
-const emit = defineEmits(['edit', 'model-change'])
+const emit = defineEmits(['edit', 'model-change', 'previous-version', 'next-version'])
 const editing = ref(false)
 const draft = ref('')
 
@@ -129,6 +132,7 @@ async function copyMessage() {
     </div>
 
     <template v-else>
+      <div class="agent-message-wrap">
       <ProcessActivity
         v-for="(chunk, index) in processChunks()"
         :key="`process-${index}`"
@@ -167,6 +171,23 @@ async function copyMessage() {
         class="error-banner"
       >
         {{ chunk.text }}
+      </div>
+
+      <div v-if="textChunks().length" class="agent-message-actions" aria-label="智能体消息操作">
+        <button type="button" class="message-icon-button" title="复制正文" aria-label="复制正文" @click="copyMessage">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+        </button>
+        <time>{{ formatTimestamp(message.timestamp) }}</time>
+        <template v-if="showVersionNav && versionTotal > 1">
+          <button type="button" class="message-icon-button" title="查看上一个版本" aria-label="查看上一个版本" :disabled="versionPosition <= 1" @click="emit('previous-version')">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <span class="message-version-count">{{ versionPosition }}/{{ versionTotal }}</span>
+          <button type="button" class="message-icon-button" title="查看下一个版本" aria-label="查看下一个版本" :disabled="versionPosition >= versionTotal" @click="emit('next-version')">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </template>
+      </div>
       </div>
     </template>
   </article>

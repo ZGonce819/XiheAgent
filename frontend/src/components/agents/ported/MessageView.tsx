@@ -433,7 +433,7 @@ function UserMessage({ message, editable = false, onEdit, models = [], selection
 
   return (
     <div className="group flex justify-end my-4">
-      <div className="max-w-[78%]">
+      <div className="w-fit max-w-[78%]">
         {images.length > 0 && (
           <div className="flex gap-2 mb-2 flex-wrap justify-end">
             {images.map((img, i) => (

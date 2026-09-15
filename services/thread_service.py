@@ -19,6 +19,22 @@ from utils.time_utils import iso_to_millis
 logger = logging.getLogger(__name__)
 
 
+def _last_user_text(messages: list[dict[str, Any]]) -> str:
+    for message in reversed(messages):
+        author = message.get("author") or message.get("role")
+        if author != "user":
+            continue
+        chunks = message.get("chunks")
+        if isinstance(chunks, list):
+            return "".join(
+                str(chunk.get("text") or "")
+                for chunk in chunks
+                if isinstance(chunk, dict) and chunk.get("kind") == "text"
+            ).strip()
+        return str(message.get("content") or "").strip()
+    return ""
+
+
 def fetch_visible_messages(thread_id: str) -> list[dict[str, str]]:
     """通过 thread_id 从 checkpoint 获取可见消息列表。
 
@@ -186,7 +202,18 @@ def message_payload(thread: dict[str, Any]) -> list[dict[str, Any]]:
     return messages
 
 
-def thread_payload(thread: dict[str, Any]) -> dict[str, Any]:
+def conversation_snapshot(thread: dict[str, Any]) -> dict[str, Any]:
+    """Build the read-only UI state archived before a message edit."""
+
+    return {
+        "messages": message_payload(thread),
+        "runEvents": thread.get("run_events") or [],
+    }
+
+
+def thread_payload(
+    thread: dict[str, Any], *, include_versions: bool = False
+) -> dict[str, Any]:
     """组装完整的 thread DTO，包含 messages、run_events、PR、状态等全部字段。
 
     Args:
@@ -208,7 +235,7 @@ def thread_payload(thread: dict[str, Any]) -> dict[str, Any]:
             pass
 
     run_events = thread.get("run_events") or []
-    return {
+    payload = {
         "id": thread["thread_id"],
         "title": thread.get("title") or "XiheAgent Task",
         "repo": full_name,
@@ -230,6 +257,23 @@ def thread_payload(thread: dict[str, Any]) -> dict[str, Any]:
         "diffStats": None,
         "changedFiles": [],
     }
+    if include_versions:
+        try:
+            from agent.graph.graph import get_store
+
+            store = get_store()
+            saved_view = store.get_conversation_view(str(thread["thread_id"]))
+            if saved_view and _last_user_text(saved_view) == _last_user_text(payload["messages"]):
+                payload["messages"] = saved_view
+            payload["conversationVersions"] = store.list_conversation_versions(
+                str(thread["thread_id"])
+            )
+        except Exception:
+            logger.warning(
+                "读取会话版本失败：thread_id=%s", thread.get("thread_id"), exc_info=True
+            )
+            payload["conversationVersions"] = []
+    return payload
 
 
 def thread_meta_payload(thread: dict[str, Any]) -> dict[str, Any]:
@@ -245,6 +289,6 @@ def thread_meta_payload(thread: dict[str, Any]) -> dict[str, Any]:
         去除 messages 后的 thread DTO 字典。
     """
 
-    payload = thread_payload(thread)
+    payload = thread_payload(thread, include_versions=True)
     payload.pop("messages", None)
     return payload

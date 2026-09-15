@@ -30,12 +30,17 @@ class DashboardThreadMessageRequest(BaseModel):
     effort: str | None = Field(default=None, description="推理努力程度")
     edit_message_id: str | None = Field(default=None, description="正在编辑的最近一条用户消息 ID")
     edit_message_content: str | None = Field(default=None, description="待编辑消息的原始文本，用于校验实时消息 ID")
+    edit_snapshot: list[dict[str, Any]] | None = Field(default=None, description="编辑前的页面消息快照")
     rollback_confirmed: bool = Field(default=False, description="是否确认回退后重新发送")
 
 
 class DashboardEditPreviewRequest(BaseModel):
     message_id: str = Field(min_length=1, description="待编辑的用户消息 ID")
     original_content: str | None = Field(default=None, description="消息原文，用于校验实时 ID")
+
+
+class DashboardViewSnapshotRequest(BaseModel):
+    messages: list[dict[str, Any]] = Field(description="当前页面完整消息视图")
 
 
 class TaskCreateRequest(BaseModel):

@@ -32,9 +32,17 @@ class RunRepo(ConnectionManager):
                 started_at VARCHAR(32) NOT NULL,
                 finished_at VARCHAR(32),
                 error TEXT,
+                base_commit VARCHAR(64),
+                head_commit VARCHAR(64),
                 INDEX idx_thread_id (thread_id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """)
+        for column in ("base_commit", "head_commit"):
+            try:
+                self.execute(f"ALTER TABLE runs ADD COLUMN {column} VARCHAR(64) NULL")
+            except Exception:
+                # Existing installations already have the column.
+                pass
 
     def record_run(
         self,
@@ -44,6 +52,8 @@ class RunRepo(ConnectionManager):
         status: str,
         error: str | None = None,
         finished: bool = False,
+        base_commit: str | None = None,
+        head_commit: str | None = None,
     ) -> None:
         """记录或更新一次运行。
 
@@ -63,14 +73,16 @@ class RunRepo(ConnectionManager):
         finished_at = now if finished else None
         self.execute(
             """
-            INSERT INTO runs (run_id, thread_id, status, started_at, finished_at, error)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO runs (run_id, thread_id, status, started_at, finished_at, error, base_commit, head_commit)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
                 status = VALUES(status),
                 finished_at = VALUES(finished_at),
-                error = VALUES(error)
+                error = VALUES(error),
+                base_commit = COALESCE(VALUES(base_commit), base_commit),
+                head_commit = COALESCE(VALUES(head_commit), head_commit)
             """,
-            (run_id, thread_id, status, now, finished_at, error),
+            (run_id, thread_id, status, now, finished_at, error, base_commit, head_commit),
         )
 
     def get_latest_run(self, thread_id: str) -> dict[str, Any] | None:

@@ -9,6 +9,12 @@ function nowIso() {
   return new Date().toISOString()
 }
 
+function cloneMessages(messages) {
+  // Pinia 的响应式数组是 Proxy，不能直接传给 structuredClone。
+  // 消息只包含 JSON 数据，用序列化复制可以稳定保存完整页面快照。
+  return JSON.parse(JSON.stringify(messages || []))
+}
+
 function createTextMessage(author, text, idPrefix = author) {
   return {
     id: `${idPrefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -285,6 +291,61 @@ function messageText(message) {
     .trim()
 }
 
+function foldLegacyNarrations(messages, threadId) {
+  const result = messages.slice()
+  let userIndex = 0
+  while (userIndex < result.length) {
+    if (result[userIndex].author !== 'user') {
+      userIndex += 1
+      continue
+    }
+    let nextUserIndex = userIndex + 1
+    while (nextUserIndex < result.length && result[nextUserIndex].author !== 'user') {
+      nextUserIndex += 1
+    }
+    const turn = result.slice(userIndex + 1, nextUserIndex)
+    const hasProcess = turn.some((message) => (
+      message.chunks || []
+    ).some((chunk) => chunk.kind === 'process'))
+    const textMessages = turn.filter((message) => (
+      message.author === 'agent'
+      && messageText(message)
+      && !(message.chunks || []).some((chunk) => ['process', 'todo', 'tools'].includes(chunk.kind))
+    ))
+    if (!hasProcess && textMessages.length > 1) {
+      const narrations = textMessages.slice(0, -1)
+      const firstIndex = result.indexOf(narrations[0])
+      const timestamps = narrations.map((message) => millis(message.timestamp)).filter((value) => value != null)
+      for (const narration of narrations) {
+        const index = result.indexOf(narration)
+        if (index >= 0) result.splice(index, 1)
+      }
+      result.splice(firstIndex, 0, {
+        id: `${threadId}-legacy-process-${result[userIndex]?.id || userIndex}`,
+        author: 'agent',
+        timestamp: narrations[0]?.timestamp || nowIso(),
+        chunks: [{
+          kind: 'process',
+          runId: `legacy-${result[userIndex]?.id || userIndex}`,
+          startedAt: timestamps[0] || null,
+          finishedAt: timestamps[timestamps.length - 1] || null,
+          items: [],
+          narrations: narrations.map((message) => ({ id: message.id, text: messageText(message) })),
+          timeline: narrations.map((message) => ({
+            id: message.id,
+            type: 'text',
+            text: messageText(message),
+            createdAt: message.timestamp,
+          })),
+        }],
+      })
+      nextUserIndex -= narrations.length - 1
+    }
+    userIndex = nextUserIndex
+  }
+  return result
+}
+
 function normalizeThreadMessages(messages, runEvents = [], threadId = '') {
   if (!Array.isArray(messages)) return []
   const events = Array.isArray(runEvents) ? runEvents : []
@@ -298,8 +359,14 @@ function normalizeThreadMessages(messages, runEvents = [], threadId = '') {
       hidden: !!message.hidden,
     }))
 
+  // 编辑请求会保存页面已经组装完成的 process 消息。它包含任务步骤、
+  // 工具调用和展开状态所需的数据，不需要再从 runEvents 推断一次。
+  if (normalized.some((message) => message.chunks.some((chunk) => chunk.kind === 'process'))) {
+    return foldLegacyNarrations(normalized, threadId)
+  }
+
   const timeline = historyTimeline(threadId, events)
-  if (!timeline.length) return normalized
+  if (!timeline.length) return foldLegacyNarrations(normalized, threadId)
 
   let latestUserIndex = -1
   for (let index = normalized.length - 1; index >= 0; index -= 1) {
@@ -319,11 +386,20 @@ function normalizeThreadMessages(messages, runEvents = [], threadId = '') {
     if (hasStreamAnswer && messageText(message)) return false
     return true
   })
-  return [
+  return foldLegacyNarrations([
     ...normalized.slice(0, latestUserIndex + 1),
     ...timeline,
     ...preservedSuffix,
-  ]
+  ], threadId)
+}
+
+function normalizeConversationVersions(versions, threadId) {
+  if (!Array.isArray(versions)) return []
+  return versions.map((version, index) => ({
+    number: Number(version.number) || index + 1,
+    createdAt: version.createdAt || nowIso(),
+    messages: normalizeThreadMessages(version.messages || [], version.runEvents || [], threadId),
+  }))
 }
 
 function removeEmptyAgentMessages(messages) {
@@ -628,6 +704,8 @@ export const useAgentStore = defineStore('agent', {
     threads: [],
     currentThread: null,
     messages: [],
+    conversationVersions: [],
+    viewedVersionIndex: null,
     selectedRepo: DEFAULT_REPO,
     selectedPlatform: 'github',
     selectedModel: '',
@@ -643,10 +721,42 @@ export const useAgentStore = defineStore('agent', {
   getters: {
     currentThreadId: (state) => state.currentThread?.id || null,
     latestUserMessageId: (state) => [...state.messages].reverse().find((message) => message.author === 'user')?.id || null,
+    displayedMessages: (state) => (
+      Number.isInteger(state.viewedVersionIndex)
+        ? state.conversationVersions[state.viewedVersionIndex]?.messages || state.messages
+        : state.messages
+    ),
+    isViewingCurrentVersion: (state) => !Number.isInteger(state.viewedVersionIndex),
+    conversationVersionTotal: (state) => state.conversationVersions.length + 1,
+    conversationVersionPosition: (state) => (
+      Number.isInteger(state.viewedVersionIndex)
+        ? state.viewedVersionIndex + 1
+        : state.conversationVersions.length + 1
+    ),
+    latestDisplayedAgentMessageId() {
+      return [...this.displayedMessages].reverse().find((message) => (
+        message.author === 'agent' && messageText(message)
+      ))?.id || null
+    },
+    displayVersionKey: (state) => Number.isInteger(state.viewedVersionIndex)
+      ? `archived-${state.viewedVersionIndex}`
+      : 'current',
     modelOptions: (state) => state.options?.models || [],
     canSend: (state) => !state.streaming,
   },
   actions: {
+    showPreviousVersion() {
+      if (!this.conversationVersions.length) return
+      const current = Number.isInteger(this.viewedVersionIndex)
+        ? this.viewedVersionIndex
+        : this.conversationVersions.length
+      this.viewedVersionIndex = Math.max(0, current - 1)
+    },
+    showNextVersion() {
+      if (!Number.isInteger(this.viewedVersionIndex)) return
+      const next = this.viewedVersionIndex + 1
+      this.viewedVersionIndex = next >= this.conversationVersions.length ? null : next
+    },
     resolveConfirm(value) {
       const resolver = this.confirmResolver
       this.confirmResolver = null
@@ -698,11 +808,15 @@ export const useAgentStore = defineStore('agent', {
         this.selectedPlatform = thread.platform
       }
       this.messages = normalizeThreadMessages(thread.messages, thread.runEvents, thread.id)
+      this.conversationVersions = normalizeConversationVersions(thread.conversationVersions, thread.id)
+      this.viewedVersionIndex = null
     },
     async createThread() {
       if (this.streaming) return
       this.currentThread = null
       this.messages = []
+      this.conversationVersions = []
+      this.viewedVersionIndex = null
       this.error = ''
       this.activeRunThreadId = null
       this.selectedRepo = DEFAULT_REPO
@@ -715,6 +829,8 @@ export const useAgentStore = defineStore('agent', {
       if (this.currentThread?.id === threadId) {
         this.currentThread = null
         this.messages = []
+        this.conversationVersions = []
+        this.viewedVersionIndex = null
         if (this.threads.length) await this.selectThread(this.threads[0].id)
       }
     },
@@ -731,6 +847,7 @@ export const useAgentStore = defineStore('agent', {
       }
 
       this.error = ''
+      this.viewedVersionIndex = null
       this.streaming = true
       this.controller = new AbortController()
       const localUserMessage = createTextMessage('user', prompt, 'local-user')
@@ -759,7 +876,7 @@ export const useAgentStore = defineStore('agent', {
     async editMessage({ message, content }) {
       // 页面只会给最后一条用户消息显示编辑入口；这里不再用本地 ID
       // 做第二次严格比较，因为 SSE 回退后会重新分配消息 ID。
-      if (this.streaming || !message || message.author !== 'user') return
+      if (this.streaming || !this.isViewingCurrentVersion || !message || message.author !== 'user') return
       const index = this.messages.findIndex((item) => item.id === message.id)
       if (index < 0) return
       let impact = '没有需要回退的任务或代码变更。\n是否使用编辑后的内容重新发送？'
@@ -782,6 +899,7 @@ export const useAgentStore = defineStore('agent', {
         this.confirmDialog = { title: '确认回退并重新发送', message: impact }
       })
       if (!confirmed) return
+      const editSnapshot = cloneMessages(this.messages)
       const oldMessages = this.messages.slice(0, index)
       this.messages = oldMessages
       this.error = ''
@@ -793,6 +911,7 @@ export const useAgentStore = defineStore('agent', {
         await this.consumeMessageStream(this.currentThreadId, content, {
           edit_message_id: message.id,
           edit_message_content: (message.chunks || []).filter((chunk) => chunk.kind === 'text').map((chunk) => chunk.text || '').join(''),
+          edit_snapshot: editSnapshot,
           rollback_confirmed: true,
         })
       } catch (error) {
@@ -825,6 +944,9 @@ export const useAgentStore = defineStore('agent', {
                 this.selectedRepo = data.repo || data.repoFullName || this.selectedRepo || DEFAULT_REPO
               } else {
                 mergeThreadMeta(this.currentThread, data)
+              }
+              if (Array.isArray(data.conversationVersions)) {
+                this.conversationVersions = normalizeConversationVersions(data.conversationVersions, eventThreadId)
               }
               this.activeRunThreadId = data.id || data.thread_id || eventThreadId || this.activeRunThreadId
               if (event === 'thread_snapshot') markProcessConnected(this.messages, eventThreadId)
@@ -925,6 +1047,14 @@ export const useAgentStore = defineStore('agent', {
           },
         },
       )
+      const snapshotThreadId = this.currentThreadId || this.activeRunThreadId || threadId
+      if (snapshotThreadId && snapshotThreadId !== 'pending' && this.messages.length) {
+        try {
+          await dashboardApi.saveViewSnapshot(snapshotThreadId, cloneMessages(this.messages))
+        } catch {
+          // 对话本身已经完成；快照失败不应把本轮任务标记为失败。
+        }
+      }
     },
   },
 })

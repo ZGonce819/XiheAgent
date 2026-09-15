@@ -17,6 +17,8 @@ export interface ThreadMessageRequest {
   model_id?: string | null
   effort?: string | null
   edit_message_id?: string | null
+  edit_message_content?: string | null
+  edit_snapshot?: Array<Message>
   rollback_confirmed?: boolean
 }
 
@@ -105,10 +107,10 @@ export const agentsApi = {
     }),
   getThread: (threadId: string) =>
     agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}`),
-  previewEdit: (threadId: string, messageId: string) =>
+  previewEdit: (threadId: string, messageId: string, originalContent: string) =>
     agentsRequest<EditPreview>(`/threads/${encodeURIComponent(threadId)}/edit-preview`, {
       method: "POST",
-      body: JSON.stringify({ message_id: messageId }),
+      body: JSON.stringify({ message_id: messageId, original_content: originalContent }),
     }),
   createThread: (body: ThreadCreateRequest) =>
     fetch(`${API_BASE}/dashboard/api/threads/stream-message`, {

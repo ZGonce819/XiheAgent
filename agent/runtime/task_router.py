@@ -188,7 +188,10 @@ def run_agent_task(
         latest_run_status="running",
     )
     run_id = run_id or str(uuid.uuid4())
-    store.record_run(run_id=run_id, thread_id=thread_id, status="running")
+    # 延迟导入，避免 services 包的兼容导出在 runtime 初始化期间形成循环依赖。
+    from services.repo_rollback import git_head, git_parent
+    base_commit = git_head(repo.clone_url, store)
+    store.record_run(run_id=run_id, thread_id=thread_id, status="running", base_commit=base_commit)
     logger.info("业务 Store 已记录运行：thread_id=%s run_id=%s", thread_id, run_id)
     record_event(thread_id, "agent", "构建 Agent 运行图", status="in_progress")
     agent = build_agent_for_runtime(thread_id=thread_id, task_kind=task_kind, repo_url=repo.clone_url)
@@ -215,7 +218,19 @@ def run_agent_task(
         )
         store.finish_open_run_events(thread_id, status="completed")
         store.update_thread_status(thread_id, "completed")
-        store.record_run(run_id=run_id, thread_id=thread_id, status="completed", finished=True)
+        head_commit = git_head(repo.clone_url, store)
+        # 首次任务可能由 Agent 自己完成 clone，启动前尚无 HEAD。此时第一
+        # 个提交的父提交就是可回退的仓库基线。
+        if base_commit is None and head_commit:
+            base_commit = git_parent(repo.clone_url, store)
+        store.record_run(
+            run_id=run_id,
+            thread_id=thread_id,
+            status="completed",
+            base_commit=base_commit,
+            head_commit=head_commit,
+            finished=True,
+        )
         record_event(thread_id, "done", "任务完成", status="completed")
         messages = result.get("messages", [])
         final_answer = extract_final_assistant_text(messages)

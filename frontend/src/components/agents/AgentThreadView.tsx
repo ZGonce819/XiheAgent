@@ -19,6 +19,14 @@ interface AgentThreadViewProps {
   thread: AgentThread;
 }
 
+interface PageDialog {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  resolve: (confirmed: boolean) => void;
+}
+
 function messageText(message: Message): string {
   return message.chunks
     .filter((chunk) => chunk.kind === "text")
@@ -93,7 +101,13 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
     return { modelId: thread.model, effort: thread.effort };
   }, [models, thread.model, thread.effort]);
   const [selection, setSelection] = useState<ModelSelection | null>(null);
+  const [pageDialog, setPageDialog] = useState<PageDialog | null>(null);
   const activeSelection = selection ?? threadSelection ?? defaultSelection;
+
+  const showDialog = (dialog: Omit<PageDialog, "resolve">) =>
+    new Promise<boolean>((resolve) => {
+      setPageDialog({ ...dialog, resolve });
+    });
 
   useEffect(() => {
     setPendingPrompts((prev) => {
@@ -145,21 +159,36 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   }, [displayMessages]);
   const handleEditMessage = async (message: Message, content: string) => {
     if (hasActiveRun || sendMessage.isPending) {
-      window.alert("请先停止当前运行，再编辑消息。");
+      await showDialog({
+        title: "暂时无法编辑",
+        message: "请先停止当前运行，再编辑消息。",
+        confirmLabel: "知道了",
+      });
       return;
     }
     if (!latestUserMessage || message.id !== latestUserMessage.id) return;
     let impact = "没有需要回退的任务或代码变更。\n是否使用编辑后的内容重新发送？";
     try {
-      const preview = await agentsApi.previewEdit(thread.id, message.id);
+      const originalContent = messageText(message);
+      const preview = await agentsApi.previewEdit(thread.id, message.id, originalContent);
       impact = preview.requires_rollback
         ? `将回退 ${preview.messages_to_replace} 条消息和 ${preview.runs_to_replace} 次任务执行。\n${preview.code_changes_detected ? "检测到代码变更，回退可能产生冲突。\n" : ""}\n请确认已了解影响后继续。`
         : "没有需要回退的任务或代码变更。\n是否使用编辑后的内容重新发送？";
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "无法获取回退影响，请稍后重试。");
+      await showDialog({
+        title: "无法获取回退影响",
+        message: error instanceof Error ? error.message : "请稍后重试。",
+        confirmLabel: "知道了",
+      });
       return;
     }
-    if (!window.confirm(impact)) return;
+    const confirmed = await showDialog({
+      title: "确认回退并重新发送",
+      message: impact,
+      confirmLabel: "确认并发送",
+      cancelLabel: "取消",
+    });
+    if (!confirmed) return;
     const insertAt = Math.max(0, displayMessages.findIndex((item) => item.id === message.id));
     setPendingPrompts(addPendingPrompt(thread.id, content, insertAt, message.chunks.filter((chunk): chunk is ImageChunk => chunk.kind === "image")));
     sendMessage.mutate({
@@ -168,6 +197,8 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
       model_id: activeSelection?.modelId ?? null,
       effort: activeSelection?.effort ?? null,
       edit_message_id: message.id,
+      edit_message_content: messageText(message),
+      edit_snapshot: displayMessages,
       rollback_confirmed: true,
     });
   };
@@ -276,6 +307,44 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
           )}
         </div>
       </div>
+      {pageDialog && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/35 p-4" role="presentation">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-dialog-title"
+            className="w-[min(28rem,calc(100vw-2rem))] rounded-lg border border-[var(--ui-border)] bg-[var(--ui-panel)] p-5 text-[color:var(--ui-text)] shadow-2xl"
+          >
+            <h2 id="edit-dialog-title" className="text-sm font-semibold">{pageDialog.title}</h2>
+            <p className="mt-3 whitespace-pre-line text-sm leading-6 text-[color:var(--ui-text-muted)]">{pageDialog.message}</p>
+            <div className="mt-5 flex justify-end gap-2">
+              {pageDialog.cancelLabel && (
+                <button
+                  type="button"
+                  className="rounded-md px-3 py-1.5 text-xs text-[color:var(--ui-text-muted)] hover:bg-[var(--ui-panel-2)]"
+                  onClick={() => {
+                    pageDialog.resolve(false);
+                    setPageDialog(null);
+                  }}
+                >
+                  {pageDialog.cancelLabel}
+                </button>
+              )}
+              <button
+                type="button"
+                autoFocus
+                className="rounded-md bg-[var(--ui-accent)] px-3 py-1.5 text-xs text-white hover:opacity-90"
+                onClick={() => {
+                  pageDialog.resolve(true);
+                  setPageDialog(null);
+                }}
+              >
+                {pageDialog.confirmLabel ?? "确定"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AgentsShell>
   );
 }

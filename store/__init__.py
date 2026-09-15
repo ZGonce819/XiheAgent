@@ -23,6 +23,7 @@ from store.mysql_store import LocalMySQLStore
 from store.event_repo import RunEventRepo
 from store.run_repo import RunRepo
 from store.thread_repo import ThreadRepo
+from store.conversation_version_repo import ConversationVersionRepo
 
 __all__ = [
     "ConnectionManager",
@@ -32,5 +33,6 @@ __all__ = [
     "RunEventRepo",
     "RunRepo",
     "ThreadRepo",
+    "ConversationVersionRepo",
     "utc_now",
 ]

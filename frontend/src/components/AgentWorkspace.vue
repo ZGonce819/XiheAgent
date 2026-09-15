@@ -28,7 +28,7 @@ function scrollToBottom() {
 }
 
 watch(
-  () => agent.messages.map((message) => {
+  () => agent.displayedMessages.map((message) => {
     const signature = message.chunks?.map((chunk) => {
       if (chunk.kind === 'todo') return JSON.stringify(chunk.todos || [])
       if (chunk.kind === 'tools') {
@@ -103,7 +103,7 @@ onBeforeUnmount(() => {
       <div ref="messageList" class="message-list">
         <div class="message-list-content">
         <div v-if="agent.loading" class="empty-state">正在加载会话...</div>
-        <div v-else-if="!agent.messages.length" class="empty-state">
+        <div v-else-if="!agent.displayedMessages.length" class="empty-state">
           <div class="empty-icon">⚡</div>
           <h2>让 XiheAgent 构建、修复或检查代码仓库</h2>
           <p>输入技术方案、代码实施、PR 审查等指令，前端会按顺序展示用户输入、任务计划和 AI 输出。</p>
@@ -124,14 +124,19 @@ onBeforeUnmount(() => {
         </div>
 
         <ChatMessage
-          v-for="message in agent.messages"
-          :key="message.id"
+          v-for="message in agent.displayedMessages"
+          :key="`${agent.displayVersionKey}:${message.id}`"
           :message="message"
-          :editable="!agent.streaming && message.author === 'user' && message.id === agent.latestUserMessageId"
+          :editable="!agent.streaming && agent.isViewingCurrentVersion && message.author === 'user' && message.id === agent.latestUserMessageId"
           :model-options="agent.modelOptions"
           :selected-model="agent.selectedModel"
+          :show-version-nav="message.id === agent.latestDisplayedAgentMessageId"
+          :version-position="agent.conversationVersionPosition"
+          :version-total="agent.conversationVersionTotal"
           @edit="agent.editMessage"
           @model-change="agent.selectedModel = $event"
+          @previous-version="agent.showPreviousVersion"
+          @next-version="agent.showNextVersion"
         />
 
         <div v-if="agent.error" class="error-banner">{{ agent.error }}</div>

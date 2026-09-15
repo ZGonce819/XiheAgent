@@ -17,10 +17,12 @@ from agent.runtime import (
     get_task,
     list_tasks,
 )
+from agent.graph.graph import get_store
 from config.app_config import get_settings
 from config.env_config import get_env
-from schemas.request_schema import DashboardThreadMessageRequest, DashboardEditPreviewRequest
-from services.thread_service import fetch_visible_messages
+from schemas.request_schema import DashboardEditPreviewRequest, DashboardThreadMessageRequest, DashboardViewSnapshotRequest
+from services.thread_service import conversation_snapshot, fetch_visible_messages
+from services.repo_rollback import rollback_run
 from services.streaming_service import build_streaming_response
 from services.thread_service import thread_payload
 from utils.platform_utils import (normalize_repo_url)
@@ -40,9 +42,9 @@ def _is_latest_user_message(message_id: str, thread_id: str, messages: list[dict
     if not user_messages:
         return False
     latest_id = str(user_messages[-1].get("id") or "")
-    if latest_id == message_id or message_id.startswith(f"{thread_id}-user-"):
+    if latest_id == message_id:
         return True
-    if original_content is not None:
+    if message_id.startswith(f"{thread_id}-user-") and original_content is not None:
         return str(user_messages[-1].get("content") or "").strip() == original_content.strip()
     return False
 
@@ -117,7 +119,7 @@ def dashboard_thread_detail(thread_id: str) -> dict[str, Any]:
     task = get_task(thread_id)
     if task is None:
         raise HTTPException(status_code=404, detail="thread not found")
-    return thread_payload(task)
+    return thread_payload(task, include_versions=True)
 
 
 @dashboard_router.post("/threads/stream-message")
@@ -169,6 +171,16 @@ async def dashboard_stream_existing_message(
         messages = fetch_visible_messages(thread_id)
         if not _is_latest_user_message(body.edit_message_id, thread_id, messages, body.edit_message_content):
             raise HTTPException(status_code=409, detail="只能编辑最近一条用户消息")
+        latest_run = get_store().get_latest_run(thread_id)
+        if latest_run:
+            try:
+                rollback_run(repo_url, latest_run, get_store())
+            except RuntimeError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+        snapshot = conversation_snapshot(task)
+        if body.edit_snapshot:
+            snapshot["messages"] = body.edit_snapshot
+        get_store().add_conversation_version(thread_id, snapshot)
     try:
         return build_streaming_response(
             thread_id=thread_id,
@@ -201,6 +213,14 @@ def dashboard_edit_preview(thread_id: str, body: DashboardEditPreviewRequest) ->
         ),
         "requires_rollback": bool(task.get("run_events") or len(messages) > index + 1),
     }
+
+
+@dashboard_router.put("/threads/{thread_id}/view-snapshot", status_code=204)
+def dashboard_save_view_snapshot(thread_id: str, body: DashboardViewSnapshotRequest) -> None:
+    if get_task(thread_id) is None:
+        raise HTTPException(status_code=404, detail="thread not found")
+    get_store().save_conversation_view(thread_id, body.messages)
+    return None
 
 
 @dashboard_router.delete("/threads/{thread_id}", status_code=204)

@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from store.event_repo import RunEventRepo
+from store.conversation_version_repo import ConversationVersionRepo
 from store.finding_repo import FindingRepo
 from store.mapping_repo import MappingRepo
 from store.run_repo import RunRepo
@@ -29,6 +30,7 @@ class LocalMySQLStore:
         self.event_repo = RunEventRepo()
         self.finding_repo = FindingRepo()
         self.mapping_repo = MappingRepo()
+        self.conversation_version_repo = ConversationVersionRepo()
         self._init_schema()
 
     def _init_schema(self) -> None:
@@ -38,6 +40,7 @@ class LocalMySQLStore:
         self.event_repo.ensure_table()
         self.finding_repo.ensure_table()
         self.mapping_repo.ensure_table()
+        self.conversation_version_repo.ensure_table()
 
     def close(self) -> None:
         """关闭所有 Repo 的数据库连接，释放连接池资源。"""
@@ -46,6 +49,7 @@ class LocalMySQLStore:
         self.event_repo.close()
         self.finding_repo.close()
         self.mapping_repo.close()
+        self.conversation_version_repo.close()
 
     # ── Thread 操作 ──────────────────────────────────────────────────────────
 
@@ -152,6 +156,7 @@ class LocalMySQLStore:
             ("findings", self.finding_repo.delete_findings_by_thread),
             ("events", self.event_repo.clear_run_events),
             ("runs", self.run_repo.delete_runs_by_thread),
+            ("conversation versions", self.conversation_version_repo.delete_versions),
         ]:
             try:
                 cleanup_fn(thread_id)
@@ -172,6 +177,8 @@ class LocalMySQLStore:
         status: str,
         error: str | None = None,
         finished: bool = False,
+        base_commit: str | None = None,
+        head_commit: str | None = None,
     ) -> None:
         """记录或更新一次 Agent 运行。
 
@@ -188,6 +195,8 @@ class LocalMySQLStore:
             status=status,
             error=error,
             finished=finished,
+            base_commit=base_commit,
+            head_commit=head_commit,
         )
 
     def get_latest_run(self, thread_id: str) -> dict[str, Any] | None:
@@ -200,6 +209,18 @@ class LocalMySQLStore:
             最近一次运行的字典，不存在时返回 None。
         """
         return self.run_repo.get_latest_run(thread_id)
+
+    def add_conversation_version(self, thread_id: str, payload: dict[str, Any]) -> None:
+        self.conversation_version_repo.add_version(thread_id, payload)
+
+    def list_conversation_versions(self, thread_id: str) -> list[dict[str, Any]]:
+        return self.conversation_version_repo.list_versions(thread_id)
+
+    def save_conversation_view(self, thread_id: str, messages: list[dict[str, Any]]) -> None:
+        self.conversation_version_repo.save_current_view(thread_id, messages)
+
+    def get_conversation_view(self, thread_id: str) -> list[dict[str, Any]] | None:
+        return self.conversation_version_repo.get_current_view(thread_id)
 
     # ── Run Event 操作 ───────────────────────────────────────────────────────
 

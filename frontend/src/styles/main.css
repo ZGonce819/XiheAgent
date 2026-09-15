@@ -584,6 +584,8 @@ textarea {
 }
 
 .user-bubble {
+  box-sizing: border-box;
+  width: fit-content;
   max-width: 75%;
   border-radius: var(--radius-lg);
   background: var(--color-accent-soft);
@@ -591,6 +593,8 @@ textarea {
   padding: var(--space-3) var(--space-4);
   line-height: 1.7;
   white-space: pre-wrap;
+  word-break: keep-all;
+  overflow-wrap: break-word;
   box-shadow: var(--shadow-sm);
 }
 
@@ -598,7 +602,9 @@ textarea {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  max-width: 75%;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .message-actions {
@@ -633,6 +639,16 @@ textarea {
 .message-action-button:hover {
   background: var(--color-bg-hover);
   color: var(--color-accent);
+}
+
+.message-icon-button:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.message-icon-button:disabled:hover {
+  background: transparent;
+  color: inherit;
 }
 
 .message-icon-button svg {
@@ -680,6 +696,34 @@ textarea {
 .message-action-primary {
   background: var(--color-accent);
   color: var(--color-text-inverse);
+}
+
+.agent-message-wrap {
+  min-width: 0;
+}
+
+.agent-message-actions {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.message-agent:hover .agent-message-actions,
+.agent-message-actions:focus-within {
+  opacity: 1;
+}
+
+.message-version-count {
+  min-width: 34px;
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
 .dialog-backdrop {
@@ -1055,7 +1099,7 @@ textarea {
   border: 2px solid color-mix(in srgb, var(--color-accent) 22%, transparent);
   border-top-color: var(--color-accent);
   border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+  animation: tool-spin 0.8s linear infinite;
 }
 
 .todo-plan-number {
@@ -1259,6 +1303,8 @@ textarea {
 }
 
 .process-spinner {
+  display: block;
+  flex: 0 0 auto;
   width: 12px;
   height: 12px;
   border: 2px solid var(--color-border-primary);
