@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 const PLATFORMS = [
   { id: 'github', name: 'GitHub', host: 'github.com' },
@@ -41,6 +41,8 @@ const showPlatformDropdown = ref(false)
 const textareaHeight = ref(72)
 const isResizing = ref(false)
 const repoInput = ref('')
+const composer = ref(null)
+let activeResizeCleanup = null
 
 const MODELS = [
   { id: 'deepseek', name: 'DeepSeek' },
@@ -152,42 +154,75 @@ function onOverlayClick(event) {
   }
 }
 
+function maxTextareaHeight() {
+  if (typeof window === 'undefined') return 640
+  const headerBottom = document.querySelector('.workspace-header')?.getBoundingClientRect().bottom || 0
+  const composerTop = composer.value?.getBoundingClientRect().top
+  const measuredLimit = composerTop == null
+    ? window.innerHeight - 220
+    : textareaHeight.value + composerTop - headerBottom - 8
+  return Math.max(160, Math.floor(measuredLimit))
+}
+
+function clampTextareaHeight(height) {
+  return Math.max(48, Math.min(maxTextareaHeight(), height))
+}
+
 function onResizeStart(event) {
+  if (event.button != null && event.button !== 0) return
   event.preventDefault()
   isResizing.value = true
   const startY = event.clientY
   const startHeight = textareaHeight.value
+  const pointerId = event.pointerId
+  event.currentTarget?.setPointerCapture?.(pointerId)
 
   function onMove(e) {
+    if (e.pointerId !== pointerId) return
+    e.preventDefault()
     const delta = startY - e.clientY
-    textareaHeight.value = Math.max(48, Math.min(400, startHeight + delta))
+    textareaHeight.value = clampTextareaHeight(startHeight + delta)
   }
 
-  function onUp() {
+  function onUp(e) {
+    if (e.pointerId !== pointerId) return
     isResizing.value = false
-    document.removeEventListener('mousemove', onMove)
-    document.removeEventListener('mouseup', onUp)
+    document.removeEventListener('pointermove', onMove)
+    document.removeEventListener('pointerup', onUp)
+    document.removeEventListener('pointercancel', onUp)
     document.body.style.cursor = ''
     document.body.style.userSelect = ''
+    activeResizeCleanup = null
   }
 
   document.body.style.cursor = 'ns-resize'
   document.body.style.userSelect = 'none'
-  document.addEventListener('mousemove', onMove)
-  document.addEventListener('mouseup', onUp)
+  document.addEventListener('pointermove', onMove, { passive: false })
+  document.addEventListener('pointerup', onUp)
+  document.addEventListener('pointercancel', onUp)
+  activeResizeCleanup = () => onUp({ pointerId })
 }
 
+function onViewportResize() {
+  textareaHeight.value = clampTextareaHeight(textareaHeight.value)
+}
+
+onMounted(() => {
+  window.addEventListener('resize', onViewportResize)
+})
+
 onBeforeUnmount(() => {
-  isResizing.value = false
+  activeResizeCleanup?.()
+  window.removeEventListener('resize', onViewportResize)
 })
 </script>
 
 <template>
-  <footer class="composer">
+  <footer ref="composer" class="composer">
     <div
       class="resize-handle"
       :class="{ active: isResizing }"
-      @mousedown="onResizeStart"
+      @pointerdown="onResizeStart"
     >
       <span class="resize-grip"></span>
     </div>

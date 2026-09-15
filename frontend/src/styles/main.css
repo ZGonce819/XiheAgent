@@ -1379,6 +1379,8 @@ textarea {
   padding: 9px 0 5px;
   background: transparent;
   cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
 }
 
 .resize-grip {
@@ -1506,7 +1508,7 @@ textarea {
 .composer textarea {
   width: 100%;
   min-height: 48px;
-  max-height: 400px;
+  max-height: calc(100dvh - 180px);
   resize: none;
   border: 0;
   outline: none;
