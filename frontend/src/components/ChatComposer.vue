@@ -156,12 +156,23 @@ function onOverlayClick(event) {
 
 function maxTextareaHeight() {
   if (typeof window === 'undefined') return 640
-  const headerBottom = document.querySelector('.workspace-header')?.getBoundingClientRect().bottom || 0
-  const composerTop = composer.value?.getBoundingClientRect().top
-  const measuredLimit = composerTop == null
-    ? window.innerHeight - 220
-    : textareaHeight.value + composerTop - headerBottom - 8
-  return Math.max(160, Math.floor(measuredLimit))
+  const composerElement = composer.value
+  if (!composerElement) return Math.max(48, window.innerHeight - 220)
+  const workspace = composerElement.closest('.workspace')
+  const headerBottom = workspace?.querySelector('.workspace-header')?.getBoundingClientRect().bottom || 0
+  const viewport = window.visualViewport
+  const viewportBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight
+  const bottom = Math.min(workspace?.getBoundingClientRect().bottom ?? viewportBottom, viewportBottom)
+  const composerRect = composerElement.getBoundingClientRect()
+  const actualTextareaHeight = composerElement.querySelector('textarea').getBoundingClientRect().height
+  const controlsHeight = composerRect.height - actualTextareaHeight
+  const style = getComputedStyle(composerElement)
+  const marginBottom = Number.parseFloat(style.marginBottom) || 0
+  // Reserve the button and equal spacing above and below, even while it is hidden.
+  const buttonSize = Number.parseFloat(style.getPropertyValue('--scroll-to-bottom-size'))
+  const buttonGap = Number.parseFloat(style.getPropertyValue('--scroll-to-bottom-gap'))
+  const topClearance = buttonSize + buttonGap * 2
+  return Math.max(48, bottom - headerBottom - topClearance - marginBottom - controlsHeight)
 }
 
 function clampTextareaHeight(height) {
@@ -169,11 +180,12 @@ function clampTextareaHeight(height) {
 }
 
 function onResizeStart(event) {
-  if (event.button != null && event.button !== 0) return
+  if (isResizing.value || !event.isPrimary || (event.button != null && event.button !== 0)) return
   event.preventDefault()
   isResizing.value = true
   const startY = event.clientY
   const startHeight = textareaHeight.value
+  const dragMaxHeight = maxTextareaHeight()
   const pointerId = event.pointerId
   event.currentTarget?.setPointerCapture?.(pointerId)
 
@@ -181,7 +193,7 @@ function onResizeStart(event) {
     if (e.pointerId !== pointerId) return
     e.preventDefault()
     const delta = startY - e.clientY
-    textareaHeight.value = clampTextareaHeight(startHeight + delta)
+    textareaHeight.value = Math.max(48, Math.min(dragMaxHeight, startHeight + delta))
   }
 
   function onUp(e) {
@@ -204,16 +216,19 @@ function onResizeStart(event) {
 }
 
 function onViewportResize() {
+  activeResizeCleanup?.()
   textareaHeight.value = clampTextareaHeight(textareaHeight.value)
 }
 
 onMounted(() => {
   window.addEventListener('resize', onViewportResize)
+  window.visualViewport?.addEventListener('resize', onViewportResize)
 })
 
 onBeforeUnmount(() => {
   activeResizeCleanup?.()
   window.removeEventListener('resize', onViewportResize)
+  window.visualViewport?.removeEventListener('resize', onViewportResize)
 })
 </script>
 

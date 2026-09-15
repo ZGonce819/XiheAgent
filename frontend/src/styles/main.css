@@ -160,6 +160,7 @@ textarea {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   background: var(--color-bg-primary);
 }
@@ -388,6 +389,8 @@ textarea {
 }
 
 .workspace {
+  --scroll-to-bottom-size: 34px;
+  --scroll-to-bottom-gap: 12px;
   display: flex;
   position: relative;
   min-width: 0;
@@ -398,6 +401,7 @@ textarea {
 
 .workspace-header {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid var(--color-border-primary);
@@ -442,24 +446,30 @@ textarea {
 }
 
 .message-list {
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.message-list-content {
   padding: var(--space-6) var(--space-8);
 }
 
 .composer-dock {
   position: relative;
+  min-height: 0;
+  flex: 0 0 auto;
 }
 
 .scroll-to-bottom {
   position: absolute;
   z-index: 3;
   right: 50%;
-  bottom: calc(100% + 12px);
+  bottom: calc(100% + var(--scroll-to-bottom-gap));
   display: grid;
-  width: 34px;
-  height: 34px;
+  width: var(--scroll-to-bottom-size);
+  height: var(--scroll-to-bottom-size);
   place-items: center;
   transform: translateX(50%);
   border: 1px solid var(--color-border-primary);
@@ -1508,7 +1518,7 @@ textarea {
 .composer textarea {
   width: 100%;
   min-height: 48px;
-  max-height: calc(100dvh - 180px);
+  max-height: none;
   resize: none;
   border: 0;
   outline: none;
@@ -1634,7 +1644,7 @@ textarea {
     display: none;
   }
 
-  .message-list {
+  .message-list-content {
     padding: var(--space-4);
   }
 

@@ -101,6 +101,7 @@ onBeforeUnmount(() => {
       </header>
 
       <div ref="messageList" class="message-list">
+        <div class="message-list-content">
         <div v-if="agent.loading" class="empty-state">正在加载会话...</div>
         <div v-else-if="!agent.messages.length" class="empty-state">
           <div class="empty-icon">⚡</div>
@@ -129,6 +130,7 @@ onBeforeUnmount(() => {
         />
 
         <div v-if="agent.error" class="error-banner">{{ agent.error }}</div>
+        </div>
       </div>
 
       <div class="composer-dock">
