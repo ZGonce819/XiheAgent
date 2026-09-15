@@ -89,6 +89,11 @@ function stateIcon(status) {
   return ''
 }
 
+function stepTitle(entry) {
+  if (String(entry?.id || '').endsWith(':model')) return '调用大模型'
+  return entry?.title || ''
+}
+
 function narrationText(narration) {
   return typeof narration === 'string' ? narration : String(narration?.text || '')
 }
@@ -131,7 +136,7 @@ function timelineItems() {
             <span v-if="entry.status === 'in_progress'" class="process-spinner"></span>
             <span v-else>{{ stateIcon(entry.status) }}</span>
           </span>
-          <span>{{ entry.title }}</span>
+          <span>{{ stepTitle(entry) }}</span>
         </div>
         <div
           v-else-if="entry.type === 'text'"
@@ -146,6 +151,7 @@ function timelineItems() {
         <TodoPlan
           v-else-if="entry.type === 'todo'"
           :todos="entry.todos || []"
+          embedded
         />
       </template>
     </div>

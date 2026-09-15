@@ -25,7 +25,7 @@ function collectColumnCounts(node: ReactNode, counts: number[]) {
 
 function getTableMinWidth(columnCount: number): string {
   if (columnCount <= 1) return '100%';
-  return `max(100%, ${Math.max(420, columnCount * 160)}px)`;
+  return `max(100%, ${Math.max(300, columnCount * 120)}px)`;
 }
 
 export function MarkdownTable({ children }: MarkdownTableProps) {
@@ -34,10 +34,12 @@ export function MarkdownTable({ children }: MarkdownTableProps) {
   const columnCount = Math.max(0, ...columnCounts);
 
   return (
-    <div className="my-2 max-w-full overflow-x-auto pb-1 text-[color:var(--ui-text-muted)]">
-      <table className="w-max border-collapse align-top" style={{ minWidth: getTableMinWidth(columnCount) }}>
-        {children}
-      </table>
+    <div className="my-2 max-w-full overflow-hidden rounded-lg border border-[var(--ui-border)]">
+      <div className="overflow-x-auto">
+        <table className="w-max table-auto border-collapse align-top" style={{ minWidth: getTableMinWidth(columnCount) }}>
+          {children}
+        </table>
+      </div>
     </div>
   );
 }

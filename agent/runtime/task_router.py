@@ -235,7 +235,7 @@ def run_agent_task(
     except Exception as exc:
         store.finish_open_run_events(thread_id, status="error")
         store.update_thread_status(thread_id, "failed")
-        record_event(thread_id, "model", "调用 deepseek-v4-pro", status="error")
+        record_event(thread_id, "model", "调用大模型", status="error")
         record_event(thread_id, "failed", "任务失败", status="error", detail=mask_token(str(exc)))
         store.record_run(
             run_id=run_id,

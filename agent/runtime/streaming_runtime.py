@@ -907,7 +907,7 @@ def run_agent_with_event_stream(
         version="v3",
         config={"configurable": {"thread_id": thread_id}},
     )
-    record_event(thread_id, "model", "调用 deepseek-v4-pro", kind="other", status="in_progress")
+    record_event(thread_id, "model", "调用大模型", kind="other", status="in_progress")
     # raw protocol events 是当前版本里唯一能拿到 token/chunk 的通道。
     # 这里同时解析 text-delta 和 write_todos 的 tool_call_chunk，保证正文和任务计划都能流式更新。
     try:
@@ -927,11 +927,11 @@ def run_agent_with_event_stream(
             status="error",
             detail=str(exc),
         )
-        record_event(thread_id, "model", "调用 deepseek-v4-pro", kind="other", status="error", detail=str(exc))
+        record_event(thread_id, "model", "调用大模型", kind="other", status="error", detail=str(exc))
         raise
 
     output = stream.output
-    record_event(thread_id, "model", "调用 deepseek-v4-pro", kind="other", status="completed")
+    record_event(thread_id, "model", "调用大模型", kind="other", status="completed")
     logger.info(
         "官方事件流消费完成：thread_id=%s tool_calls=%s subagents=%s",
         thread_id,

@@ -18,11 +18,11 @@ interface TodoListProps {
 function StatusIcon({ status }: { status: TodoItem["status"] }) {
   switch (status) {
     case "pending":
-      return <Circle className="h-3.5 w-3.5 text-[color:var(--ui-text-dim)] shrink-0" />;
+      return <Circle className="h-2.5 w-2.5 text-[color:var(--ui-text-dim)] shrink-0" />;
     case "in_progress":
-      return <Loader2 className="h-3.5 w-3.5 text-[color:var(--ui-accent)] animate-spin shrink-0" />;
+      return <Loader2 className="h-2.5 w-2.5 text-[color:var(--ui-accent)] animate-spin shrink-0" />;
     case "completed":
-      return <CheckCircle2 className="h-3.5 w-3.5 text-green-400 shrink-0" />;
+      return <CheckCircle2 className="h-2.5 w-2.5 text-green-400 shrink-0" />;
   }
 }
 
@@ -54,45 +54,45 @@ export function TodoList({ todos, className = "", runActive = false }: TodoListP
   const completed = todos.filter((t) => t.status === "completed").length;
 
   return (
-    <div className={`font-sans text-xs rounded-xl border border-[var(--ui-border)] bg-[var(--ui-accent-bubble)] overflow-hidden ${className}`}>
+    <div className={`font-sans text-[10px] rounded-lg border border-[var(--ui-border)] bg-[var(--ui-accent-bubble)] overflow-hidden ${className}`}>
       <button
         type="button"
-        className="w-full px-3 py-2 flex items-center gap-2 text-left hover:bg-white/5 transition-colors"
+        className="w-full px-2 py-1 flex items-center gap-1.5 text-left hover:bg-white/5 transition-colors"
         onClick={() => setCollapsed((c) => !c)}
       >
-        <ListChecks className="h-3.5 w-3.5 text-[color:var(--ui-text-muted)] shrink-0" />
-        <span className="text-[color:var(--ui-text-muted)] truncate">
+        <ListChecks className="h-2.5 w-2.5 text-[color:var(--ui-text-muted)] shrink-0" />
+        <span className="text-[color:var(--ui-text-muted)] truncate text-[10px]">
           {completed} out of {todos.length} task{todos.length === 1 ? "" : "s"} completed
         </span>
         {collapsed ? (
-          <ChevronRight className="h-3.5 w-3.5 text-[color:var(--ui-text-dim)] ml-auto shrink-0" />
+          <ChevronRight className="h-2.5 w-2.5 text-[color:var(--ui-text-dim)] ml-auto shrink-0" />
         ) : (
-          <ChevronDown className="h-3.5 w-3.5 text-[color:var(--ui-text-dim)] ml-auto shrink-0" />
+          <ChevronDown className="h-2.5 w-2.5 text-[color:var(--ui-text-dim)] ml-auto shrink-0" />
         )}
       </button>
 
       {!collapsed && (
         <div
           ref={scrollRef}
-          className="border-t border-[var(--ui-border)] px-3 py-2 space-y-1.5 overflow-y-auto"
+          className="border-t border-[var(--ui-border)] px-2 py-1 space-y-0.5 overflow-y-auto"
           style={{ maxHeight: MAX_HEIGHT }}
         >
           {todos.map((todo, index) => (
             <div
               key={index}
-              className={`flex items-start gap-2 ${todo.status === "completed" ? "opacity-70" : ""}`}
+              className={`flex items-start gap-1 ${todo.status === "completed" ? "opacity-70" : ""}`}
             >
               <StatusIcon status={todo.status} />
               <span
-                className={
+                className={`text-[10px] ${
                   todo.status === "completed"
                     ? "text-[color:var(--ui-text-dim)] line-through"
                     : todo.status === "in_progress"
                       ? "text-[color:var(--ui-text)]"
                       : "text-[color:var(--ui-text-muted)]"
-                }
+                }`}
               >
-                <span className="mr-1 text-[color:var(--ui-text-dim)]">{index + 1}.</span>
+                <span className="mr-0.5 text-[color:var(--ui-text-dim)]">{index + 1}.</span>
                 {todo.content}
               </span>
             </div>

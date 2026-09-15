@@ -35,11 +35,11 @@ export function Markdown({ content }: MarkdownProps) {
           ),
           hr: () => <hr className="border-[var(--ui-border-subtle)] my-3" />,
           table: ({ children }) => <MarkdownTable>{children}</MarkdownTable>,
-          thead: ({ children }) => <thead className="border-b border-[var(--ui-border)]">{children}</thead>,
-          tbody: ({ children }) => <tbody>{children}</tbody>,
-          tr: ({ children }) => <tr>{children}</tr>,
-          th: ({ children }) => <th className="px-3 py-1 text-left text-[color:var(--ui-accent)] break-words [overflow-wrap:anywhere]">{children}</th>,
-          td: ({ children }) => <td className="px-3 py-1 text-[color:var(--ui-text-muted)] break-words [overflow-wrap:anywhere]">{children}</td>,
+          thead: ({ children }) => <thead className="border-b border-[var(--ui-border)] bg-[var(--ui-panel-2)]">{children}</thead>,
+          tbody: ({ children }) => <tbody className="divide-y divide-[var(--ui-border-subtle)]">{children}</tbody>,
+          tr: ({ children }) => <tr className="hover:bg-[var(--ui-panel-2)]/50 transition-colors">{children}</tr>,
+          th: ({ children }) => <th className="border-0 text-left text-[11px] font-medium text-[color:var(--ui-text)] whitespace-nowrap align-middle first:font-semibold first:text-[color:var(--ui-accent)]" style={{ padding: '4px 8px' }}>{children}</th>,
+          td: ({ children }) => <td className="border-0 text-[11px] text-[color:var(--ui-text-muted)] align-middle first:font-medium first:text-[color:var(--ui-text)]" style={{ padding: '4px 8px' }}>{children}</td>,
           code: ({ className, children }) => {
             const text = extractText(children);
             const match = /language-([^\s]+)/.exec(className || '');
