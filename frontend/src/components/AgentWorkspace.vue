@@ -148,6 +148,7 @@ onBeforeUnmount(() => {
           v-model:platform="agent.selectedPlatform"
           v-model:model="agent.selectedModel"
           :disabled="agent.streaming"
+          :locked="!!agent.currentThread"
           :effort="agent.selectedEffort"
           @send="agent.submit"
           @stop="agent.stopStream"

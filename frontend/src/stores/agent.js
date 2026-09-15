@@ -696,7 +696,8 @@ export const useAgentStore = defineStore('agent', {
       this.messages = []
       this.error = ''
       this.activeRunThreadId = null
-      if (!this.selectedRepo) this.selectedRepo = DEFAULT_REPO
+      this.selectedRepo = DEFAULT_REPO
+      this.selectedPlatform = 'github'
     },
     async deleteThread(threadId) {
       if (this.streaming) return

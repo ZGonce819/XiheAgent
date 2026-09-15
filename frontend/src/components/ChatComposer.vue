@@ -12,6 +12,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  locked: {
+    type: Boolean,
+    default: false,
+  },
   model: {
     type: String,
     default: '',
@@ -136,7 +140,7 @@ function selectPlatform(platformId) {
 }
 
 function togglePlatformDropdown() {
-  if (!props.disabled) {
+  if (!props.disabled && !props.locked) {
     showPlatformDropdown.value = !showPlatformDropdown.value
   }
 }
@@ -193,7 +197,7 @@ onBeforeUnmount(() => {
       <div class="platform-selector">
         <button
           class="platform-badge"
-          :disabled="disabled"
+          :disabled="disabled || locked"
           @click="togglePlatformDropdown"
         >
           {{ displayPlatform.name }}
@@ -218,13 +222,13 @@ onBeforeUnmount(() => {
       <div class="repo-input-wrap">
         <input
           v-model="repoInput"
-          :disabled="disabled"
+          :disabled="disabled || locked"
           placeholder="owner/repo"
         />
         <button
           v-if="repoInput"
           class="repo-clear-btn"
-          :disabled="disabled"
+          :disabled="disabled || locked"
           title="清空代码仓库"
           @click="repoInput = ''"
         >

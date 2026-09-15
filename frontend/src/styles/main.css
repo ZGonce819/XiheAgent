@@ -117,6 +117,40 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Keep every scrollable surface in the same visual system as the workspace. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-primary) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 0;
+  background: var(--color-border-primary);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--color-accent);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-button,
+*::-webkit-scrollbar-corner {
+  width: 0;
+  height: 0;
+  background: transparent;
+}
+
 button,
 textarea {
   font: inherit;
@@ -1342,28 +1376,24 @@ textarea {
 .resize-handle {
   display: flex;
   justify-content: center;
-  padding: 8px 0 4px;
+  padding: 9px 0 5px;
+  background: transparent;
   cursor: ns-resize;
-  transition: background var(--transition-fast);
-}
-
-.resize-handle:hover,
-.resize-handle.active {
-  background: var(--color-bg-hover);
 }
 
 .resize-grip {
   display: block;
-  width: 32px;
-  height: 4px;
+  width: 28px;
+  height: 3px;
   border-radius: 2px;
   background: var(--color-border-primary);
-  transition: background var(--transition-fast);
+  transition: background var(--transition-fast), transform var(--transition-fast);
 }
 
 .resize-handle:hover .resize-grip,
 .resize-handle.active .resize-grip {
   background: var(--color-accent);
+  transform: scaleX(1.15);
 }
 
 .repo-field {
