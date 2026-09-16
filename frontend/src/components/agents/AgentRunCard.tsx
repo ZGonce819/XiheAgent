@@ -39,12 +39,12 @@ export function AgentRunCard({ thread }: AgentRunCardProps) {
     <Link
       to="/agents/$threadId"
       params={{ threadId: thread.id }}
-      className="group flex items-center gap-4 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-4 py-3 transition-colors hover:border-[var(--ui-accent)]/30 hover:bg-[var(--ui-panel)]"
+      className="group flex items-center gap-4 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface)] px-4 py-3 transition-colors hover:border-[var(--ui-accent)]/30 hover:bg-[var(--ui-panel)]"
     >
       <div className="flex size-[72px] shrink-0 flex-col items-center justify-center rounded-lg border border-[var(--ui-border)] bg-[var(--ui-panel-2)] text-center">
         {stats ? (
           <>
-            <div className="text-[11px] font-medium text-[var(--ui-text-muted)]">
+            <div className="text-[0.6875rem] font-medium text-[var(--ui-text-muted)]">
               {stats.files} 个文件
             </div>
             <div className="mt-0.5 flex items-center gap-1.5 text-xs font-medium">
@@ -59,7 +59,7 @@ export function AgentRunCard({ thread }: AgentRunCardProps) {
         ) : (
           <GitBranchIcon className="size-5 text-[var(--ui-text-dim)]" />
         )}
-        <div className="mt-1.5 flex items-center gap-1 text-[10px] text-[var(--ui-text-dim)]">
+        <div className="mt-1.5 flex items-center gap-1 text-[0.625rem] text-[var(--ui-text-dim)]">
           {hasPr ? (
             <>
               <GitPullRequestIcon className="size-3" />

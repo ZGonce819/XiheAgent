@@ -15,15 +15,15 @@ export const DIFF_UNSAFE_CSS = `
   --diffs-bg-separator-override: var(--ui-accent-bubble);
   --diffs-bg-buffer-override: var(--ui-bg);
 
-  --diffs-bg-addition-override: color-mix(in srgb, var(--ui-panel) 80%, #22c55e);
-  --diffs-bg-addition-number-override: color-mix(in srgb, var(--ui-panel) 75%, #22c55e);
-  --diffs-bg-addition-hover-override: color-mix(in srgb, var(--ui-panel) 70%, #22c55e);
-  --diffs-bg-addition-emphasis-override: color-mix(in srgb, var(--ui-panel) 60%, #22c55e);
+  --diffs-bg-addition-override: color-mix(in srgb, var(--ui-panel) 80%, var(--ui-success));
+  --diffs-bg-addition-number-override: color-mix(in srgb, var(--ui-panel) 75%, var(--ui-success));
+  --diffs-bg-addition-hover-override: color-mix(in srgb, var(--ui-panel) 70%, var(--ui-success));
+  --diffs-bg-addition-emphasis-override: color-mix(in srgb, var(--ui-panel) 60%, var(--ui-success));
 
-  --diffs-bg-deletion-override: color-mix(in srgb, var(--ui-panel) 80%, #ef4444);
-  --diffs-bg-deletion-number-override: color-mix(in srgb, var(--ui-panel) 75%, #ef4444);
-  --diffs-bg-deletion-hover-override: color-mix(in srgb, var(--ui-panel) 70%, #ef4444);
-  --diffs-bg-deletion-emphasis-override: color-mix(in srgb, var(--ui-panel) 60%, #ef4444);
+  --diffs-bg-deletion-override: color-mix(in srgb, var(--ui-panel) 80%, var(--ui-danger));
+  --diffs-bg-deletion-number-override: color-mix(in srgb, var(--ui-panel) 75%, var(--ui-danger));
+  --diffs-bg-deletion-hover-override: color-mix(in srgb, var(--ui-panel) 70%, var(--ui-danger));
+  --diffs-bg-deletion-emphasis-override: color-mix(in srgb, var(--ui-panel) 60%, var(--ui-danger));
 
   --diffs-fg-number-override: var(--ui-text-dim);
   --diffs-font-size: 12px;

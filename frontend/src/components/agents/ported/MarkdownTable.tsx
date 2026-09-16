@@ -1,4 +1,4 @@
-// @ts-nocheck — ported from open-swe-app (Electron).
+// @ts-nocheck - ported from open-swe-app (Electron).
 import { Children, isValidElement, type ReactNode } from 'react';
 
 interface MarkdownTableProps {

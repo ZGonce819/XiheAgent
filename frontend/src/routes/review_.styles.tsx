@@ -22,9 +22,9 @@ function ReviewStylesPage() {
   return (
     <AppShell
       user={session.data}
-      title="Review Style Prompts"
-      description="An agent browses recent merged PR review feedback, then writes a per-repo style guide for the reviewer."
-      backTo={{ to: "/review", label: "Back to PR Review" }}
+      title="审查样式提示词"
+      description="智能体根据近期已合并 PR 的审查反馈，为每个仓库生成审查规范。"
+      backTo={{ to: "/review", label: "返回代码审查" }}
     >
       <div className="rounded-lg border border-border bg-card">
         <ReviewStylesPanel />

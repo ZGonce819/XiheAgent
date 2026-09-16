@@ -1,31 +1,24 @@
 import { useState, useEffect } from "react";
-import { ChevronDown, ChevronUp, Brain, Wrench, Search, Cog, CheckCircle2, Circle, AlertCircle, Loader2 } from "lucide-react";
+import { ChevronDown, ChevronUp, Brain, Wrench, Search, Cog, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 
 import type { RunEvent, RunEventKind, RunEventStatus } from "@/lib/agents/types";
 
 const KIND_CONFIG: Record<RunEventKind, { icon: typeof Brain; label: string; color: string }> = {
-  think: { icon: Brain, label: "思考", color: "text-purple-400" },
-  execute: { icon: Wrench, label: "执行", color: "text-blue-400" },
-  search: { icon: Search, label: "搜索", color: "text-cyan-400" },
-  other: { icon: Cog, label: "处理", color: "text-gray-400" },
-  todo: { icon: CheckCircle2, label: "任务", color: "text-green-400" },
-};
-
-const STATUS_CONFIG: Record<RunEventStatus, { icon: typeof Circle; label: string }> = {
-  pending: { icon: Circle, label: "等待中" },
-  in_progress: { icon: Loader2, label: "进行中" },
-  completed: { icon: CheckCircle2, label: "已完成" },
-  error: { icon: AlertCircle, label: "失败" },
+  think: { icon: Brain, label: "思考", color: "text-[color:var(--ui-text-muted)]" },
+  execute: { icon: Wrench, label: "执行", color: "text-[color:var(--ui-accent)]" },
+  search: { icon: Search, label: "搜索", color: "text-[color:var(--ui-text-muted)]" },
+  other: { icon: Cog, label: "处理", color: "text-[color:var(--ui-text-muted)]" },
+  todo: { icon: CheckCircle2, label: "任务", color: "text-[color:var(--ui-success)]" },
 };
 
 function getStepStatusColor(status: RunEventStatus): string {
   switch (status) {
     case "completed":
-      return "text-green-400";
+      return "text-[color:var(--ui-text)]";
     case "in_progress":
-      return "text-blue-400";
+      return "text-[color:var(--ui-accent)]";
     case "error":
-      return "text-red-400";
+      return "text-[color:var(--ui-danger)]";
     default:
       return "text-[color:var(--ui-text-dim)]";
   }
@@ -33,14 +26,14 @@ function getStepStatusColor(status: RunEventStatus): string {
 
 function StepIcon({ status, kind }: { status: RunEventStatus; kind: RunEventKind }) {
   if (status === "in_progress") {
-    return <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-400" />;
+    return <Loader2 className="agents-spinner h-3.5 w-3.5 text-[color:var(--ui-accent)]" />;
   }
 
   const kindConfig_ = KIND_CONFIG[kind];
   const KindIcon = kindConfig_.icon;
 
   return (
-    <KindIcon className={`h-3.5 w-3.5 ${status === "completed" ? "text-green-400" : status === "error" ? "text-red-400" : kindConfig_.color}`} />
+    <KindIcon className={`h-3.5 w-3.5 ${status === "completed" ? "text-[color:var(--ui-success)]" : status === "error" ? "text-[color:var(--ui-danger)]" : kindConfig_.color}`} />
   );
 }
 
@@ -74,40 +67,40 @@ export function RunWorkflowSteps({ runEvents, isRunning, className = "" }: RunWo
       : `已完成 ${completedCount}/${runEvents.length} 步`;
 
   return (
-    <div className={`rounded-xl border border-[var(--ui-border)] bg-[var(--ui-panel)] overflow-hidden ${className}`}>
+    <div className={`agents-task-panel my-1 overflow-hidden rounded-lg border border-[var(--ui-border)] bg-[var(--ui-panel)] ${className}`}>
       <button
         type="button"
         onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full px-3 py-2 flex items-center justify-between gap-2 hover:bg-[var(--ui-panel-2)] transition-colors"
+        className="w-full px-3 py-2.5 flex items-center justify-between gap-3 transition-colors hover:bg-[var(--ui-panel-2)]"
       >
         <div className="flex items-center gap-2 min-w-0">
           {isRunning && !hasError && (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-400 shrink-0" />
+            <Loader2 className="agents-spinner size-4 shrink-0 text-[color:var(--ui-accent)]" />
           )}
           {hasError && (
-            <AlertCircle className="h-3.5 w-3.5 text-red-400 shrink-0" />
+            <AlertCircle className="size-4 shrink-0 text-[color:var(--ui-danger)]" />
           )}
           {!isRunning && !hasError && (
-            <CheckCircle2 className="h-3.5 w-3.5 text-green-400 shrink-0" />
+            <CheckCircle2 className="size-4 shrink-0 text-[color:var(--ui-success)]" />
           )}
-          <span className="text-xs text-[color:var(--ui-text-muted)] truncate">
+          <span className="text-[0.8125rem] text-[color:var(--ui-text-muted)] truncate">
             {headerText}
           </span>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          <span className="text-[10px] text-[color:var(--ui-text-dim)]">
+          <span className="text-[0.625rem] text-[color:var(--ui-text-dim)]">
             {completedCount}/{runEvents.length}
           </span>
           {isExpanded ? (
-            <ChevronUp className="h-3.5 w-3.5 text-[color:var(--ui-text-dim)]" />
+            <ChevronUp className="size-4 text-[color:var(--ui-text-dim)]" />
           ) : (
-            <ChevronDown className="h-3.5 w-3.5 text-[color:var(--ui-text-dim)]" />
+            <ChevronDown className="size-4 text-[color:var(--ui-text-dim)]" />
           )}
         </div>
       </button>
 
       {isExpanded && (
-        <div className="border-t border-[var(--ui-border)] px-3 py-2">
+        <div className="border-t border-[var(--ui-border)] px-4 py-2">
           <div className="space-y-1">
             {runEvents.map((event, index) => {
               const kindCfg = KIND_CONFIG[event.kind] || KIND_CONFIG.other;
@@ -116,13 +109,18 @@ export function RunWorkflowSteps({ runEvents, isRunning, className = "" }: RunWo
               return (
                 <div
                   key={event.id || index}
-                  className="flex items-center gap-2 py-1 text-xs"
+                  className="grid grid-cols-[20px_minmax(0,1fr)_auto] items-start gap-x-2 border-b border-[var(--ui-border-subtle)] py-2.5 text-[0.8125rem] last:border-0"
                 >
                   <StepIcon status={event.status} kind={event.kind} />
-                  <span className={`truncate ${statusColor}`}>
-                    {event.title}
-                  </span>
-                  <span className="shrink-0 text-[10px] text-[color:var(--ui-text-dim)] ml-auto">
+                  <div className="min-w-0">
+                    <p className={statusColor}>{event.title}</p>
+                    {event.detail && (
+                      <p className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-[color:var(--ui-text-dim)]">
+                        {event.detail}
+                      </p>
+                    )}
+                  </div>
+                  <span className="shrink-0 text-[0.625rem] text-[color:var(--ui-text-dim)] ml-auto">
                     {kindCfg.label}
                   </span>
                 </div>

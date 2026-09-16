@@ -18,7 +18,7 @@ export function AppShell({ user, title, description, backTo, children }: AppShel
     <div className="flex h-svh overflow-hidden bg-background text-foreground">
       <AppSidebar user={user} />
       <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl px-4 pt-14 pb-6 sm:px-8 sm:py-10">
+        <div className="mx-auto max-w-4xl px-4 pt-14 pb-10 sm:px-8 sm:py-10">
           {backTo && (
             <Link
               to={backTo.to}
@@ -28,8 +28,8 @@ export function AppShell({ user, title, description, backTo, children }: AppShel
               {backTo.label}
             </Link>
           )}
-          <header className="mb-8">
-            <h1 className="font-heading text-lg font-medium">{title}</h1>
+          <header className="mb-8 border-b border-border pb-5">
+            <h1 className="font-heading text-xl font-semibold">{title}</h1>
             {description && (
               <p className="mt-1 text-xs text-muted-foreground">{description}</p>
             )}
@@ -62,7 +62,7 @@ export function SettingsSection({ title, description, action, children }: Settin
         </div>
         {action}
       </div>
-      <div className="rounded-lg border border-border bg-card">{children}</div>
+      <div className="border-y border-border bg-card sm:border">{children}</div>
     </section>
   );
 }
@@ -94,8 +94,8 @@ export function SettingsRow({
             {label}
           </span>
           {comingSoon && (
-            <span className="rounded-sm border border-border bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
-              Coming soon
+            <span className="rounded-sm border border-border bg-muted px-1.5 py-0.5 text-[0.625rem] font-normal text-muted-foreground">
+              即将推出
             </span>
           )}
         </span>

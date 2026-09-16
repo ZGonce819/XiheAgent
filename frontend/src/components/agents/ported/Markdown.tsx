@@ -14,13 +14,13 @@ function extractText(children: ReactNode): string {
 
 export function Markdown({ content }: MarkdownProps) {
   return (
-    <div className="min-w-0 max-w-full text-[13px] leading-6 break-words [overflow-wrap:anywhere]">
+    <div className="min-w-0 max-w-full text-[0.8125rem] leading-6 break-words [overflow-wrap:anywhere]">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          h1: ({ children }) => <div className="text-[color:var(--ui-accent)] text-[20px] font-semibold mt-4 mb-2 tracking-tight">{children}</div>,
-          h2: ({ children }) => <div className="text-[color:var(--ui-accent)] text-[17px] font-semibold mt-3 mb-2 tracking-tight">{children}</div>,
-          h3: ({ children }) => <div className="text-[color:var(--ui-accent)] text-[15px] font-semibold mt-3 mb-1">{children}</div>,
+          h1: ({ children }) => <div className="mt-4 mb-2 text-[1.25rem] font-semibold text-[color:var(--ui-text)]">{children}</div>,
+          h2: ({ children }) => <div className="mt-3 mb-2 text-[1.0625rem] font-semibold text-[color:var(--ui-text)]">{children}</div>,
+          h3: ({ children }) => <div className="text-[color:var(--ui-accent)] text-[0.9375rem] font-semibold mt-3 mb-1">{children}</div>,
           p: ({ children }) => <p className="my-1.5 text-[color:var(--ui-text)] break-words [overflow-wrap:anywhere]">{children}</p>,
           a: ({ href, children }) => (
             <a className="text-[color:var(--ui-accent)] underline decoration-[color:var(--ui-accent)]/50 break-words [overflow-wrap:anywhere]" href={href} target="_blank" rel="noreferrer">
@@ -38,8 +38,8 @@ export function Markdown({ content }: MarkdownProps) {
           thead: ({ children }) => <thead className="border-b border-[var(--ui-border)] bg-[var(--ui-panel-2)]">{children}</thead>,
           tbody: ({ children }) => <tbody className="divide-y divide-[var(--ui-border-subtle)]">{children}</tbody>,
           tr: ({ children }) => <tr className="hover:bg-[var(--ui-panel-2)]/50 transition-colors">{children}</tr>,
-          th: ({ children }) => <th className="border-0 text-left text-[11px] font-medium text-[color:var(--ui-text)] whitespace-nowrap align-middle first:font-semibold first:text-[color:var(--ui-accent)]" style={{ padding: '4px 8px' }}>{children}</th>,
-          td: ({ children }) => <td className="border-0 text-[11px] text-[color:var(--ui-text-muted)] align-middle first:font-medium first:text-[color:var(--ui-text)]" style={{ padding: '4px 8px' }}>{children}</td>,
+          th: ({ children }) => <th className="border-0 text-left text-[0.6875rem] font-medium text-[color:var(--ui-text)] whitespace-nowrap align-middle first:font-semibold first:text-[color:var(--ui-accent)]" style={{ padding: '4px 8px' }}>{children}</th>,
+          td: ({ children }) => <td className="border-0 text-[0.6875rem] text-[color:var(--ui-text-muted)] align-middle first:font-medium first:text-[color:var(--ui-text)]" style={{ padding: '4px 8px' }}>{children}</td>,
           code: ({ className, children }) => {
             const text = extractText(children);
             const match = /language-([^\s]+)/.exec(className || '');

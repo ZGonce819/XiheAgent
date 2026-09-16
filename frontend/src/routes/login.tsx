@@ -6,6 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { loginUrl } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { cn } from "@/lib/utils";
+import { Logo } from "@/components/agents/ported/Logo";
 
 export const Route = createFileRoute("/login")({ component: Login });
 
@@ -25,17 +26,20 @@ function Login() {
   }
 
   return (
-    <main className="flex min-h-svh items-center justify-center p-6">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>登录 XiheAgent</CardTitle>
+    <main className="relative flex min-h-svh items-center justify-center bg-background p-6">
+      <div className="absolute top-6 left-6 text-foreground">
+        <Logo className="h-auto" />
+      </div>
+      <Card className="w-full max-w-md rounded-lg border-border shadow-sm">
+        <CardHeader className="border-b border-border pb-5">
+          <CardTitle className="text-lg">XiheAgent</CardTitle>
           <CardDescription>
-            使用控制台账号配置模型、Gitee 仓库和手动编码任务。
+            登录后继续管理代码任务、仓库和自动化。
           </CardDescription>
         </CardHeader>
         <CardContent>
           <a href={loginUrl()} className={cn(buttonVariants({ size: "lg" }), "w-full")}>
-            继续
+            使用控制台账号继续
           </a>
         </CardContent>
       </Card>

@@ -14,6 +14,7 @@ export interface ThreadCreateRequest {
 export interface ThreadMessageRequest {
   content: string
   images?: Array<ImageChunk>
+  repo?: string | null
   model_id?: string | null
   effort?: string | null
   edit_message_id?: string | null
@@ -107,6 +108,11 @@ export const agentsApi = {
     }),
   getThread: (threadId: string) =>
     agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}`),
+  saveViewSnapshot: (threadId: string, messages: Array<Message>) =>
+    agentsRequest<void>(`/threads/${encodeURIComponent(threadId)}/view-snapshot`, {
+      method: "PUT",
+      body: JSON.stringify({ messages }),
+    }),
   previewEdit: (threadId: string, messageId: string, originalContent: string) =>
     agentsRequest<EditPreview>(`/threads/${encodeURIComponent(threadId)}/edit-preview`, {
       method: "POST",

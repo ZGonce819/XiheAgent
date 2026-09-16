@@ -63,6 +63,7 @@ def build_streaming_response(
     repo_url: str,
     content: str,
     rollback_message_id: str | None = None,
+    rollback_message_content: str | None = None,
 ) -> StreamingResponse:
     """构造 POST SSE 流式响应。
 
@@ -227,7 +228,13 @@ def build_streaming_response(
 
         yield sse_part("thread_snapshot", thread_meta_payload(initial_task))
         if rollback_message_id:
-            yield sse_part("rollback", {"message_id": rollback_message_id})
+            yield sse_part(
+                "rollback",
+                {
+                    "message_id": rollback_message_id,
+                    "message_content": rollback_message_content,
+                },
+            )
         yield sse_part(
             "user_message",
             {

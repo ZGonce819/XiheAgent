@@ -71,6 +71,8 @@ class ConversationVersionRepo(ConnectionManager):
                 "createdAt": row.get("created_at"),
                 "messages": payload.get("messages") or [],
                 "runEvents": payload.get("runEvents") or [],
+                "editedMessageId": payload.get("editedMessageId"),
+                "editedUserIndex": payload.get("editedUserIndex"),
             })
         return versions
 

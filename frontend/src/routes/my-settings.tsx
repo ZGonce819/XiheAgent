@@ -60,12 +60,12 @@ function UserMappingSection({ session }: { session: SessionUser }) {
 
   return (
     <SettingsSection
-      title="User mapping"
+      title="账号映射"
       description="仅当你计划从 Slack 触发 XiheAgent 时才需要连接 Slack。手动 Gitee 任务使用服务端仓库令牌。"
     >
       <div className="divide-y divide-border">
         <SettingsRow
-          label="Dashboard account"
+          label="控制台账号"
           control={
             <span className="text-xs text-muted-foreground">
               {session.login}
@@ -73,23 +73,23 @@ function UserMappingSection({ session }: { session: SessionUser }) {
           }
         />
         <SettingsRow
-          label="Slack account"
+          label="Slack 账号"
           description={
             connected
-              ? `Linked to Slack member ${slackUserId}${workEmail ? ` · ${workEmail}` : ""}.`
-              : "Not connected. Slack is optional for manual Gitee tasks."
+              ? `已关联 Slack 成员 ${slackUserId}${workEmail ? ` · ${workEmail}` : ""}。`
+              : "尚未连接；手动执行 Gitee 任务不需要 Slack。"
           }
           control={
             <div className="flex items-center gap-2">
               <span
                 className={cn(
-                  "rounded-full px-2 py-0.5 text-[10px] font-medium",
+                  "rounded-full px-2 py-0.5 text-[0.625rem] font-medium",
                   connected
                     ? "bg-primary/10 text-primary"
                     : "bg-muted text-muted-foreground"
                 )}
               >
-                {connected ? "Connected" : "Not connected"}
+                {connected ? "已连接" : "未连接"}
               </span>
               {session.slack_oauth_enabled ? (
                 <Button
@@ -100,14 +100,14 @@ function UserMappingSection({ session }: { session: SessionUser }) {
                 >
                   <IoLogoSlack className="size-4" />
                   {connecting
-                    ? "Redirecting..."
+                    ? "正在跳转..."
                     : connected
-                      ? "Reconnect"
-                      : "Connect Slack"}
+                      ? "重新连接"
+                      : "连接 Slack"}
                 </Button>
               ) : (
-                <span className="text-[10px] text-muted-foreground">
-                  Sign in with Slack unavailable
+                <span className="text-[0.625rem] text-muted-foreground">
+                  当前无法使用 Slack 登录
                 </span>
               )}
             </div>
@@ -156,7 +156,7 @@ function MySettingsPage() {
 
   const draftChoice = toChoice(profile.data?.review_draft_prs)
   const teamDefaultOn = teamSettings.data?.review_draft_prs ?? false
-  const teamDefaultLabel = `Use team default (currently: ${teamDefaultOn ? "On" : "Off"})`
+  const teamDefaultLabel = `使用团队默认值（当前：${teamDefaultOn ? "开启" : "关闭"}）`
 
   const handleDraftChoiceChange = (next: DraftReviewChoice) => {
     setError(null)
@@ -173,10 +173,10 @@ function MySettingsPage() {
   }
 
   return (
-    <AppShell user={session.data} title="Profile Settings">
-      <SettingsSection title="Profile">
+    <AppShell user={session.data} title="个人设置">
+      <SettingsSection title="个人资料">
         <SettingsRow
-          label="Email"
+          label="邮箱"
           control={
             <span className="text-xs text-muted-foreground">
               {session.data.email ?? "-"}
@@ -187,10 +187,10 @@ function MySettingsPage() {
 
       <UserMappingSection session={session.data} />
 
-      <SettingsSection title="PR Review">
+      <SettingsSection title="代码审查">
         <SettingsRow
-          label="Review my draft PRs"
-          description="Whether PR Review runs on pull requests you open in draft. When set to the team default, your admin's org-wide setting applies."
+          label="审查我的草稿 PR"
+          description="决定是否审查你创建的草稿 PR；选择团队默认值时使用管理员的全局设置。"
           control={
             <Select
               value={draftChoice}
@@ -205,10 +205,10 @@ function MySettingsPage() {
               <SelectContent>
                 <SelectItem value="team_default">{teamDefaultLabel}</SelectItem>
                 <SelectItem value="always_on">
-                  Always review my drafts
+                  始终审查我的草稿
                 </SelectItem>
                 <SelectItem value="always_off">
-                  Never review my drafts
+                  从不审查我的草稿
                 </SelectItem>
               </SelectContent>
             </Select>
@@ -216,17 +216,17 @@ function MySettingsPage() {
         />
       </SettingsSection>
 
-      <SettingsSection title="Account">
+      <SettingsSection title="账号">
         <SettingsRow
-          label="Sign out"
-          description="End your dashboard session."
+          label="退出登录"
+          description="结束当前控制台会话。"
           control={
             <Button
               size="sm"
               variant="outline"
               onClick={() => void handleLogout()}
             >
-              Sign out
+              退出登录
             </Button>
           }
         />

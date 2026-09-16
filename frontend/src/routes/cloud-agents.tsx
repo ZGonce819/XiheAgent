@@ -1,4 +1,4 @@
-﻿import { Navigate, createFileRoute } from "@tanstack/react-router"
+import { Navigate, createFileRoute } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 
 import type { ModelOption } from "@/lib/api"
@@ -141,17 +141,17 @@ function CloudAgentsPage() {
     <AppShell
       user={session.data}
       title="XiheAgent 智能体"
-      description="Configure how XiheAgent picks a model, Gitee repository, and PR defaults."
+      description="配置 XiheAgent 默认使用的模型、仓库和 PR 行为。"
     >
-      <SettingsSection title="Defaults">
+      <SettingsSection title="默认设置">
         <div className="divide-y divide-border">
           <SettingsRow
-            label="Default Model"
-            description="Used when no model is specified"
+            label="默认模型"
+            description="未明确指定模型时使用"
             control={
               <Select value={modelId} onValueChange={(v) => v && setModelId(v)}>
                 <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Pick a model" />
+                  <SelectValue placeholder="选择模型" />
                 </SelectTrigger>
                 <SelectContent>
                   {options.data?.models.map((m) => (
@@ -164,8 +164,8 @@ function CloudAgentsPage() {
             }
           />
           <SettingsRow
-            label="Reasoning Effort"
-            description="How hard the model thinks before answering"
+            label="推理强度"
+            description="控制模型回答前的推理深度"
             control={
               <Select value={effort} onValueChange={(v) => v && setEffort(v)}>
                 <SelectTrigger className="w-32">
@@ -182,15 +182,15 @@ function CloudAgentsPage() {
             }
           />
           <SettingsRow
-            label="Default Subagent Model"
-            description="Used for delegated tasks launched by your agent"
+            label="默认子智能体模型"
+            description="用于主智能体委派的任务"
             control={
               <Select
                 value={subagentModelId}
                 onValueChange={(v) => v && setSubagentModelId(v)}
               >
                 <SelectTrigger className="w-40">
-                  <SelectValue placeholder="Pick a model" />
+                  <SelectValue placeholder="选择模型" />
                 </SelectTrigger>
                 <SelectContent>
                   {options.data?.models.map((m) => (
@@ -203,8 +203,8 @@ function CloudAgentsPage() {
             }
           />
           <SettingsRow
-            label="Subagent Reasoning Effort"
-            description="How hard delegated subagents think before answering"
+            label="子智能体推理强度"
+            description="控制子智能体的推理深度"
             control={
               <Select
                 value={subagentEffort}
@@ -224,8 +224,8 @@ function CloudAgentsPage() {
             }
           />
           <SettingsRow
-            label="Default Repository"
-            description="Used when no repository is specified. Gitee URLs and owner/repo are supported."
+            label="默认仓库"
+            description="未指定仓库时使用，支持 Gitee URL 和 owner/repo 格式。"
             control={
               repos.data?.repositories?.length ? (
                 <div className="w-56">
@@ -233,8 +233,8 @@ function CloudAgentsPage() {
                     repos={repos.data.repositories}
                     selectedRepo={defaultRepo || null}
                     onRepoChange={(repo) => setDefaultRepo(repo ?? "")}
-                    placeholder="Pick or enter a repository"
-                    emptySelectionLabel="No default repository"
+                    placeholder="选择或输入仓库"
+                    emptySelectionLabel="不设置默认仓库"
                     triggerClassName="h-7 w-full max-w-none rounded-md border border-input bg-input/20 px-2 py-1.5 text-xs/relaxed text-foreground transition-colors hover:opacity-100 dark:bg-input/30"
                     dropdownClassName="w-56"
                   />
@@ -242,7 +242,7 @@ function CloudAgentsPage() {
               ) : (
                 <Input
                   className="w-56"
-                  placeholder="https://gitee.com/owner/repo"
+                  placeholder="owner/repo"
                   value={defaultRepo}
                   onChange={(e) => setDefaultRepo(e.target.value)}
                 />
@@ -250,22 +250,22 @@ function CloudAgentsPage() {
             }
           />
           <SettingsRow
-            label="Base Branch"
-            description="When empty, the agent will use the repository's default branch."
+            label="基础分支"
+            description="留空时使用仓库的默认分支。"
             htmlFor="base-branch"
             control={
               <Input
                 id="base-branch"
                 className="w-56"
-                placeholder="Branch name"
+                placeholder="分支名称"
                 value={baseBranch}
                 onChange={(e) => setBaseBranch(e.target.value)}
               />
             }
           />
           <SettingsRow
-            label="Branch Prefix"
-            description="Prefix for branch names created by the agent"
+            label="分支前缀"
+            description="智能体创建分支时使用的名称前缀"
             htmlFor="branch-prefix"
             control={
               <Input
@@ -283,17 +283,17 @@ function CloudAgentsPage() {
               onClick={persistDefaults}
               disabled={save.isPending}
             >
-              {save.isPending ? "Saving..." : "Save defaults"}
+              {save.isPending ? "正在保存..." : "保存默认设置"}
             </Button>
           </div>
         </div>
       </SettingsSection>
 
-      <SettingsSection title="Pull Requests">
+      <SettingsSection title="拉取请求">
         <div className="divide-y divide-border">
           <SettingsRow
-            label="Automatically fix CI failures"
-            description="Agent will attempt to fix failing CI checks on PRs it opens."
+            label="自动修复 CI 失败"
+            description="智能体会尝试修复其创建的 PR 中失败的 CI 检查。"
             comingSoon
             control={
               <Switch
@@ -304,8 +304,8 @@ function CloudAgentsPage() {
             }
           />
           <SettingsRow
-            label="Always Create PRs"
-            description="Always create a pull request for code changes. When disabled, agents create PRs only when necessary or requested."
+            label="始终创建 PR"
+            description="代码变更后始终创建 PR；关闭时仅在必要或明确要求时创建。"
             control={
               <Switch
                 checked={profile.data?.create_prs ?? false}
@@ -320,3 +320,4 @@ function CloudAgentsPage() {
     </AppShell>
   )
 }
+

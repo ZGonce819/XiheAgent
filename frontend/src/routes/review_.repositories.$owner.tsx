@@ -90,18 +90,18 @@ function RepositoriesOwnerPage() {
       title={owner}
       description={
         canEdit
-          ? "Toggle a repository to opt it into automatic PR Review."
-          : "Only team admins can modify enabled repositories."
+          ? "启用仓库后，系统会自动执行 PR 代码审查。"
+          : "只有团队管理员可以修改已启用的仓库。"
       }
-      backTo={{ to: "/review", label: "Back to PR Review" }}
+      backTo={{ to: "/review", label: "返回代码审查" }}
     >
       <section className="space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Repositories
+          <h2 className="text-xs font-medium text-muted-foreground">
+            仓库
           </h2>
           <span className="text-xs text-muted-foreground">
-            {enabledCount}/{ownerRepos.length} enabled
+            已启用 {enabledCount}/{ownerRepos.length}
           </span>
         </div>
         <div className="rounded-lg border border-border bg-card">
@@ -112,7 +112,7 @@ function RepositoriesOwnerPage() {
           )}
           {!loading && ownerRepos.length === 0 && (
             <p className="px-4 py-3 text-xs text-muted-foreground">
-              No repositories found for this installation.
+              当前安装中没有找到仓库。
             </p>
           )}
           <ul className="divide-y divide-border">
@@ -131,13 +131,13 @@ function RepositoriesOwnerPage() {
                       </span>
                     </span>
                     {r.private && (
-                      <span className="text-[10px] text-muted-foreground">private</span>
+                      <span className="text-[0.625rem] text-muted-foreground">私有</span>
                     )}
                   </div>
                   <span
                     title={
                       !canEdit
-                        ? "Only team admins can modify enabled repositories"
+                        ? "只有团队管理员可以修改已启用的仓库"
                         : undefined
                     }
                     className={!canEdit ? "cursor-not-allowed" : undefined}
@@ -157,7 +157,7 @@ function RepositoriesOwnerPage() {
           {ownerRepos.length > PAGE_SIZE && (
             <div className="flex items-center justify-between gap-4 border-t border-border px-4 py-2 text-xs">
               <span className="text-muted-foreground">
-                Showing {pageStart + 1}-{pageEnd} of {ownerRepos.length}
+                显示第 {pageStart + 1}-{pageEnd} 项，共 {ownerRepos.length} 项
               </span>
               <div className="flex items-center gap-2">
                 <Button
@@ -166,7 +166,7 @@ function RepositoriesOwnerPage() {
                   disabled={safePage === 0}
                   onClick={() => setPage((p) => Math.max(0, p - 1))}
                 >
-                  Prev
+                  上一页
                 </Button>
                 <span className="text-muted-foreground">
                   {safePage + 1} / {totalPages}
@@ -177,7 +177,7 @@ function RepositoriesOwnerPage() {
                   disabled={safePage >= totalPages - 1}
                   onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
                 >
-                  Next
+                  下一页
                 </Button>
               </div>
             </div>

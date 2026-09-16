@@ -171,6 +171,15 @@ export interface RunEvent {
   updated_at?: string
 }
 
+export interface ConversationVersion {
+  number: number
+  createdAt: string
+  messages: Array<Message>
+  runEvents: Array<RunEvent>
+  editedMessageId?: string | null
+  editedUserIndex?: number | null
+}
+
 export interface AgentThread {
   id: string
   title: string
@@ -188,6 +197,7 @@ export interface AgentThread {
   updatedAt: number
   messages: Array<Message>
   runEvents?: Array<RunEvent>
+  conversationVersions?: Array<ConversationVersion>
   pr?: {
     number: number
     title: string

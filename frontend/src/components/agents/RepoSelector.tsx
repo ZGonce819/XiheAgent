@@ -1,7 +1,7 @@
 import { CaretDownIcon, FolderIcon } from "@phosphor-icons/react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import { normalizeRepoFullName } from "@/lib/repo"
+import { detectRepoProvider, normalizeRepoFullName, type RepoProvider } from "@/lib/repo"
 import { cn } from "@/lib/utils"
 
 type RepoOption = { full_name: string }
@@ -18,24 +18,32 @@ interface RepoSelectorProps {
   triggerClassName?: string
   dropdownClassName?: string
   disabled?: boolean
+  onProviderChange?: (provider: RepoProvider) => void
 }
 
 export function RepoSelector({
   repos,
   selectedRepo = null,
   onRepoChange,
-  placeholder = "Select repository",
-  emptySelectionLabel = "No repository",
-  searchPlaceholder = "Enter Gitee URL or owner/repo",
-  noMatchesLabel = "No matching repositories",
+  placeholder = "选择仓库",
+  emptySelectionLabel = "不指定仓库",
+  noMatchesLabel = "暂无匹配仓库",
   className,
   triggerClassName,
   dropdownClassName,
   disabled = false,
+  onProviderChange,
 }: RepoSelectorProps) {
   const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState("")
+  const [owner, setOwner] = useState("")
+  const [repoName, setRepoName] = useState("")
+  const [provider, setProvider] = useState<RepoProvider>("github")
+  const [validationError, setValidationError] = useState<string | null>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const ownerRef = useRef<HTMLInputElement>(null)
+  const repoRef = useRef<HTMLInputElement>(null)
+
+  const query = owner || repoName ? `${owner}/${repoName}`.replace(/^\/|\/$/g, "").replace(/\/+/g, "/") : ""
 
   const filteredRepos = useMemo(() => {
     const all = repos ?? []
@@ -50,8 +58,43 @@ export function RepoSelector({
     const normalized = normalizeRepoFullName(trimmed)
     if (!normalized) return null
     const exists = (repos ?? []).some((repo) => repo.full_name === normalized)
-    return exists ? null : trimmed
-  }, [query, repos])
+    if (exists) return null
+    if (detectRepoProvider(trimmed)) return trimmed
+    const parts = normalized.split("/")
+    if (parts.length === 2) {
+      const host = provider === "github" ? "https://github.com" : provider === "codeup" ? "https://codeup.aliyun.com" : "https://gitee.com"
+      return `${host}/${normalized}`
+    }
+    return trimmed
+  }, [query, repos, provider])
+
+  const clearInputs = () => { setOwner(""); setRepoName(""); setValidationError(null) }
+
+  const handleEnterKey = useCallback(() => {
+    if (!owner.trim() || !repoName.trim()) {
+      setValidationError(!owner.trim() && !repoName.trim() ? "请填写 owner 和 repo" : !owner.trim() ? "请填写 owner" : "请填写 repo")
+      return
+    }
+    setValidationError(null)
+    const trimmed = `${owner.trim()}/${repoName.trim()}`
+    const normalized = normalizeRepoFullName(trimmed)
+    const existing = (repos ?? []).find((repo) => repo.full_name === normalized)
+    if (existing) {
+      onRepoChange(existing.full_name)
+    } else if (customRepo) {
+      onRepoChange(customRepo)
+    } else {
+      onRepoChange(trimmed)
+    }
+    setOpen(false)
+    clearInputs()
+  }, [owner, repoName, repos, customRepo, onRepoChange])
+
+  useEffect(() => {
+    if (open) {
+      requestAnimationFrame(() => ownerRef.current?.focus())
+    }
+  }, [open])
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -69,9 +112,26 @@ export function RepoSelector({
       <button
         type="button"
         disabled={disabled}
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => {
+          setOpen((value) => {
+            if (!value && selectedRepo) {
+              const normalized = normalizeRepoFullName(selectedRepo)
+              if (normalized) {
+                const parts = normalized.split("/")
+                if (parts.length === 2 && parts[0] && parts[1]) {
+                  setOwner(parts[0])
+                  setRepoName(parts[1])
+                } else if (parts.length === 3 && parts[1] && parts[2]) {
+                  setOwner(parts[1])
+                  setRepoName(parts[2])
+                }
+              }
+            }
+            return !value
+          })
+        }}
         className={cn(
-          "flex max-w-[260px] cursor-pointer items-center gap-1 text-muted-foreground transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60",
+          "flex max-w-[300px] cursor-pointer items-center gap-1.5 text-[0.8125rem] text-muted-foreground transition-[color,opacity,transform] duration-150 hover:opacity-80 active:scale-[0.98] disabled:cursor-default disabled:opacity-60",
           triggerClassName
         )}
       >
@@ -79,38 +139,77 @@ export function RepoSelector({
         <span className="flex-1 truncate text-left">
           {selectedRepo || placeholder}
         </span>
-        <CaretDownIcon className="size-3 shrink-0 opacity-70" />
+        <CaretDownIcon className={cn("size-3 shrink-0 opacity-70 transition-transform duration-200 ease-out", open && "rotate-180")} />
       </button>
       {open && (
         <div
           className={cn(
-            "absolute top-full left-0 z-50 mt-1 flex max-h-72 w-72 flex-col overflow-hidden rounded border border-border bg-popover text-xs text-popover-foreground shadow-lg",
+            "absolute top-full left-0 z-50 mt-1 flex max-h-96 w-[22rem] origin-top-left animate-in fade-in-0 zoom-in-95 slide-in-from-top-1 duration-150 ease-out flex-col overflow-hidden rounded-lg border border-border bg-popover text-[0.8125rem] text-popover-foreground shadow-lg",
             dropdownClassName
           )}
         >
-          <input
-            autoFocus
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={searchPlaceholder}
-            className="w-full border-b border-border bg-transparent px-2 py-1.5 text-foreground outline-none placeholder:text-muted-foreground"
-          />
-          <div className="overflow-y-auto">
+          <div className="flex items-center gap-1 border-b border-border px-2 py-2">
+            {(["github", "gitee", "codeup"] as RepoProvider[]).map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => {
+                  setProvider(item)
+                  onProviderChange?.(item)
+                }}
+                className={cn(
+                  "rounded-md px-2 py-1 text-[0.75rem] font-medium transition-[background-color,color,transform] duration-150 active:scale-95",
+                  provider === item
+                    ? "bg-[var(--ui-accent)] text-white"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+              >
+                {item === "github" ? "GitHub" : item === "gitee" ? "Gitee" : "Codeup"}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-0 border-b border-border px-3 py-2.5">
+            <input
+              ref={ownerRef}
+              autoFocus
+              value={owner}
+              onChange={(e) => { setOwner(e.target.value.replace(/\//g, "")); setValidationError(null) }}
+              onKeyDown={(e) => {
+                if (e.key === "/" || e.key === "ArrowRight") { e.preventDefault(); repoRef.current?.focus() }
+                else if (e.key === "Enter") { e.preventDefault(); handleEnterKey() }
+              }}
+              placeholder={validationError && !owner ? "请填写 owner" : "owner"}
+              className={cn("w-24 bg-transparent text-foreground outline-none", validationError && !owner ? "placeholder:text-[color:var(--ui-danger)]" : "placeholder:text-muted-foreground")}
+            />
+            <span className="mx-1 rounded bg-muted px-1.5 py-0.5 text-[0.6875rem] font-medium text-muted-foreground select-none">/</span>
+            <input
+              ref={repoRef}
+              value={repoName}
+              onChange={(e) => { setRepoName(e.target.value.replace(/\//g, "")); setValidationError(null) }}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowLeft" && !repoName) { e.preventDefault(); ownerRef.current?.focus() }
+                else if (e.key === "Enter") { e.preventDefault(); handleEnterKey() }
+              }}
+              placeholder={validationError && !repoName ? "请填写 repo" : "repo"}
+              className={cn("flex-1 min-w-0 bg-transparent text-foreground outline-none", validationError && !repoName ? "placeholder:text-[color:var(--ui-danger)]" : "placeholder:text-muted-foreground")}
+            />
+          </div>
+          <div className="animate-in fade-in-0 duration-200 overflow-y-auto">
             <button
               type="button"
               onClick={() => {
                 onRepoChange(null)
                 setOpen(false)
-                setQuery("")
+                clearInputs()
               }}
               className={cn(
-                "flex w-full items-center px-2 py-1.5 text-left transition-colors hover:bg-muted",
+                "flex w-full items-center px-2 py-1.5 text-left transition-[background-color,color] duration-150 hover:bg-muted",
                 selectedRepo ? "text-muted-foreground" : "text-foreground"
               )}
             >
               {emptySelectionLabel}
               {!selectedRepo && (
-                <span className="ml-auto pl-3 text-muted-foreground">✓</span>
+                <span className="ml-auto animate-in fade-in-0 zoom-in-75 pl-3 text-muted-foreground duration-150">✓</span>
               )}
             </button>
             {filteredRepos.length === 0 ? (
@@ -127,16 +226,16 @@ export function RepoSelector({
                     onClick={() => {
                       onRepoChange(repo.full_name)
                       setOpen(false)
-                      setQuery("")
+                      clearInputs()
                     }}
                     className={cn(
-                      "flex w-full items-center px-2 py-1.5 text-left transition-colors hover:bg-muted",
+                      "flex w-full items-center px-2 py-1.5 text-left transition-[background-color,color] duration-150 hover:bg-muted",
                       selected ? "text-foreground" : "text-muted-foreground"
                     )}
                   >
                     <span className="truncate">{repo.full_name}</span>
                     {selected && (
-                      <span className="ml-auto pl-3 text-muted-foreground">
+                        <span className="ml-auto animate-in fade-in-0 zoom-in-75 pl-3 text-muted-foreground duration-150">
                         ✓
                       </span>
                     )}
@@ -150,11 +249,11 @@ export function RepoSelector({
                 onClick={() => {
                   onRepoChange(customRepo)
                   setOpen(false)
-                  setQuery("")
+                  clearInputs()
                 }}
-                className="flex w-full items-center px-2 py-1.5 text-left text-foreground transition-colors hover:bg-muted"
+                className="flex w-full items-center px-2 py-1.5 text-left text-foreground transition-[background-color,color] duration-150 hover:bg-muted"
               >
-                <span className="min-w-0 truncate">Use {customRepo}</span>
+                <span className="min-w-0 truncate">使用此仓库：{customRepo}</span>
               </button>
             )}
           </div>
@@ -163,3 +262,4 @@ export function RepoSelector({
     </div>
   )
 }
+

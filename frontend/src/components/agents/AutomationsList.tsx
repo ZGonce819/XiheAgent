@@ -19,9 +19,9 @@ import {
 import { cn } from "@/lib/utils"
 
 function formatDate(value?: string | null): string {
-  if (!value) return "Never run"
+  if (!value) return "从未运行"
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "Never run"
+  if (Number.isNaN(date.getTime())) return "从未运行"
   return date.toLocaleString(undefined, {
     month: "short",
     day: "numeric",
@@ -69,8 +69,8 @@ export function AutomationsList() {
         <div className="mt-3">
           {schedulesQuery.isLoading ? (
             <div className="space-y-2">
-              <Skeleton className="h-16 w-full rounded-xl" />
-              <Skeleton className="h-16 w-full rounded-xl" />
+              <Skeleton className="h-16 w-full rounded-lg" />
+              <Skeleton className="h-16 w-full rounded-lg" />
             </div>
           ) : total === 0 ? (
             <EmptyState />
@@ -97,7 +97,7 @@ function StatCard({
   highlight?: boolean
 }) {
   return (
-    <div className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-4 py-3">
+    <div className="rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface)] px-4 py-3">
       <div className="text-xs text-[var(--ui-text-dim)]">{label}</div>
       <div
         className={cn(
@@ -113,7 +113,7 @@ function StatCard({
 
 function EmptyState() {
   return (
-    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-[var(--ui-border)] bg-[var(--ui-surface)] px-6 py-14 text-center">
+    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-[var(--ui-border)] bg-[var(--ui-surface)] px-6 py-14 text-center">
       <div className="rounded-full bg-[var(--ui-panel-2)] p-3 text-[var(--ui-text-muted)]">
         <LightningIcon className="size-5" />
       </div>
@@ -153,7 +153,7 @@ function AutomationRow({ schedule }: { schedule: AgentSchedule }) {
     <Link
       to="/agents/automations/$scheduleId"
       params={{ scheduleId: schedule.id }}
-      className="flex items-center gap-3 rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-4 py-3 transition-colors hover:border-[var(--ui-text-dim)]"
+      className="flex items-center gap-3 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface)] px-4 py-3 transition-colors hover:border-[var(--ui-text-dim)]"
     >
       <span
         className={cn(
@@ -169,9 +169,9 @@ function AutomationRow({ schedule }: { schedule: AgentSchedule }) {
           {schedule.lastError && (
             <WarningCircleIcon
               className="size-3.5 shrink-0 text-[var(--ui-danger)]"
-              aria-label="Last run failed"
+              aria-label="上次运行失败"
             >
-              <title>Last run failed</title>
+              <title>上次运行失败</title>
             </WarningCircleIcon>
           )}
         </div>
@@ -181,14 +181,14 @@ function AutomationRow({ schedule }: { schedule: AgentSchedule }) {
             {describeCron(schedule.schedule)}
           </span>
           {schedule.repo && <span>{schedule.repo}</span>}
-          <span>Last run: {formatDate(schedule.lastTriggeredAt)}</span>
+          <span>上次运行：{formatDate(schedule.lastTriggeredAt)}</span>
         </div>
       </div>
       <button
         type="button"
         onClick={onToggle}
         disabled={isToggling}
-        aria-label={schedule.enabled ? "Pause automation" : "Resume automation"}
+        aria-label={schedule.enabled ? "暂停自动任务" : "恢复自动任务"}
         className="shrink-0 rounded-md p-1.5 text-[var(--ui-text-dim)] transition-colors hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)] disabled:opacity-40"
       >
         {schedule.enabled ? (

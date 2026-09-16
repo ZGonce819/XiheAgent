@@ -41,8 +41,8 @@ function AdminPage() {
   return (
     <AppShell
       user={session.data}
-      title="Admin"
-      description="Workspace-wide defaults and user mappings."
+      title="管理设置"
+      description="管理工作区全局默认值和用户映射。"
     >
       <GlobalDefaultsSection models={options.data?.models ?? []} />
 
@@ -82,8 +82,8 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
 
   return (
     <SettingsSection
-      title="User mappings"
-      description="Mappings are created when users connect Slack from settings. Admins can remove stale mappings here."
+      title="用户映射"
+      description="用户连接 Slack 时会创建映射，管理员可以在此移除失效记录。"
     >
       <div className="flex flex-col gap-3 p-4">
         {error && <span className="text-xs text-destructive">{error}</span>}
@@ -92,7 +92,7 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
           {mappings.isLoading ? (
             <Skeleton className="h-32" />
           ) : !items.length ? (
-            <p className="text-xs text-muted-foreground">No mappings yet.</p>
+            <p className="text-xs text-muted-foreground">暂无用户映射。</p>
           ) : (
             items.map((m: UserMapping) => (
               <div
@@ -113,7 +113,7 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
                   onClick={() => remove.mutate(m.github_login)}
                   disabled={remove.isPending}
                 >
-                  Remove
+                  移除
                 </Button>
               </div>
             ))
@@ -123,7 +123,7 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
         {total > PAGE_SIZE && (
           <div className="flex items-center justify-between pt-1 text-xs text-muted-foreground">
             <span>
-              {total} mapping{total === 1 ? "" : "s"} · page {page} of {pageCount}
+              共 {total} 条映射 · 第 {page}/{pageCount} 页
             </span>
             <div className="flex items-center gap-2">
               <Button
@@ -132,7 +132,7 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={page <= 1 || mappings.isFetching}
               >
-                Previous
+                上一页
               </Button>
               <Button
                 variant="outline"
@@ -140,7 +140,7 @@ function UserMappingsSection({ enabled }: { enabled: boolean }) {
                 onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
                 disabled={page >= pageCount || mappings.isFetching}
               >
-                Next
+                下一页
               </Button>
             </div>
           </div>
@@ -174,13 +174,13 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
 
   return (
     <SettingsSection
-      title="Global defaults"
-      description="Workspace-wide model defaults. Per-user XiheAgent selections override the agent defaults."
+      title="全局默认设置"
+      description="工作区级模型默认值；用户自己的 XiheAgent 选择会覆盖这些设置。"
     >
       <div className="divide-y divide-border">
         <RolePicker
           label="XiheAgent 智能体"
-          description="Model used for internal code-writing runs triggered from the dashboard or integrations."
+          description="用于从控制台或集成触发的代码编写任务。"
           models={models}
           model={settings.data?.default_agent_model ?? null}
           effort={settings.data?.default_agent_reasoning_effort ?? null}
@@ -196,7 +196,7 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
         />
         <RolePicker
           label="XiheAgent 子智能体"
-          description="Model used by delegated main-agent tasks."
+          description="用于主智能体委派的任务。"
           models={models}
           model={settings.data?.default_agent_subagent_model ?? null}
           effort={settings.data?.default_agent_subagent_reasoning_effort ?? null}
@@ -211,12 +211,12 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
           disabled={!settings.data || save.isPending}
         />
         <SettingsRow
-          label="Default Repository"
-          description="Global fallback used when a run has no explicit repo and the user has no profile default. Gitee URLs and owner/repo are supported."
+          label="默认仓库"
+          description="任务和用户均未指定仓库时使用，支持 Gitee URL 和 owner/repo 格式。"
           control={
             <Input
               className="w-56"
-              placeholder="https://gitee.com/owner/repo"
+              placeholder="owner/repo"
               value={defaultRepoDraft}
               onChange={(e) => setDefaultRepoDraft(e.target.value)}
               onBlur={() =>
@@ -231,8 +231,8 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
           }
         />
         <RolePicker
-          label="PR Reviewer"
-          description="Model used for PR review runs."
+          label="PR 审查器"
+          description="用于 PR 审查任务的模型。"
           models={models}
           model={settings.data?.default_reviewer_model ?? null}
           effort={settings.data?.default_reviewer_reasoning_effort ?? null}
@@ -247,8 +247,8 @@ function GlobalDefaultsSection({ models }: { models: Array<ModelOption> }) {
           disabled={!settings.data || save.isPending}
         />
         <RolePicker
-          label="PR Reviewer subagents"
-          description="Model used by delegated reviewer tasks."
+          label="PR 审查子智能体"
+          description="用于审查器委派任务的模型。"
           models={models}
           model={settings.data?.default_reviewer_subagent_model ?? null}
           effort={settings.data?.default_reviewer_subagent_reasoning_effort ?? null}
@@ -340,7 +340,7 @@ function RolePicker({
             disabled={disabled || !localModel}
           >
             <SelectTrigger className="w-28">
-              <SelectValue placeholder="effort" />
+              <SelectValue placeholder="推理强度" />
             </SelectTrigger>
             <SelectContent>
               {availableEfforts.map((e) => (
@@ -355,3 +355,4 @@ function RolePicker({
     />
   );
 }
+

@@ -7,12 +7,13 @@ import type { ModelSelection } from "@/lib/agents/useModelOptions";
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar";
 import { AgentsShell } from "@/components/agents/AgentsSidebar";
 import { MessageView } from "@/components/agents/ported";
-import { RunWorkflowSteps } from "@/components/agents/RunWorkflowSteps";
 import { useCancelAgentThread, useSendAgentMessage } from "@/lib/agents/queries";
 import { addPendingPrompt, dropPendingPrompts, getPendingPrompts } from "@/lib/agents/pendingPrompts";
 import { useAgentThreadStream } from "@/lib/agents/useThreadStream";
+import { normalizeThreadHistory } from "@/lib/agents/useThreadStream";
 import { useModelOptions } from "@/lib/agents/useModelOptions";
 import { agentsApi } from "@/lib/agents/api";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 interface AgentThreadViewProps {
   user: SessionUser;
@@ -102,12 +103,22 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   }, [models, thread.model, thread.effort]);
   const [selection, setSelection] = useState<ModelSelection | null>(null);
   const [pageDialog, setPageDialog] = useState<PageDialog | null>(null);
+  const [viewedVersionIndexes, setViewedVersionIndexes] = useState<Record<string, number>>({});
+  const [sendTransition, setSendTransition] = useState(false);
   const activeSelection = selection ?? threadSelection ?? defaultSelection;
 
   const showDialog = (dialog: Omit<PageDialog, "resolve">) =>
     new Promise<boolean>((resolve) => {
       setPageDialog({ ...dialog, resolve });
     });
+
+  useEffect(() => {
+    setViewedVersionIndexes({});
+  }, [thread.id]);
+
+  useEffect(() => {
+    if (thread.status === "running") setViewedVersionIndexes({});
+  }, [thread.status]);
 
   useEffect(() => {
     setPendingPrompts((prev) => {
@@ -145,18 +156,92 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
     return result;
   }, [thread.messages, pendingPrompts]);
 
-  const hasMessages = displayMessages.length > 0;
+  const conversationVersions = useMemo(
+    () =>
+      (thread.conversationVersions ?? []).map((version) => {
+        const normalized = normalizeThreadHistory({
+          ...thread,
+          messages: version.messages,
+          runEvents: version.runEvents,
+          conversationVersions: [],
+        });
+        return {
+          ...version,
+          messages: normalized.messages,
+          runEvents: normalized.runEvents ?? version.runEvents,
+          editedUserIndex: version.editedUserIndex ?? Math.max(0, normalized.messages.filter((message) => message.author === "user").length - 1),
+        };
+      }),
+    [thread, thread.conversationVersions],
+  );
+  const userMessages = displayMessages.filter((message) => message.author === "user");
+  const visibleMessages = useMemo(() => {
+    let result = displayMessages.slice();
+    const activeVersions = Object.entries(viewedVersionIndexes);
+    for (const [userIndexText, versionIndex] of activeVersions) {
+      const userIndex = Number(userIndexText);
+      const version = conversationVersions.filter((item) => item.editedUserIndex === userIndex)[versionIndex];
+      if (!version) continue;
+      const snapshotUsers = version.messages.filter((message) => message.author === "user");
+      const currentUserStart = result.findIndex((message) => message.author === "user" && userMessages.indexOf(message) === userIndex);
+      if (currentUserStart < 0) continue;
+      const currentUserEnd = result.findIndex((message, index) => index > currentUserStart && message.author === "user");
+      const snapshotUser = snapshotUsers[userIndex];
+      if (!snapshotUser) continue;
+      const snapshotStart = version.messages.findIndex((message) => message.id === snapshotUser.id);
+      const snapshotEnd = version.messages.findIndex((message, index) => index > snapshotStart && message.author === "user");
+      const replacement = version.messages.slice(snapshotStart, snapshotEnd < 0 ? version.messages.length : snapshotEnd);
+      result.splice(currentUserStart, (currentUserEnd < 0 ? result.length : currentUserEnd) - currentUserStart, ...replacement);
+    }
+    return result;
+  }, [displayMessages, conversationVersions, viewedVersionIndexes, userMessages]);
+  const isViewingCurrentVersion = Object.keys(viewedVersionIndexes).length === 0;
+  const versionNavigations = useMemo(() => {
+    const map: Record<string, { position: number; total: number; onPrevious: () => void; onNext: () => void }> = {};
+    userMessages.forEach((_userMessage, userIndex) => {
+      const versions = conversationVersions.filter((version) => version.editedUserIndex === userIndex);
+      if (versions.length === 0) return;
+      const currentIndex = viewedVersionIndexes[String(userIndex)] ?? versions.length;
+      const visibleUsers = visibleMessages.filter((message) => message.author === "user");
+      const visibleUserId = visibleUsers[userIndex]?.id;
+      const currentUserStart = visibleUserId
+        ? visibleMessages.findIndex((message) => message.id === visibleUserId)
+        : -1;
+      if (currentUserStart < 0) return;
+      const nextUserStart = visibleMessages.findIndex((message, index) => index > currentUserStart && message.author === "user");
+      const answer = visibleMessages
+        .slice(currentUserStart + 1, nextUserStart < 0 ? visibleMessages.length : nextUserStart)
+        .findLast((message) => message.author === "agent" && !message.executionNarration && message.chunks.some((chunk) => chunk.kind === "text" && chunk.text.trim()));
+      if (!answer) return;
+      const navigation = {
+        position: currentIndex + 1,
+        total: versions.length + 1,
+        onPrevious: () => setViewedVersionIndexes((prev) => ({ ...prev, [String(userIndex)]: Math.max(0, currentIndex - 1) })),
+        onNext: () => setViewedVersionIndexes((prev) => {
+          const next = currentIndex + 1;
+          const copy = { ...prev };
+          if (next >= versions.length) delete copy[String(userIndex)];
+          else copy[String(userIndex)] = next;
+          return copy;
+        }),
+      };
+      map[answer.id] = navigation;
+    });
+    return map;
+  }, [conversationVersions, userMessages, viewedVersionIndexes, visibleMessages]);
+
+  const hasMessages = visibleMessages.length > 0;
   const hasActiveRun = thread.status === "running";
   const isStreaming = hasActiveRun || pendingPrompts.length > 0;
   const runFailed = thread.status === "error";
   const sendError = sendMessage.error instanceof Error ? sendMessage.error.message : null;
   const liveStatus = liveStatusFor(thread, pendingPrompts.length > 0);
   const latestUserMessage = useMemo(() => {
-    for (let index = displayMessages.length - 1; index >= 0; index -= 1) {
-      if (displayMessages[index]?.author === "user") return displayMessages[index];
+    for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
+      if (visibleMessages[index]?.author === "user") return visibleMessages[index];
     }
     return null;
-  }, [displayMessages]);
+  }, [visibleMessages]);
   const handleEditMessage = async (message: Message, content: string) => {
     if (hasActiveRun || sendMessage.isPending) {
       await showDialog({
@@ -166,7 +251,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
       });
       return;
     }
-    if (!latestUserMessage || message.id !== latestUserMessage.id) return;
+    if (!isViewingCurrentVersion || !latestUserMessage || message.id !== latestUserMessage.id) return;
     let impact = "没有需要回退的任务或代码变更。\n是否使用编辑后的内容重新发送？";
     try {
       const originalContent = messageText(message);
@@ -189,6 +274,8 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
       cancelLabel: "取消",
     });
     if (!confirmed) return;
+    setSendTransition(true);
+    window.setTimeout(() => setSendTransition(false), 1100);
     const insertAt = Math.max(0, displayMessages.findIndex((item) => item.id === message.id));
     setPendingPrompts(addPendingPrompt(thread.id, content, insertAt, message.chunks.filter((chunk): chunk is ImageChunk => chunk.kind === "image")));
     sendMessage.mutate({
@@ -203,6 +290,8 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
     });
   };
   const handleSubmit = (content: string, images: Array<ImageChunk>) => {
+    setSendTransition(true);
+    window.setTimeout(() => setSendTransition(false), 1100);
     const insertAt = displayMessages.length;
     const nextPendingPrompts = addPendingPrompt(thread.id, content, insertAt, images);
     setPendingPrompts(nextPendingPrompts);
@@ -217,47 +306,68 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   return (
     <AgentsShell user={user} activeThreadId={thread.id}>
       <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--ui-border)] px-6 max-md:pl-14">
+          <div className="min-w-0">
+            <h1 className="truncate text-[0.9375rem] font-semibold text-[var(--ui-text)]">{thread.title || "新任务"}</h1>
+            {thread.repo ? (
+              <p className="flex items-center gap-1.5 truncate text-[0.6875rem] text-[color:var(--ui-text-muted)]">
+                {thread.platformDisplay ? <span className="shrink-0 rounded bg-[var(--ui-panel-2)] px-1 py-px text-[0.625rem] font-medium">{thread.platformDisplay}</span> : null}
+                <span className="truncate">{thread.repo}</span>
+              </p>
+            ) : <p className="text-[0.6875rem] text-[color:var(--ui-text-dim)]">未指定仓库</p>}
+          </div>
+          <span className="shrink-0 rounded-full bg-[var(--ui-accent-bubble)] px-2.5 py-1 text-[0.6875rem] text-[color:var(--ui-text-muted)]">{thread.status === "running" ? "运行中" : thread.status === "error" ? "失败" : "已完成"}</span>
+        </header>
         <div className="flex min-h-0 flex-1 flex-col">
           {hasMessages ? (
-            <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className={`relative flex min-h-0 flex-1 flex-col overflow-hidden ${sendTransition ? "send-transition" : ""}`}>
+              {sendTransition && (
+                <div className="pointer-events-none absolute inset-x-0 top-2 z-20 flex justify-center">
+                  <span className="send-transition-pill">正在发送指令…</span>
+                </div>
+              )}
               <MessageView
-                messages={displayMessages}
-                isStreaming={isStreaming}
-                contentWidthClass="max-w-3xl"
+                messages={visibleMessages}
+                threadId={thread.id}
+                isStreaming={isViewingCurrentVersion && isStreaming}
+                contentWidthClass="max-w-4xl"
                 liveStatus={liveStatus}
-                editableMessageId={!hasActiveRun ? latestUserMessage?.id : null}
+                editableMessageId={isViewingCurrentVersion && !hasActiveRun ? latestUserMessage?.id : null}
                 onEditMessage={handleEditMessage}
                 models={models}
                 selection={activeSelection}
                 onSelectionChange={setSelection}
+                versionNavigations={versionNavigations}
               />
-              {thread.runEvents && thread.runEvents.length > 0 && (
-                <div className="shrink-0 px-4">
-                  <div className="mx-auto w-full min-w-0 max-w-3xl">
-                    <RunWorkflowSteps
-                      runEvents={thread.runEvents}
-                      isRunning={hasActiveRun}
-                    />
-                  </div>
-                </div>
-              )}
               <div className="shrink-0 px-4 pb-4">
-                <div className="mx-auto w-full min-w-0 max-w-3xl">
+                <div className="mx-auto w-full min-w-0 max-w-4xl">
                   {runFailed ? (
-                    <p className="mb-3 text-sm text-red-600 dark:text-red-400">
+                    <p className="mb-3 text-sm text-[color:var(--ui-danger)]">
                       运行失败。请查看后端控制台日志。
                     </p>
                   ) : null}
                   {sendError ? (
-                    <p className="mb-3 text-sm text-red-600 dark:text-red-400">
+                    <p className="mb-3 text-sm text-[color:var(--ui-danger)]">
                       {sendError}
                     </p>
                   ) : null}
+                  {!isViewingCurrentVersion && (
+                    <div className="mb-3 flex items-center justify-between gap-3 border-l-2 border-[var(--ui-accent)] bg-[var(--ui-panel)] px-3 py-2 text-xs text-[color:var(--ui-text-muted)]">
+                      <span>正在查看编辑前的消息版本，此视图只读。</span>
+                      <button
+                        type="button"
+                        onClick={() => setViewedVersionIndexes({})}
+                        className="shrink-0 font-medium text-[color:var(--ui-accent)] hover:underline"
+                      >
+                        返回当前版本
+                      </button>
+                    </div>
+                  )}
                   <AgentPromptBar
-                    placeholder="继续输入指令"
+                    placeholder={isViewingCurrentVersion ? "继续输入指令" : "历史版本不可发送"}
                     compact
                     busy={hasActiveRun}
-                    disabled={sendMessage.isPending}
+                    disabled={sendMessage.isPending || !isViewingCurrentVersion}
                     onSubmit={handleSubmit}
                     onStop={() => cancelThread.mutate()}
                     stopping={cancelThread.isPending}
@@ -269,27 +379,20 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
               </div>
             </div>
           ) : (
-            <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
+            <div className="flex min-h-0 flex-1 flex-col px-4">
+              <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 px-2">
               <p className="text-sm text-[var(--ui-text-dim)]">当前线程还没有消息。</p>
               {runFailed ? (
-                <p className="text-sm text-red-600 dark:text-red-400">
+                <p className="text-sm text-[color:var(--ui-danger)]">
                   运行失败。请查看后端控制台日志。
                 </p>
               ) : null}
               {sendError ? (
-                <p className="text-sm text-red-600 dark:text-red-400">
+                <p className="text-sm text-[color:var(--ui-danger)]">
                   {sendError}
                 </p>
               ) : null}
-              {thread.runEvents && thread.runEvents.length > 0 && (
-                <div className="w-full max-w-3xl">
-                  <RunWorkflowSteps
-                    runEvents={thread.runEvents}
-                    isRunning={hasActiveRun}
-                  />
-                </div>
-              )}
-              <div className="w-full max-w-3xl">
+              <div className="w-full max-w-4xl">
                 <AgentPromptBar
                   placeholder="发送第一条指令"
                   compact
@@ -303,48 +406,32 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                   onSelectionChange={setSelection}
                 />
               </div>
+              </div>
             </div>
           )}
         </div>
       </div>
       {pageDialog && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/35 p-4" role="presentation">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="edit-dialog-title"
-            className="w-[min(28rem,calc(100vw-2rem))] rounded-lg border border-[var(--ui-border)] bg-[var(--ui-panel)] p-5 text-[color:var(--ui-text)] shadow-2xl"
-          >
-            <h2 id="edit-dialog-title" className="text-sm font-semibold">{pageDialog.title}</h2>
-            <p className="mt-3 whitespace-pre-line text-sm leading-6 text-[color:var(--ui-text-muted)]">{pageDialog.message}</p>
-            <div className="mt-5 flex justify-end gap-2">
-              {pageDialog.cancelLabel && (
-                <button
-                  type="button"
-                  className="rounded-md px-3 py-1.5 text-xs text-[color:var(--ui-text-muted)] hover:bg-[var(--ui-panel-2)]"
-                  onClick={() => {
-                    pageDialog.resolve(false);
-                    setPageDialog(null);
-                  }}
-                >
-                  {pageDialog.cancelLabel}
-                </button>
-              )}
-              <button
-                type="button"
-                autoFocus
-                className="rounded-md bg-[var(--ui-accent)] px-3 py-1.5 text-xs text-white hover:opacity-90"
-                onClick={() => {
-                  pageDialog.resolve(true);
-                  setPageDialog(null);
-                }}
-              >
-                {pageDialog.confirmLabel ?? "确定"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          open
+          title={pageDialog.title}
+          description={pageDialog.message}
+          confirmText={pageDialog.confirmLabel ?? "确定"}
+          cancelText={pageDialog.cancelLabel ?? "取消"}
+          showCancel={Boolean(pageDialog.cancelLabel)}
+          destructive={pageDialog.title.includes("回退")}
+          onOpenChange={(open) => {
+            if (open) return;
+            pageDialog.resolve(false);
+            setPageDialog(null);
+          }}
+          onConfirm={() => {
+            pageDialog.resolve(true);
+            setPageDialog(null);
+          }}
+        />
       )}
     </AgentsShell>
   );
 }
+

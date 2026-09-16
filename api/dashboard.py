@@ -90,6 +90,40 @@ def dashboard_options() -> dict[str, Any]:
     }
 
 
+@dashboard_router.get("/profile")
+def dashboard_profile() -> dict[str, Any]:
+    """返回当前用户的默认工作台配置。
+
+    配置存储尚未启用时返回稳定的环境默认值，确保前端首屏不会因
+    可选配置缺失而失败。
+    """
+    model = get_env("MAIN_MODEL", "deepseek-v4-pro")
+    return {
+        "default_model": model,
+        "reasoning_effort": "default",
+        "default_subagent_model": model,
+        "subagent_reasoning_effort": "default",
+        "default_repo": None,
+        "base_branch": "main",
+        "branch_prefix": "codex/",
+        "auto_fix_ci": False,
+        "create_prs": True,
+        "review_draft_prs": None,
+    }
+
+
+@dashboard_router.get("/repos")
+def dashboard_repos() -> dict[str, Any]:
+    """返回可用代码仓库列表。"""
+    return {"installations": [], "repositories": []}
+
+
+@dashboard_router.get("/my-mapping")
+def dashboard_my_mapping() -> dict[str, Any]:
+    """返回当前用户的外部账号映射；未配置时返回空对象。"""
+    return {}
+
+
 @dashboard_router.get("/threads")
 def dashboard_threads(limit: int = 50) -> list[dict[str, Any]]:
     """返回会话列表。
@@ -177,7 +211,7 @@ async def dashboard_stream_existing_message(
                 rollback_run(repo_url, latest_run, get_store())
             except RuntimeError as exc:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
-        snapshot = conversation_snapshot(task)
+        snapshot = conversation_snapshot(task, edited_message_id=body.edit_message_id)
         if body.edit_snapshot:
             snapshot["messages"] = body.edit_snapshot
         get_store().add_conversation_version(thread_id, snapshot)
@@ -187,6 +221,7 @@ async def dashboard_stream_existing_message(
             repo_url=repo_url,
             content=body.content,
             rollback_message_id=body.edit_message_id,
+            rollback_message_content=body.edit_message_content,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

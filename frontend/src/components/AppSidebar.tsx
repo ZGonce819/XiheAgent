@@ -29,11 +29,11 @@ interface NavItem {
 }
 
 const NAV: Array<NavItem> = [
-  { to: "/my-settings", label: "Profile Settings", icon: IoOptionsOutline },
+  { to: "/my-settings", label: "个人设置", icon: IoOptionsOutline },
   { to: "/cloud-agents", label: "XiheAgent 智能体", icon: IoCloudOutline },
-  { to: "/review", label: "PR Review", icon: IoGitPullRequestOutline },
-  { to: "/usage", label: "Usage", icon: IoStatsChartOutline },
-  { to: "/admin", label: "Admin", icon: IoSettingsOutline, adminOnly: true },
+  { to: "/review", label: "代码审查", icon: IoGitPullRequestOutline },
+  { to: "/usage", label: "使用统计", icon: IoStatsChartOutline },
+  { to: "/admin", label: "管理设置", icon: IoSettingsOutline, adminOnly: true },
 ];
 
 export function AppSidebar({ user }: { user: SessionUser }) {
@@ -60,7 +60,7 @@ export function AppSidebar({ user }: { user: SessionUser }) {
           )}
         >
           <IoArrowBackOutline className="size-4" />
-          <span>返回智能体</span>
+          <span>返回任务</span>
         </Link>
         {NAV.filter((n) => !n.adminOnly || user.is_admin).map((item) => {
           const Icon = item.icon;

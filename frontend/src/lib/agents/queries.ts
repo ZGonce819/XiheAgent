@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 
 import { agentsApi } from "./api"
-import { addPendingPrompt, dropPendingPrompts } from "./pendingPrompts"
+import { addPendingPrompt } from "./pendingPrompts"
 import {
   handleStreamPart,
   normalizeThreadHistory,
@@ -11,13 +11,6 @@ import {
 } from "./useThreadStream"
 import type { ScheduleUpdateRequest } from "./api"
 import type { AgentThread, ImageChunk, Message } from "./types"
-
-function messageText(message: { chunks: Array<{ kind: string; text?: string }> }): string {
-  return message.chunks
-    .filter((chunk) => chunk.kind === "text")
-    .map((chunk) => chunk.text ?? "")
-    .join("")
-}
 
 export const agentThreadKeys = {
   all: ["agent-threads"] as const,
@@ -166,6 +159,14 @@ export function useCreateAgentThread() {
       }
 
       if (capturedThreadId) {
+        const completedThread = normalizeThreadHistory(
+          await agentsApi.getThread(capturedThreadId),
+        )
+        await agentsApi.saveViewSnapshot(capturedThreadId, completedThread.messages)
+        queryClient.setQueryData(
+          agentThreadKeys.detail(capturedThreadId),
+          completedThread,
+        )
         navigate({ to: "/agents/$threadId", params: { threadId: capturedThreadId } })
       }
       return capturedThreadId
@@ -215,7 +216,13 @@ export function useSendAgentMessage(threadId: string) {
         rollback_confirmed: vars.rollback_confirmed,
       })
       await processStreamResponse(response, queryClient)
-      return queryClient.getQueryData<AgentThread>(agentThreadKeys.detail(threadId))
+      const completedThread = queryClient.getQueryData<AgentThread>(
+        agentThreadKeys.detail(threadId),
+      )
+      if (completedThread) {
+        await agentsApi.saveViewSnapshot(threadId, completedThread.messages)
+      }
+      return completedThread
     },
     onSuccess: (thread) => {
       if (!thread) return

@@ -39,12 +39,12 @@ export function SlackConnectDialog() {
             <div className="flex items-center gap-3">
               <IoLogoSlack className="size-6 shrink-0 text-muted-foreground" />
               <Dialog.Title className="text-base font-semibold">
-                Connect your Slack account
+                连接 Slack 账号
               </Dialog.Title>
             </div>
             <Dialog.Description className="text-sm text-muted-foreground">
-              Connect Slack only if you plan to trigger XiheAgent from Slack.
-              Manual Gitee tasks use the service-side repository token.
+              仅当你计划从 Slack 触发 XiheAgent 时才需要连接。手动 Gitee
+              任务使用服务端仓库令牌。
             </Dialog.Description>
             <div className="mt-2 flex justify-end gap-2">
               <Button
@@ -52,14 +52,14 @@ export function SlackConnectDialog() {
                 size="sm"
                 onClick={() => setDismissed(true)}
               >
-                Maybe later
+                稍后再说
               </Button>
               <Button
                 size="sm"
                 onClick={() => window.location.assign(slackConnectUrl())}
               >
                 <IoLogoSlack className="size-4" />
-                Connect Slack
+                连接 Slack
               </Button>
             </div>
           </div>

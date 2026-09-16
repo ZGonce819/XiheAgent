@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { FolderGit2 } from "lucide-react"
 
 import type { ModelSelection } from "@/lib/agents/useModelOptions"
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar"
@@ -28,11 +29,23 @@ export function AgentsHome() {
       : repoOverride
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col overflow-y-auto px-6 py-8">
+    <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
       <SlackConnectDialog />
-      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center">
-        <div className="flex w-full flex-col items-center gap-6">
-          <Logo />
+      <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--ui-border)] px-5 md:px-8 max-md:pl-14">
+        <div className="flex items-center gap-3">
+          <FolderGit2 className="size-4 text-[color:var(--ui-text-dim)]" />
+          <h1 className="text-sm font-medium text-[color:var(--ui-text)]">新任务</h1>
+        </div>
+        <span className="text-[0.6875rem] text-[color:var(--ui-text-dim)]">本地工作区</span>
+      </header>
+      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-5 pt-[18vh] pb-12 md:px-8 max-md:pt-28">
+        <div className="mb-5 flex items-end justify-between gap-4 border-b border-[var(--ui-border)] pb-3">
+          <div>
+            <Logo className="h-auto" />
+            <p className="mt-1 text-xs text-[color:var(--ui-text-dim)]">本地代码任务</p>
+          </div>
+        </div>
+        <div className="w-full">
           <AgentPromptBar
             onSubmit={(prompt, images) =>
               createThread.mutate({
@@ -53,12 +66,12 @@ export function AgentsHome() {
             onRepoChange={setRepoOverride}
           />
           {createError ? (
-            <p className="w-full text-sm text-red-600 dark:text-red-400">
+            <p className="mt-3 w-full border-l-2 border-[var(--ui-danger)] bg-[var(--ui-panel)] px-3 py-2 text-sm text-[color:var(--ui-danger)]">
               {createError}
             </p>
           ) : null}
         </div>
-      </div>
+      </main>
     </div>
   )
 }

@@ -13,6 +13,7 @@
   --ui-sidebar: oklch(0.985 0.002 220);
   --ui-sidebar-hover: oklch(0.955 0.008 250);
   --ui-success: oklch(0.6 0.17 145);
+  --ui-warning: oklch(0.66 0.16 75);
   --ui-danger: oklch(0.58 0.22 25);
 }
 
@@ -32,14 +33,16 @@
   --ui-sidebar: oklch(0.18 0.01 250);
   --ui-sidebar-hover: oklch(0.26 0.015 250);
   --ui-success: oklch(0.6 0.17 145);
+  --ui-warning: oklch(0.74 0.14 75);
   --ui-danger: oklch(0.7 0.18 22);
 }
 
 .agents-ui {
   color: var(--ui-text);
   background: var(--ui-bg);
-  font-size: 13px;
-  line-height: 1.45;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  letter-spacing: 0;
 }
 
 .agents-ui * {
@@ -51,20 +54,91 @@
   scrollbar-color: oklch(0.4 0.01 250) transparent;
 }
 
-.agents-ui .shimmer-text {
-  background: linear-gradient(90deg, var(--ui-text-dim) 40%, var(--ui-accent) 50%, var(--ui-text-dim) 60%);
-  background-size: 200% auto;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  animation: agents-shimmer 4s linear infinite;
+.agents-spinner {
+  animation: agents-spin 0.85s linear infinite;
+}
+.agents-scroll-loader {
+  position: absolute;
+  inset: -1px;
+  border: 1.5px solid color-mix(in oklab, var(--ui-accent) 12%, transparent);
+  border-top-color: color-mix(in oklab, var(--ui-accent) 92%, white 8%);
+  border-right-color: color-mix(in oklab, var(--ui-accent) 56%, transparent);
+  border-radius: 999px;
+  pointer-events: none;
+  opacity: 0.92;
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--ui-panel-2) 72%, transparent);
+  animation: agents-spin 0.85s linear infinite;
 }
 
-@keyframes agents-shimmer {
-  0% {
-    background-position: 200% center;
+.agents-task-panel {
+  animation: agents-panel-in 180ms ease-out both;
+}
+
+.message-enter {
+  animation: message-enter 280ms cubic-bezier(.22,1,.36,1) both;
+}
+
+.send-transition > *:not(.send-transition-pill) {
+  animation: send-content-in 1100ms cubic-bezier(.22,1,.36,1) both;
+}
+
+.send-transition-pill {
+  border: 1px solid var(--ui-border);
+  border-radius: 999px;
+  background: var(--ui-surface);
+  color: var(--ui-text-muted);
+  box-shadow: 0 6px 18px rgb(30 45 70 / 12%);
+  padding: 5px 12px;
+  font-size: 0.6875rem;
+  animation: send-pill-in 1100ms cubic-bezier(.22,1,.36,1) both;
+}
+
+@keyframes send-content-in {
+  from { opacity: .35; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes send-pill-in {
+  0% { opacity: 0; transform: translateY(-8px) scale(.94); }
+  22% { opacity: 1; transform: translateY(0) scale(1); }
+  78% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-4px) scale(.98); }
+}
+
+.agents-ui button,
+.agents-ui textarea,
+.agents-ui input {
+  transition-timing-function: cubic-bezier(.22,1,.36,1);
+}
+
+@keyframes message-enter {
+  from { opacity: 0; transform: translateY(10px); filter: blur(2px); }
+  to { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+
+@keyframes agents-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
   }
-  100% {
-    background-position: -200% center;
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
+
+@keyframes agents-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agents-spinner,
+  .agents-scroll-loader,
+  .agents-task-panel,
+  .message-enter {
+    animation: none;
+  }
+  .send-transition > *:not(.send-transition-pill),
+  .send-transition-pill { animation: none; }
+}
+

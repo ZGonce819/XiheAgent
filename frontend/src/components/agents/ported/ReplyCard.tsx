@@ -43,7 +43,7 @@ function isSlackBlockArray(value: unknown): value is SlackBlock[] {
   )
 }
 
-// Slack mrkdwn isn't standard Markdown — rewrite its link/mention syntax for display
+// Slack mrkdwn isn't standard Markdown - rewrite its link/mention syntax for display
 // rather than feeding it to the Markdown renderer (which mis-renders *bold* etc.).
 function renderSlackBody(text: string): Array<ReactNode> {
   const nodes: Array<ReactNode> = []
@@ -142,7 +142,7 @@ function renderSlackBlocks(blocks: SlackBlock[]): ReactNode {
                 return (
                   <span
                     key={elementIndex}
-                    className="rounded-md border border-[var(--ui-border)] bg-[var(--ui-panel)] px-2 py-1 text-[12px] text-[color:var(--ui-text)]"
+                    className="rounded-md border border-[var(--ui-border)] bg-[var(--ui-panel)] px-2 py-1 text-[0.75rem] text-[color:var(--ui-text)]"
                   >
                     {label}
                   </span>
@@ -178,13 +178,13 @@ export const ReplyCard = memo(function ReplyCard({ chunk }: ReplyCardProps) {
 
   return (
     <div className="my-1">
-      <div className="flex items-center gap-1.5 py-1 text-[12px] text-[color:var(--ui-text-muted)]">
+      <div className="flex items-center gap-1.5 py-1 text-[0.75rem] text-[color:var(--ui-text-muted)]">
         <MessageCircle className="h-3.5 w-3.5 shrink-0" aria-hidden />
         <span>{headerLabel(isLinear, chunk.status)}</span>
       </div>
       {body && (
-        <div className="overflow-hidden rounded-xl bg-[var(--ui-accent-bubble)]">
-          <div className="max-h-[250px] overflow-auto px-3 py-2 text-[13px] text-[color:var(--ui-text)]">
+        <div className="overflow-hidden rounded-lg bg-[var(--ui-accent-bubble)]">
+          <div className="max-h-[250px] overflow-auto px-3 py-2 text-[0.8125rem] text-[color:var(--ui-text)]">
             {isLinear ? (
               <Markdown content={body} />
             ) : blocks ? (

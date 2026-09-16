@@ -53,7 +53,7 @@ export const ShellCommand = memo(function ShellCommand({
         onClick={() => setExpanded((prev) => !prev)}
         className="w-full flex items-center gap-2 py-1 text-left hover:opacity-90 transition-opacity"
       >
-        <span className="text-[color:var(--ui-text-muted)] text-[12px] truncate flex-1 min-w-0">
+        <span className="text-[color:var(--ui-text-muted)] text-[0.75rem] truncate flex-1 min-w-0">
           {headerText}
         </span>
         <span
@@ -65,7 +65,7 @@ export const ShellCommand = memo(function ShellCommand({
       </button>
 
       {expanded && (
-        <div className="rounded-xl bg-[var(--ui-accent-bubble)] mt-1 overflow-hidden max-h-[250px] flex flex-col">
+        <div className="mt-1 flex max-h-[250px] flex-col overflow-hidden rounded-lg bg-[var(--ui-accent-bubble)]">
           <div className="px-3 pt-2 pb-1 font-mono text-xs shrink-0">
             <div className="text-[color:var(--ui-text-dim)] mb-2">bash</div>
             {cwd && <div className="text-[color:var(--ui-text-dim)] mb-2">cwd: {cwd}</div>}
@@ -88,16 +88,16 @@ export const ShellCommand = memo(function ShellCommand({
           )}
           <div className="px-3 py-1.5 flex justify-end shrink-0">
             {chunk.status === "in_progress" && (
-              <span className="text-yellow-400 text-xs">运行中...</span>
+              <span className="text-xs text-[color:var(--ui-warning)]">运行中...</span>
             )}
             {chunk.status === "completed" && (
               <span className="text-[color:var(--ui-text-muted)] text-xs">✓ 成功</span>
             )}
             {chunk.status === "error" && (
-              <span className="text-red-400 text-xs">✗ 失败</span>
+              <span className="text-xs text-[color:var(--ui-danger)]">失败</span>
             )}
             {chunk.status === "pending" && (
-              <span className="text-yellow-400 text-xs">等待批准...</span>
+              <span className="text-xs text-[color:var(--ui-warning)]">等待批准...</span>
             )}
           </div>
         </div>

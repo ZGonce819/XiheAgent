@@ -9,56 +9,26 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as UsageRouteImport } from './routes/usage'
-import { Route as ReviewRouteImport } from './routes/review'
-import { Route as MySettingsRouteImport } from './routes/my-settings'
-import { Route as LoginRouteImport } from './routes/login'
-import { Route as IntegrationsRouteImport } from './routes/integrations'
-import { Route as CloudAgentsRouteImport } from './routes/cloud-agents'
-import { Route as AgentsRouteImport } from './routes/agents'
-import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AdminRouteImport } from './routes/admin'
+import { Route as AgentsRouteImport } from './routes/agents'
+import { Route as CloudAgentsRouteImport } from './routes/cloud-agents'
+import { Route as IntegrationsRouteImport } from './routes/integrations'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as MySettingsRouteImport } from './routes/my-settings'
+import { Route as ReviewRouteImport } from './routes/review'
+import { Route as UsageRouteImport } from './routes/usage'
 import { Route as AgentsIndexRouteImport } from './routes/agents/index'
-import { Route as ReviewStylesRouteImport } from './routes/review_.styles'
 import { Route as AgentsThreadIdRouteImport } from './routes/agents/$threadId'
+import { Route as ReviewStylesRouteImport } from './routes/review_.styles'
 import { Route as AgentsAutomationsIndexRouteImport } from './routes/agents/automations/index'
-import { Route as ReviewRepositoriesOwnerRouteImport } from './routes/review_.repositories.$owner'
-import { Route as AgentsAutomationsNewRouteImport } from './routes/agents/automations/new'
 import { Route as AgentsAutomationsScheduleIdRouteImport } from './routes/agents/automations/$scheduleId'
+import { Route as AgentsAutomationsNewRouteImport } from './routes/agents/automations/new'
+import { Route as ReviewRepositoriesOwnerRouteImport } from './routes/review_.repositories.$owner'
 
-const UsageRoute = UsageRouteImport.update({
-  id: '/usage',
-  path: '/usage',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ReviewRoute = ReviewRouteImport.update({
-  id: '/review',
-  path: '/review',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MySettingsRoute = MySettingsRouteImport.update({
-  id: '/my-settings',
-  path: '/my-settings',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LoginRoute = LoginRouteImport.update({
-  id: '/login',
-  path: '/login',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const IntegrationsRoute = IntegrationsRouteImport.update({
-  id: '/integrations',
-  path: '/integrations',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CloudAgentsRoute = CloudAgentsRouteImport.update({
-  id: '/cloud-agents',
-  path: '/cloud-agents',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AgentsRoute = AgentsRouteImport.update({
-  id: '/agents',
-  path: '/agents',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminRoute = AdminRouteImport.update({
@@ -66,9 +36,39 @@ const AdminRoute = AdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const AgentsRoute = AgentsRouteImport.update({
+  id: '/agents',
+  path: '/agents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CloudAgentsRoute = CloudAgentsRouteImport.update({
+  id: '/cloud-agents',
+  path: '/cloud-agents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IntegrationsRoute = IntegrationsRouteImport.update({
+  id: '/integrations',
+  path: '/integrations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MySettingsRoute = MySettingsRouteImport.update({
+  id: '/my-settings',
+  path: '/my-settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReviewRoute = ReviewRouteImport.update({
+  id: '/review',
+  path: '/review',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const UsageRoute = UsageRouteImport.update({
+  id: '/usage',
+  path: '/usage',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentsIndexRoute = AgentsIndexRouteImport.update({
@@ -76,29 +76,19 @@ const AgentsIndexRoute = AgentsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AgentsRoute,
 } as any)
-const ReviewStylesRoute = ReviewStylesRouteImport.update({
-  id: '/review_/styles',
-  path: '/review/styles',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AgentsThreadIdRoute = AgentsThreadIdRouteImport.update({
   id: '/$threadId',
   path: '/$threadId',
   getParentRoute: () => AgentsRoute,
 } as any)
+const ReviewStylesRoute = ReviewStylesRouteImport.update({
+  id: '/review_/styles',
+  path: '/review/styles',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AgentsAutomationsIndexRoute = AgentsAutomationsIndexRouteImport.update({
   id: '/automations/',
   path: '/automations/',
-  getParentRoute: () => AgentsRoute,
-} as any)
-const ReviewRepositoriesOwnerRoute = ReviewRepositoriesOwnerRouteImport.update({
-  id: '/review_/repositories/$owner',
-  path: '/review/repositories/$owner',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AgentsAutomationsNewRoute = AgentsAutomationsNewRouteImport.update({
-  id: '/automations/new',
-  path: '/automations/new',
   getParentRoute: () => AgentsRoute,
 } as any)
 const AgentsAutomationsScheduleIdRoute =
@@ -107,6 +97,16 @@ const AgentsAutomationsScheduleIdRoute =
     path: '/automations/$scheduleId',
     getParentRoute: () => AgentsRoute,
   } as any)
+const AgentsAutomationsNewRoute = AgentsAutomationsNewRouteImport.update({
+  id: '/automations/new',
+  path: '/automations/new',
+  getParentRoute: () => AgentsRoute,
+} as any)
+const ReviewRepositoriesOwnerRoute = ReviewRepositoriesOwnerRouteImport.update({
+  id: '/review_/repositories/$owner',
+  path: '/review/repositories/$owner',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -234,53 +234,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/usage': {
-      id: '/usage'
-      path: '/usage'
-      fullPath: '/usage'
-      preLoaderRoute: typeof UsageRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/review': {
-      id: '/review'
-      path: '/review'
-      fullPath: '/review'
-      preLoaderRoute: typeof ReviewRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/my-settings': {
-      id: '/my-settings'
-      path: '/my-settings'
-      fullPath: '/my-settings'
-      preLoaderRoute: typeof MySettingsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/login': {
-      id: '/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof LoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/integrations': {
-      id: '/integrations'
-      path: '/integrations'
-      fullPath: '/integrations'
-      preLoaderRoute: typeof IntegrationsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/cloud-agents': {
-      id: '/cloud-agents'
-      path: '/cloud-agents'
-      fullPath: '/cloud-agents'
-      preLoaderRoute: typeof CloudAgentsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/agents': {
-      id: '/agents'
-      path: '/agents'
-      fullPath: '/agents'
-      preLoaderRoute: typeof AgentsRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin': {
@@ -290,11 +248,53 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/agents': {
+      id: '/agents'
+      path: '/agents'
+      fullPath: '/agents'
+      preLoaderRoute: typeof AgentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cloud-agents': {
+      id: '/cloud-agents'
+      path: '/cloud-agents'
+      fullPath: '/cloud-agents'
+      preLoaderRoute: typeof CloudAgentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/integrations': {
+      id: '/integrations'
+      path: '/integrations'
+      fullPath: '/integrations'
+      preLoaderRoute: typeof IntegrationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/my-settings': {
+      id: '/my-settings'
+      path: '/my-settings'
+      fullPath: '/my-settings'
+      preLoaderRoute: typeof MySettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/review': {
+      id: '/review'
+      path: '/review'
+      fullPath: '/review'
+      preLoaderRoute: typeof ReviewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/usage': {
+      id: '/usage'
+      path: '/usage'
+      fullPath: '/usage'
+      preLoaderRoute: typeof UsageRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agents/': {
@@ -304,19 +304,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsIndexRouteImport
       parentRoute: typeof AgentsRoute
     }
-    '/review_/styles': {
-      id: '/review_/styles'
-      path: '/review/styles'
-      fullPath: '/review/styles'
-      preLoaderRoute: typeof ReviewStylesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/agents/$threadId': {
       id: '/agents/$threadId'
       path: '/$threadId'
       fullPath: '/agents/$threadId'
       preLoaderRoute: typeof AgentsThreadIdRouteImport
       parentRoute: typeof AgentsRoute
+    }
+    '/review_/styles': {
+      id: '/review_/styles'
+      path: '/review/styles'
+      fullPath: '/review/styles'
+      preLoaderRoute: typeof ReviewStylesRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/agents/automations/': {
       id: '/agents/automations/'
@@ -325,12 +325,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsAutomationsIndexRouteImport
       parentRoute: typeof AgentsRoute
     }
-    '/review_/repositories/$owner': {
-      id: '/review_/repositories/$owner'
-      path: '/review/repositories/$owner'
-      fullPath: '/review/repositories/$owner'
-      preLoaderRoute: typeof ReviewRepositoriesOwnerRouteImport
-      parentRoute: typeof rootRouteImport
+    '/agents/automations/$scheduleId': {
+      id: '/agents/automations/$scheduleId'
+      path: '/automations/$scheduleId'
+      fullPath: '/agents/automations/$scheduleId'
+      preLoaderRoute: typeof AgentsAutomationsScheduleIdRouteImport
+      parentRoute: typeof AgentsRoute
     }
     '/agents/automations/new': {
       id: '/agents/automations/new'
@@ -339,12 +339,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsAutomationsNewRouteImport
       parentRoute: typeof AgentsRoute
     }
-    '/agents/automations/$scheduleId': {
-      id: '/agents/automations/$scheduleId'
-      path: '/automations/$scheduleId'
-      fullPath: '/agents/automations/$scheduleId'
-      preLoaderRoute: typeof AgentsAutomationsScheduleIdRouteImport
-      parentRoute: typeof AgentsRoute
+    '/review_/repositories/$owner': {
+      id: '/review_/repositories/$owner'
+      path: '/review/repositories/$owner'
+      fullPath: '/review/repositories/$owner'
+      preLoaderRoute: typeof ReviewRepositoriesOwnerRouteImport
+      parentRoute: typeof rootRouteImport
     }
   }
 }

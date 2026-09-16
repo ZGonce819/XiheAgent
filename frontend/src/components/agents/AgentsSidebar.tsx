@@ -10,7 +10,7 @@ import {
 } from "@phosphor-icons/react"
 import { IoLogoGithub, IoLogoSlack } from "react-icons/io5"
 import { SiLinear } from "react-icons/si"
-import type { ComponentType, SVGProps } from "react"
+import { useState, type ComponentType, type SVGProps } from "react"
 
 import type { SessionUser } from "@/lib/api"
 import type { AgentSource, AgentThread } from "@/lib/agents/types"
@@ -24,6 +24,7 @@ import { groupThreads } from "@/lib/agents/api"
 import { useAgentThreads, useDeleteAgentThread } from "@/lib/agents/queries"
 import { cn } from "@/lib/utils"
 import { Logo } from "@/components/agents/ported/Logo"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 
 type SourceIcon = ComponentType<SVGProps<SVGSVGElement>>
 
@@ -142,7 +143,7 @@ function ThreadGroup({
 
   return (
     <div className="mb-3">
-      <div className="px-2 py-1 text-[10px] font-semibold tracking-wide text-[var(--ui-text-dim)] uppercase">
+      <div className="px-2 py-1 text-[0.625rem] font-semibold tracking-wide text-[var(--ui-text-dim)] uppercase">
         {label}
       </div>
       {threads.map((thread) => (
@@ -167,6 +168,7 @@ function ThreadRow({
   onNavigate?: () => void
 }) {
   const deleteThread = useDeleteAgentThread()
+  const [deleteOpen, setDeleteOpen] = useState(false)
   const badge =
     thread.diffStats && thread.diffStats.additions > 0
       ? `+${thread.diffStats.additions}`
@@ -178,9 +180,7 @@ function ThreadRow({
     e.preventDefault()
     e.stopPropagation()
     if (isDeleting) return
-    if (!window.confirm(`Delete "${thread.title}"? This cannot be undone.`))
-      return
-    deleteThread.mutate(thread.id)
+    setDeleteOpen(true)
   }
 
   const source =
@@ -190,6 +190,7 @@ function ThreadRow({
   const SourceIcon = source?.icon
 
   return (
+    <>
     <Link
       to="/agents/$threadId"
       params={{ threadId: thread.id }}
@@ -222,13 +223,13 @@ function ThreadRow({
       )}
       <span className="min-w-0 flex-1 truncate text-xs">{thread.title}</span>
       {badge && (
-        <span className="shrink-0 rounded bg-[var(--ui-panel-2)] px-1.5 py-0.5 text-[10px] text-[var(--ui-text-dim)] group-hover:hidden">
+        <span className="shrink-0 rounded bg-[var(--ui-panel-2)] px-1.5 py-0.5 text-[0.625rem] text-[var(--ui-text-dim)] group-hover:hidden">
           {badge}
         </span>
       )}
       <button
         type="button"
-        aria-label="Delete thread"
+        aria-label="删除会话"
         onClick={onDelete}
         disabled={isDeleting}
         className="hidden size-4 shrink-0 items-center justify-center rounded text-[var(--ui-text-dim)] group-hover:flex hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
@@ -236,6 +237,19 @@ function ThreadRow({
         <XIcon className="size-3" weight="bold" />
       </button>
     </Link>
+    <ConfirmDialog
+      open={deleteOpen}
+      title="删除会话"
+      description={`将永久删除“${thread.title}”及其历史记录，此操作无法撤销。`}
+      confirmText="删除"
+      destructive
+      busy={isDeleting}
+      onOpenChange={setDeleteOpen}
+      onConfirm={() =>
+        deleteThread.mutate(thread.id, { onSuccess: () => setDeleteOpen(false) })
+      }
+    />
+    </>
   )
 }
 

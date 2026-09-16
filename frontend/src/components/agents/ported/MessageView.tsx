@@ -1,6 +1,6 @@
-// @ts-nocheck — ported from open-swe-app (Electron); strict checks applied when wiring cloud APIs.
+// @ts-nocheck - ported from open-swe-app (Electron); strict checks applied when wiring cloud APIs.
 import { useRef, useEffect, useLayoutEffect, useCallback, memo, useMemo, useState } from "react";
-import { ChevronDown, ChevronUp, Copy, Pencil, ArrowUp, X } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Copy, LoaderCircle, Pencil, ArrowUp, X } from "lucide-react";
 import { diffLines } from "diff";
 import { MultiFileDiff } from "@pierre/diffs/react";
 import { diffOptions } from "@/components/agents/utils/diffUtils";
@@ -19,6 +19,8 @@ import type {
 } from "@/lib/agents/types";
 import type { ModelOption } from "@/lib/api";
 import type { ModelSelection } from "@/lib/agents/useModelOptions";
+import { groupConversationMessages } from "@/lib/agents/messageGroups";
+import { cn } from "@/lib/utils";
 
 type RenderItem =
   | { type: "text-chunk"; key: string; chunk: Chunk }
@@ -209,11 +211,11 @@ const TurnChangedFilesCard = memo(function TurnChangedFilesCard({
   }, []);
 
   return (
-    <div className="mt-3 rounded-xl bg-[var(--ui-accent-bubble)] overflow-hidden">
+    <div className="mt-3 overflow-hidden rounded-xl bg-[var(--ui-accent-bubble)]">
       <div className="px-3 py-2 text-xs text-[color:var(--ui-text-muted)] border-b border-[var(--ui-border)] flex items-center gap-2">
-        <span>{files.length} file{files.length === 1 ? "" : "s"} changed</span>
-        <span className="text-green-400">+{totals.additions}</span>
-        <span className="text-red-400">-{totals.deletions}</span>
+        <span>已修改 {files.length} 个文件</span>
+        <span className="text-[color:var(--ui-success)]">+{totals.additions}</span>
+        <span className="text-[color:var(--ui-danger)]">-{totals.deletions}</span>
       </div>
       <div>
         {files.map((file) => {
@@ -229,11 +231,11 @@ const TurnChangedFilesCard = memo(function TurnChangedFilesCard({
                 className="w-full px-3 py-2 text-left hover:bg-[var(--ui-panel-2)] transition-colors flex items-center justify-between gap-3"
                 aria-expanded={open}
               >
-                <span className="text-[13px] text-[color:var(--ui-accent)] truncate min-w-0">{displayPath}</span>
+                <span className="text-[0.8125rem] text-[color:var(--ui-accent)] truncate min-w-0">{displayPath}</span>
                 <span className="shrink-0 flex items-center gap-2">
                   <span className="text-xs flex items-center gap-2">
-                    <span className="text-green-400">+{file.additions}</span>
-                    <span className="text-red-400">-{file.deletions}</span>
+                    <span className="text-[color:var(--ui-success)]">+{file.additions}</span>
+                    <span className="text-[color:var(--ui-danger)]">-{file.deletions}</span>
                   </span>
                   {open ? (
                     <ChevronUp className="h-3.5 w-3.5 text-[color:var(--ui-text-dim)] shrink-0" aria-hidden />
@@ -319,6 +321,7 @@ export type MessageViewScrollControl = {
 
 interface MessageViewProps extends ApprovalCallbacks {
   messages: Message[];
+  threadId?: string;
   isStreaming: boolean;
   project?: Project | null;
   contentWidthClass?: string;
@@ -336,6 +339,22 @@ interface MessageViewProps extends ApprovalCallbacks {
   models?: Array<ModelOption>;
   selection?: ModelSelection | null;
   onSelectionChange?: (next: ModelSelection) => void;
+  versionNavigation?: VersionNavigation;
+  versionNavigations?: Record<string, VersionNavigation | undefined>;
+}
+
+interface VersionNavigation {
+  position: number;
+  total: number;
+  onPrevious: () => void;
+  onNext: () => void;
+}
+
+function formatMessageTimestamp(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 const BUSY_TEXTS: { present: string; past: string }[] = [
@@ -360,17 +379,17 @@ function ChunkRenderer({
   switch (chunk.kind) {
     case "text":
       return (
-        <div className="text-[color:var(--ui-text)]">
+        <div className="text-[0.9375rem] leading-7 text-[color:var(--ui-text)]">
           <Markdown content={chunk.text} />
         </div>
       );
     case "code":
       return <CodeBlock text={chunk.text} language={chunk.language} />;
     case "error":
-      return <span className="text-red-400">{chunk.text}</span>;
+      return <span className="text-[color:var(--ui-danger)]">{chunk.text}</span>;
     case "list":
       return (
-        <div className="text-gray-300 ml-2">
+        <div className="ml-2 text-[color:var(--ui-text-muted)]">
           {chunk.lines.map((line, i) => (
             <div key={i}>- {line}</div>
           ))}
@@ -394,10 +413,42 @@ function ChunkRenderer({
         <img
           src={`data:${chunk.mimeType};base64,${chunk.base64}`}
           alt={chunk.fileName || "image"}
-          className="max-w-48 max-h-48 rounded border border-gray-600"
+          className="max-h-48 max-w-48 rounded-md border border-[var(--ui-border)]"
         />
       );
   }
+}
+
+function VersionNavigationControls({ navigation }: { navigation?: VersionNavigation }) {
+  if (!navigation || navigation.total <= 1) return null;
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={navigation.onPrevious}
+        disabled={navigation.position <= 1}
+        aria-label="查看上一个版本"
+        title="上一个版本"
+        className="inline-flex size-6 items-center justify-center rounded-md hover:bg-[var(--ui-panel-2)] hover:text-[color:var(--ui-text)] disabled:pointer-events-none disabled:opacity-30"
+      >
+        <ChevronLeft className="size-3.5" />
+      </button>
+      <span className="min-w-8 text-center tabular-nums">
+        {navigation.position}/{navigation.total}
+      </span>
+      <button
+        type="button"
+        onClick={navigation.onNext}
+        disabled={navigation.position >= navigation.total}
+        aria-label="查看下一个版本"
+        title="下一个版本"
+        className="inline-flex size-6 items-center justify-center rounded-md hover:bg-[var(--ui-panel-2)] hover:text-[color:var(--ui-text)] disabled:pointer-events-none disabled:opacity-30"
+      >
+        <ChevronRight className="size-3.5" />
+      </button>
+    </>
+  );
 }
 
 function UserMessage({ message, editable = false, onEdit, models = [], selection = null, onSelectionChange }: { message: Message; editable?: boolean; onEdit?: (message: Message, content: string) => void; models?: Array<ModelOption>; selection?: ModelSelection | null; onSelectionChange?: (next: ModelSelection) => void }) {
@@ -432,8 +483,8 @@ function UserMessage({ message, editable = false, onEdit, models = [], selection
     .join(", ");
 
   return (
-    <div className="group flex justify-end my-4">
-      <div className="w-fit max-w-[78%]">
+    <div className="group message-enter my-5 flex w-full justify-end">
+      <div className="flex w-full min-w-0 flex-col items-end">
         {images.length > 0 && (
           <div className="flex gap-2 mb-2 flex-wrap justify-end">
             {images.map((img, i) => (
@@ -442,15 +493,15 @@ function UserMessage({ message, editable = false, onEdit, models = [], selection
                   key={i}
                   src={`data:${img.mimeType};base64,${img.base64}`}
                   alt={img.fileName || "image"}
-                  className="max-w-48 max-h-48 rounded border border-gray-600"
+                  className="max-h-48 max-w-48 rounded-md border border-[var(--ui-border)]"
                 />
               )
             ))}
           </div>
         )}
         {editing ? (
-          <div className="w-[min(78vw,720px)] rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3 shadow-sm">
-            <textarea autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} className="min-h-24 w-full resize-none bg-transparent text-[13px] leading-5 text-[color:var(--ui-text)] outline-none" />
+          <div className="w-[min(78vw,720px)] rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3 shadow-sm">
+            <textarea autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} className="min-h-24 w-full resize-none bg-transparent text-[0.875rem] leading-6 text-[color:var(--ui-text)] outline-none" />
             <div className="mt-2 flex items-center justify-between gap-2">
               <select value={selection ? selection.modelId + "::" + selection.effort : ""} onChange={(event) => { const parts = event.target.value.split("::"); if (parts[0] && parts[1]) onSelectionChange?.({ modelId: parts[0], effort: parts[1] }); }} className="max-w-[220px] rounded-md bg-transparent px-1 py-1 text-xs text-[color:var(--ui-text-muted)] outline-none" aria-label="选择模型">
                 <option value="">默认模型</option>
@@ -463,23 +514,49 @@ function UserMessage({ message, editable = false, onEdit, models = [], selection
             </div>
           </div>
         ) : text && (
-          <div className="inline-block max-w-full rounded-2xl bg-[var(--ui-accent-bubble)] overflow-hidden">
+          <div className="w-fit max-w-[min(74%,52rem)] self-end overflow-hidden rounded-xl bg-[var(--ui-accent-bubble)]">
             <div
               ref={textRef}
               onScroll={updateScrollIndicators}
-              className="max-h-[250px] overflow-auto px-3 py-1.5 text-[color:var(--ui-text)] text-[13px] whitespace-pre-wrap break-words"
+              className="max-h-[250px] overflow-auto whitespace-pre-wrap px-4 py-3 text-[0.9375rem] leading-7 text-[color:var(--ui-text)] break-words"
               style={{ boxShadow: textEdgeShadows || "none" }}
             >
               {text}
             </div>
           </div>
         )}
-        <div className="mt-1 flex items-center justify-end gap-2 pr-1 text-[11px] text-[color:var(--ui-text-dim)] opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-          <span>{message.timestamp ? new Date(message.timestamp).toLocaleString(undefined, { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }) : ""}</span>
-          <button type="button" onClick={() => void navigator.clipboard?.writeText(text)} aria-label="复制消息" title="复制" className="rounded p-1 hover:bg-[var(--ui-panel-2)]"><Copy className="size-3.5" /></button>
-          {editable && <button type="button" onClick={() => { setDraft(text); setEditing(true); }} aria-label="编辑并重新发送" title="编辑并重新发送" className="rounded p-1 hover:bg-[var(--ui-panel-2)]"><Pencil className="size-3.5" /></button>}
+        <div className="mt-1.5 flex items-center justify-end gap-2 pr-1 text-[0.6875rem] text-[color:var(--ui-text-dim)] opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
+          <time dateTime={message.timestamp}>{formatMessageTimestamp(message.timestamp)}</time>
+          <button type="button" onClick={() => void navigator.clipboard?.writeText(text)} aria-label="复制消息" title="复制" className="rounded-md p-1.5 hover:bg-[var(--ui-panel-2)]"><Copy className="size-4" /></button>
+          {editable && <button type="button" onClick={() => { setDraft(text); setEditing(true); }} aria-label="编辑并重新发送" title="编辑并重新发送" className="rounded-md p-1.5 hover:bg-[var(--ui-panel-2)]"><Pencil className="size-4" /></button>}
         </div>
       </div>
+    </div>
+  );
+}
+
+function AgentMessageActions({ message, versionNavigation }: { message: Message; versionNavigation?: VersionNavigation }) {
+  const body = message.chunks
+    .filter((chunk): chunk is Extract<Chunk, { kind: "text" }> => chunk.kind === "text")
+    .map((chunk) => chunk.text)
+    .join("");
+  if (!body.trim()) return null;
+
+  return (
+    <div className="mt-1 flex min-h-7 items-center gap-1.5 text-[0.6875rem] text-[color:var(--ui-text-dim)] opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+      <time dateTime={message.timestamp} className="px-1">
+        {formatMessageTimestamp(message.timestamp)}
+      </time>
+      <button
+        type="button"
+        onClick={() => void navigator.clipboard?.writeText(body)}
+        aria-label="复制智能体正文"
+        title="复制正文"
+        className="inline-flex size-6 items-center justify-center rounded-md hover:bg-[var(--ui-panel-2)] hover:text-[color:var(--ui-text)]"
+      >
+        <Copy className="size-3.5" />
+      </button>
+      <VersionNavigationControls navigation={versionNavigation} />
     </div>
   );
 }
@@ -487,105 +564,77 @@ function UserMessage({ message, editable = false, onEdit, models = [], selection
 function ToolActivityGroup({
   message,
   isStreaming,
+  runElapsedMs,
+  showTodos = true,
+  hasModelContent = false,
   projectPath,
   ...callbacks
 }: {
   message: Message;
   isStreaming?: boolean;
+  runElapsedMs?: number;
+  showTodos?: boolean;
+  hasModelContent?: boolean;
   projectPath?: string;
 } & ApprovalCallbacks) {
   const tools = message.chunks.filter(
     (chunk): chunk is ToolExecutionChunk => chunk.kind === "tool-execution",
   );
-  const narrations = message.chunks.filter(
-    (chunk): chunk is Extract<Chunk, { kind: "text" }> => chunk.kind === "text" && !!chunk.text.trim(),
-  );
-  const running = tools.some((tool) => tool.status === "pending" || tool.status === "in_progress");
+  const running = Boolean(isStreaming);
   const completedCount = tools.filter((tool) => tool.status === "completed").length;
   const errorCount = tools.filter((tool) => tool.status === "error").length;
-  const mixed = completedCount > 0 && errorCount > 0;
+  const toolElapsedMs = tools.reduce((total, tool) => total + (tool.elapsedMs ?? 0), 0);
+  const elapsedMs = runElapsedMs && runElapsedMs > 0 ? runElapsedMs : toolElapsedMs;
   const [expanded, setExpanded] = useState(Boolean(isStreaming || running));
-  const wasRunningRef = useRef(Boolean(isStreaming || running));
-
+  const wasStreaming = useRef(isStreaming);
   useEffect(() => {
-    const active = Boolean(isStreaming || running);
-    if (active) setExpanded(true);
-    if (!active && wasRunningRef.current) setExpanded(false);
-    wasRunningRef.current = active;
-  }, [isStreaming, running]);
+    if (wasStreaming.current && !isStreaming) setExpanded(false);
+    wasStreaming.current = isStreaming;
+  }, [isStreaming]);
 
   const activeTool = [...tools].reverse().find(
     (tool) => tool.status === "pending" || tool.status === "in_progress",
   );
-  const summary = activeTool?.title
-    || (tools.length === 0
-      ? "执行过程"
-      : errorCount > 0
-        ? `${tools.length} 项操作，${errorCount} 项失败`
-        : `已执行 ${tools.length} 项操作`);
-  const borderClass = mixed
-    ? "border-amber-400/60"
-    : errorCount > 0 && completedCount === 0
-      ? "border-red-400/50"
-      : "border-[var(--ui-border)]";
-  const dotClass = mixed
-    ? "bg-amber-400"
-    : errorCount > 0 && completedCount === 0
-      ? "bg-red-400"
-      : running
-        ? "bg-[var(--ui-accent)] animate-pulse"
-        : "bg-green-500";
+  const summary = activeTool?.title || "执行任务";
+  const duration = elapsedMs > 0 ? formatElapsed(elapsedMs) : "";
+  const statusText = running
+    ? "正在运行"
+    : errorCount > 0
+      ? `任务失败 · ${errorCount} 项失败`
+      : ((tools.length === 0 && hasModelContent) || (tools.length > 0 && completedCount === tools.length))
+        ? `任务完成 · 耗时 ${duration || "0s"}`
+        : "任务已停止";
 
   return (
-    <div className={`my-1 overflow-hidden rounded-lg border bg-[var(--ui-panel)] ${borderClass}`}>
+    <div className="my-3 overflow-hidden border-b border-[var(--ui-border)]" data-task-execution>
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
-        className="grid min-h-8 w-full grid-cols-[12px_minmax(0,1fr)_16px] items-center gap-2 px-2.5 py-1.5 text-left hover:bg-[var(--ui-panel-2)]"
+        className="group flex min-h-9 w-full items-center justify-between gap-3 px-0 py-1 text-left transition-[color,background-color] duration-150 hover:text-[color:var(--ui-text)]"
         aria-expanded={expanded}
       >
-        <span className={`h-2 w-2 justify-self-center rounded-full ${dotClass}`} aria-hidden />
-        <span className="flex min-w-0 items-baseline gap-2">
-          <span className="truncate text-xs text-[color:var(--ui-text-muted)]">{summary}</span>
-          {tools.length > 0 && (
-            <span className="shrink-0 text-[10px] text-[color:var(--ui-text-dim)]">
-              {tools.length} 条记录
-            </span>
-          )}
+        <span className="min-w-0 truncate text-[0.8125rem] text-[color:var(--ui-text-muted)]">
+          {statusText}
+          {running && summary ? ` · ${summary}` : ""}
         </span>
-        {expanded ? (
-          <ChevronUp className="h-3.5 w-3.5 justify-self-center text-[color:var(--ui-text-dim)]" />
-        ) : (
-          <ChevronDown className="h-3.5 w-3.5 justify-self-center text-[color:var(--ui-text-dim)]" />
-        )}
+        <ChevronDown
+          className={cn(
+            "size-4 shrink-0 text-[color:var(--ui-text-dim)] transition-transform duration-200 ease-out",
+            expanded && "rotate-180",
+          )}
+        />
       </button>
 
       {expanded && (
-        <div className="max-h-64 overflow-y-auto border-t border-[var(--ui-border)] px-2.5 py-1.5">
-          {narrations.length > 0 && (
-            <div className="max-h-40 overflow-y-auto border-b border-[var(--ui-border)] pb-1.5 text-xs leading-5 text-[color:var(--ui-text-muted)]">
-              {narrations.map((chunk, index) => (
-                <div key={`narration-${index}`} className={index > 0 ? "mt-1.5" : ""}>
-                  <Markdown content={chunk.text} />
-                </div>
-              ))}
-            </div>
-          )}
-          {tools.map((tool, index) => (
-            <div
-              key={tool.toolCallId || index}
-              className={index > 0 || narrations.length > 0 ? "border-t border-[var(--ui-border)] first:border-t-0" : ""}
-            >
-              <ToolExecution
-                chunk={tool}
-                projectPath={projectPath}
-                onApprove={callbacks.onApprove}
-                onReject={callbacks.onReject}
-                onAutoApprove={callbacks.onAutoApprove}
-                onOpenDiff={callbacks.onOpenDiff}
-              />
-            </div>
-          ))}
+        <div role="region" aria-label="任务执行详情" className="max-h-64 animate-in fade-in-0 slide-in-from-top-1 duration-150 ease-out overflow-y-auto px-0 pb-2 pt-1">
+          {message.chunks.map((chunk, index) => {
+            if (chunk.kind === "todo" && !showTodos) return null;
+            return (
+              <div key={getChunkRenderKey(chunk, index)} className="mb-2">
+                <ChunkRenderer chunk={chunk} projectPath={projectPath} {...callbacks} />
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -595,12 +644,16 @@ function ToolActivityGroup({
 function AgentMessage({
   message,
   isStreaming,
+  runElapsedMs,
   projectPath,
+  versionNavigation,
   ...callbacks
 }: {
   message: Message;
   isStreaming?: boolean;
+  runElapsedMs?: number;
   projectPath?: string;
+  versionNavigation?: VersionNavigation;
 } & ApprovalCallbacks) {
   const renderItems = useMemo(() => buildRenderItems(message.chunks), [message.chunks]);
   const changedFiles = useMemo(() => summarizeChangedFiles(message.chunks), [message.chunks]);
@@ -660,17 +713,25 @@ function AgentMessage({
     wasExplorationLiveRef.current = false;
   }, [hasExploredGroups, isStreaming, exploredGroupIds, message.id]);
 
-  const hasToolActivity = message.executionNarration
-    || message.chunks.some((chunk) => chunk.kind === "tool-execution");
+  const activity = message;
+  const hasToolActivity = activity.executionNarration
+    || activity.chunks.some((chunk) => chunk.kind === "tool-execution");
   if (hasToolActivity) {
-    const remainingChunks = message.chunks.filter(
-      (chunk) => chunk.kind !== "text" && chunk.kind !== "tool-execution",
-    );
+    const hasTools = activity.chunks.some((chunk) => chunk.kind === "tool-execution");
+    const panelActivity = hasTools
+      ? activity
+      : { ...activity, chunks: activity.chunks.filter((chunk) => chunk.kind === "todo") };
+    const remainingChunks = isStreaming
+      ? activity.chunks.filter((chunk) => chunk.kind !== "tool-execution")
+      : activity.chunks.filter((chunk) => !hasTools && chunk.kind !== "todo");
     return (
-      <div className="my-2 min-w-0 space-y-2">
+      <div className="group message-enter my-2 min-w-0 space-y-2">
         <ToolActivityGroup
-          message={message}
+          message={panelActivity}
           isStreaming={isStreaming}
+          runElapsedMs={runElapsedMs}
+          showTodos={!isStreaming}
+          hasModelContent={!hasTools && activity.chunks.some((chunk) => chunk.kind !== "todo")}
           projectPath={projectPath}
           {...callbacks}
         />
@@ -682,12 +743,13 @@ function AgentMessage({
             {...callbacks}
           />
         ))}
+        <AgentMessageActions message={message} versionNavigation={versionNavigation} />
       </div>
     );
   }
 
   return (
-    <div className="my-2 min-w-0 space-y-2">
+    <div className="group message-enter my-2 min-w-0 space-y-2">
       {renderItems.map((item) => {
         switch (item.type) {
           case "explored-group": {
@@ -705,13 +767,13 @@ function AgentMessage({
                   }
                   className="w-full flex items-center justify-between py-1 text-left hover:opacity-90 transition-opacity"
                 >
-                  <span className="text-[color:var(--ui-text-muted)] text-[12px]">{summary}</span>
+                  <span className="text-[color:var(--ui-text-muted)] text-[0.75rem]">{summary}</span>
                   <span className="text-[color:var(--ui-text-dim)] text-xs">{isExpanded ? "隐藏" : "显示"}</span>
                 </button>
                 {isExpanded && (
                   <div className="pt-1 pb-1 space-y-0.5">
                     {item.chunks.map((chunk, chunkIndex) => (
-                      <div key={chunk.toolCallId || `explored-chunk-${item.id}-${chunkIndex}`} className="flex-1 min-w-0 text-gray-500">
+                      <div key={chunk.toolCallId || `explored-chunk-${item.id}-${chunkIndex}`} className="min-w-0 flex-1 text-[color:var(--ui-text-muted)]">
                         <ToolExecution
                           chunk={chunk}
                           projectPath={projectPath}
@@ -799,6 +861,7 @@ function AgentMessage({
           projectPath={projectPath}
         />
       )}
+      <AgentMessageActions message={message} versionNavigation={versionNavigation} />
     </div>
   );
 }
@@ -806,22 +869,26 @@ function AgentMessage({
 const MessageBubble = memo(function MessageBubble({
   message,
   isStreaming,
+  runElapsedMs,
   projectPath,
   editable,
   onEdit,
   models,
   selection,
   onSelectionChange,
+  versionNavigation,
   ...callbacks
 }: {
   message: Message;
   isStreaming?: boolean;
+  runElapsedMs?: number;
   projectPath?: string;
   editable?: boolean;
   onEdit?: (message: Message, content: string) => void;
   models?: Array<ModelOption>;
   selection?: ModelSelection | null;
   onSelectionChange?: (next: ModelSelection) => void;
+  versionNavigation?: VersionNavigation;
 } & ApprovalCallbacks) {
   if (message.author === "user") {
     return <UserMessage message={message} editable={editable} onEdit={onEdit} models={models} selection={selection} onSelectionChange={onSelectionChange} />;
@@ -830,7 +897,9 @@ const MessageBubble = memo(function MessageBubble({
     <AgentMessage
       message={message}
       isStreaming={isStreaming}
+      runElapsedMs={runElapsedMs}
       projectPath={projectPath}
+      versionNavigation={versionNavigation}
       {...callbacks}
     />
   );
@@ -839,9 +908,11 @@ const MessageBubble = memo(function MessageBubble({
 function ThinkingSpinner({
   isStreaming,
   liveStatus,
+  runElapsedMs,
 }: {
   isStreaming: boolean;
   liveStatus?: string | null;
+  runElapsedMs?: number;
 }) {
   const [textIdx, setTextIdx] = useState(0);
   const [done, setDone] = useState<{ past: string; elapsed: string } | null>(null);
@@ -859,10 +930,10 @@ function ThinkingSpinner({
     } else if (wasStreamingRef.current) {
       setDone({
         past: BUSY_TEXTS[textIdxRef.current].past,
-        elapsed: formatElapsed(Date.now() - startTimeRef.current),
+        elapsed: formatElapsed(runElapsedMs ?? (Date.now() - startTimeRef.current)),
       });
     }
-  }, [isStreaming]);
+  }, [isStreaming, runElapsedMs]);
 
   useEffect(() => {
     if (!isStreaming) return;
@@ -876,15 +947,16 @@ function ThinkingSpinner({
   if (done) {
     return (
       <div className="my-2 flex items-center gap-2">
-        <span className="font-sans text-xs text-[color:var(--ui-text-dim)] select-none">*</span>
-        <span className="text-xs text-[color:var(--ui-text-dim)]">{done.past} for {done.elapsed}</span>
+        <CheckCircle2 className="size-3.5 text-[color:var(--ui-success)]" />
+        <span className="text-xs text-[color:var(--ui-text-dim)]">{done.past}，耗时 {done.elapsed}</span>
       </div>
     );
   }
 
   return (
     <div className="my-2 flex items-center gap-2">
-      <span className="shimmer-text text-xs">{liveStatus || BUSY_TEXTS[textIdx].present}</span>
+      <LoaderCircle className="agents-spinner size-3.5 text-[color:var(--ui-accent)]" />
+      <span className="text-xs text-[color:var(--ui-text-muted)]">{liveStatus || BUSY_TEXTS[textIdx].present}</span>
     </div>
   );
 }
@@ -893,6 +965,7 @@ const BOTTOM_LOCK_THRESHOLD_PX = 24;
 
 export const MessageView = memo(function MessageView({
   messages,
+  threadId,
   isStreaming,
   project,
   contentWidthClass = "max-w-[42rem]",
@@ -911,6 +984,8 @@ export const MessageView = memo(function MessageView({
   models,
   selection,
   onSelectionChange,
+  versionNavigation,
+  versionNavigations,
 }: MessageViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -920,6 +995,53 @@ export const MessageView = memo(function MessageView({
   const previousScrollHeightRef = useRef(0);
   const pendingScrollFrameRef = useRef<number | null>(null);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const streamElapsedStorageKey = threadId ? `xihe:run-elapsed:${threadId}` : null;
+  const [streamElapsedMs, setStreamElapsedMs] = useState(() => {
+    if (!streamElapsedStorageKey || typeof window === "undefined") return 0;
+    try {
+      const stored = Number(window.sessionStorage.getItem(streamElapsedStorageKey));
+      return Number.isFinite(stored) && stored > 0 ? stored : 0;
+    } catch {
+      return 0;
+    }
+  });
+  const streamStartedAtRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!isStreaming) {
+      if (streamStartedAtRef.current !== null) {
+        const elapsed = Math.max(0, Date.now() - streamStartedAtRef.current);
+        setStreamElapsedMs(elapsed);
+        if (streamElapsedStorageKey && typeof window !== "undefined") {
+          try {
+            window.sessionStorage.setItem(streamElapsedStorageKey, String(elapsed));
+          } catch {
+            // Storage can be unavailable in private browsing or embedded webviews.
+          }
+        }
+        streamStartedAtRef.current = null;
+      }
+      return;
+    }
+
+    if (streamStartedAtRef.current === null) {
+      streamStartedAtRef.current = Date.now();
+      setStreamElapsedMs(0);
+      if (streamElapsedStorageKey && typeof window !== "undefined") {
+        try {
+          window.sessionStorage.removeItem(streamElapsedStorageKey);
+        } catch {
+          // Storage can be unavailable in private browsing or embedded webviews.
+        }
+      }
+    }
+    const timer = window.setInterval(() => {
+      if (streamStartedAtRef.current !== null) {
+        setStreamElapsedMs(Math.max(0, Date.now() - streamStartedAtRef.current));
+      }
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [isStreaming, streamElapsedStorageKey]);
 
   const clearScheduledScroll = useCallback(() => {
     if (pendingScrollFrameRef.current === null) return;
@@ -1008,12 +1130,10 @@ export const MessageView = memo(function MessageView({
     }
 
     const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
-    const heightDelta = el.scrollHeight - previousScrollHeight;
-    const preservedTop = lastManualScrollTopRef.current + Math.max(0, heightDelta);
-    const targetTop = Math.min(preservedTop, maxTop);
+    const targetTop = Math.min(lastManualScrollTopRef.current, maxTop);
     const jumpDistance = Math.abs(el.scrollTop - targetTop);
 
-    if (heightDelta > 0 || jumpDistance > el.clientHeight * 0.5) {
+    if (jumpDistance > 1) {
       el.scrollTop = targetTop;
     }
 
@@ -1052,8 +1172,50 @@ export const MessageView = memo(function MessageView({
     return () => resizeObserver.disconnect();
   }, [scheduleScrollToBottom, syncScrollButtonVisibility]);
 
-  const visibleMessages = useMemo(() => messages.filter((message) => !message.hidden), [messages]);
-
+  const visibleMessages = useMemo(() => groupConversationMessages(messages), [messages]);
+  const currentTurnStart = visibleMessages.findLastIndex((message) => message.author === "user");
+  const latestAgentMessageId = useMemo(
+    () =>
+      [...visibleMessages]
+        .reverse()
+        .find(
+          (message) =>
+            message.author === "agent"
+            && message.chunks.some((chunk) => chunk.kind === "text" && chunk.text.trim())
+            && (!message.executionNarration
+              || !message.chunks.some((chunk) => chunk.kind === "tool-execution")),
+        )?.id ?? null,
+    [visibleMessages],
+  );
+  const versionAnchorStorageKey = threadId ? `xihe:version-anchor:${threadId}` : null;
+  const versionAnchorIdRef = useRef<string | null>(null);
+  const versionAnchorOwnerRef = useRef<string | null>(null);
+  if (versionAnchorOwnerRef.current !== versionAnchorStorageKey) {
+    versionAnchorOwnerRef.current = versionAnchorStorageKey;
+    if (versionAnchorStorageKey && typeof window !== "undefined") {
+      try {
+        versionAnchorIdRef.current = window.sessionStorage.getItem(versionAnchorStorageKey);
+      } catch {
+        versionAnchorIdRef.current = null;
+      }
+    } else {
+      versionAnchorIdRef.current = null;
+    }
+  }
+  const versionAnchorId = visibleMessages.some((message) => message.id === versionAnchorIdRef.current)
+    ? versionAnchorIdRef.current
+    : latestAgentMessageId;
+  if (versionAnchorIdRef.current !== versionAnchorId) {
+    versionAnchorIdRef.current = versionAnchorId;
+    if (versionAnchorStorageKey && typeof window !== "undefined") {
+      try {
+        if (versionAnchorId) window.sessionStorage.setItem(versionAnchorStorageKey, versionAnchorId);
+        else window.sessionStorage.removeItem(versionAnchorStorageKey);
+      } catch {
+        // Storage can be unavailable in private browsing or embedded webviews.
+      }
+    }
+  }
   const handleScrollToBottom = useCallback(() => {
     autoScrollEnabledRef.current = true;
     clearScheduledScroll();
@@ -1076,7 +1238,7 @@ export const MessageView = memo(function MessageView({
     <div className="relative flex-1 min-h-0 min-w-0">
       <div
         ref={scrollRef}
-        className="h-full min-h-0 min-w-0 overflow-y-auto overflow-x-hidden py-5 text-[13px] leading-6 font-sans antialiased"
+        className="h-full min-h-0 min-w-0 overflow-y-auto overflow-x-hidden py-6 text-[0.875rem] leading-6 font-sans antialiased [overflow-anchor:none]"
       >
         <div
           ref={contentRef}
@@ -1084,23 +1246,29 @@ export const MessageView = memo(function MessageView({
           style={bottomInset > 0 ? { paddingBottom: bottomInset } : undefined}
         >
           {visibleMessages.map((message, index) => (
-            <MessageBubble
-              key={message.id}
-              message={message}
-              isStreaming={isStreaming && index === visibleMessages.length - 1}
-              projectPath={project?.path}
-              onApprove={onApprove}
-              onReject={onReject}
-              onAutoApprove={onAutoApprove}
-              onOpenDiff={onOpenDiff}
-              editable={message.id === editableMessageId && !isStreaming}
-              onEdit={onEditMessage}
-              models={models}
-              selection={selection}
-              onSelectionChange={onSelectionChange}
-            />
+                <MessageBubble
+                  key={message.id}
+                  message={message}
+                  isStreaming={isStreaming && index > currentTurnStart}
+                  runElapsedMs={
+                    index > currentTurnStart && (isStreaming || message.executionNarration)
+                      ? streamElapsedMs
+                      : undefined
+                  }
+                  projectPath={project?.path}
+                  onApprove={onApprove}
+                  onReject={onReject}
+                  onAutoApprove={onAutoApprove}
+                  onOpenDiff={onOpenDiff}
+                  editable={message.id === editableMessageId && !isStreaming}
+                  onEdit={onEditMessage}
+                  models={models}
+                  selection={selection}
+                  onSelectionChange={onSelectionChange}
+                  versionNavigation={versionNavigations?.[message.id] ?? (message.id === versionAnchorId ? versionNavigation : undefined)}
+                />
           ))}
-          <ThinkingSpinner isStreaming={isStreaming} liveStatus={liveStatus} />
+          <ThinkingSpinner isStreaming={isStreaming} liveStatus={liveStatus} runElapsedMs={streamElapsedMs} />
         </div>
       </div>
 
@@ -1108,10 +1276,11 @@ export const MessageView = memo(function MessageView({
         <button
           type="button"
           onClick={handleScrollToBottom}
-          aria-label="Scroll to bottom"
-          className="absolute left-1/2 z-30 inline-flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full bg-[var(--ui-panel-2)] text-[color:var(--ui-text-muted)] shadow-md transition-colors hover:bg-[var(--ui-panel)] hover:text-[color:var(--ui-text)]"
+          aria-label="滚动到底部"
+          className="absolute left-1/2 z-30 inline-flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full bg-[var(--ui-panel-2)] text-[color:var(--ui-text-muted)] shadow-[0_2px_8px_rgb(30_45_70_/_14%)] transition-colors hover:bg-[var(--ui-panel)] hover:text-[color:var(--ui-text)]"
           style={{ bottom: bottomInset > 0 ? bottomInset + 8 : 16 }}
         >
+          {isStreaming && <span className="agents-scroll-loader" aria-hidden />}
           <ChevronDown className="h-3.5 w-3.5" />
         </button>
       )}

@@ -16,12 +16,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ApiError, api, isGithubReauthError, loginUrl } from "@/lib/api";
 import { normalizeRepoFullName } from "@/lib/repo";
 
 function formatMutationError(e: Error): string {
   return isGithubReauthError(e)
-    ? "GitHub token expired — sign in again using the link above."
+    ? "GitHub 令牌已过期，请使用上方链接重新登录。"
     : e.message;
 }
 
@@ -38,12 +39,23 @@ function statusVariant(status: ReviewStyle["status"]) {
   }
 }
 
+function statusLabel(status: ReviewStyle["status"]): string {
+  const labels: Record<ReviewStyle["status"], string> = {
+    completed: "已完成",
+    running: "分析中",
+    failed: "失败",
+    idle: "待分析",
+  };
+  return labels[status];
+}
+
 export function ReviewStylesPanel() {
   const qc = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [addRepo, setAddRepo] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [draftPrompt, setDraftPrompt] = useState("");
+  const [removeOpen, setRemoveOpen] = useState(false);
 
   const styles = useQuery({
     queryKey: ["reviewStyles"],
@@ -164,16 +176,16 @@ export function ReviewStylesPanel() {
     <div className="flex flex-col gap-6 p-4">
       {githubReauth && (
         <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-          Your GitHub connection expired.{" "}
+          GitHub 连接已过期。{" "}
           <a href={loginUrl()} className="font-medium underline underline-offset-2">
-            Sign in with GitHub again
+            重新登录 GitHub
           </a>{" "}
-          to list installed repos and run style analysis.
+          后即可读取已安装的仓库并运行风格分析。
         </div>
       )}
       <section className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="add-repo">Add repository</Label>
+          <Label htmlFor="add-repo">添加仓库</Label>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
             <Input
               id="add-repo"
@@ -194,7 +206,7 @@ export function ReviewStylesPanel() {
               disabled={!canAdd || createStyle.isPending}
               onClick={handleAdd}
             >
-              Add
+              添加
             </Button>
           </div>
           {suggestedRepos.length > 0 && (
@@ -204,19 +216,19 @@ export function ReviewStylesPanel() {
               onValueChange={(v) => setAddRepo(typeof v === "string" ? v : "")}
             >
               <ComboboxInput
-                placeholder="Search installed repos…"
+                placeholder="搜索已安装的仓库…"
                 showClear
                 className="w-full"
               />
               <ComboboxContent className="min-w-[var(--anchor-width)]">
                 <ComboboxList className="max-h-48">
-                  <ComboboxEmpty>No matches</ComboboxEmpty>
+                  <ComboboxEmpty>没有匹配结果</ComboboxEmpty>
                   {suggestedRepos.map((r) => (
                     <ComboboxItem key={r.full_name} value={r.full_name}>
                       <span className="truncate">{r.full_name}</span>
                       {r.private && (
-                        <span className="ml-auto text-[10px] text-muted-foreground">
-                          private
+                        <span className="ml-auto text-[0.625rem] text-muted-foreground">
+                          私有
                         </span>
                       )}
                     </ComboboxItem>
@@ -228,9 +240,9 @@ export function ReviewStylesPanel() {
         </div>
 
         <div className="space-y-2">
-          <p className="text-xs font-medium text-foreground">Repositories</p>
+          <p className="text-xs font-medium text-foreground">仓库</p>
           {(styles.data ?? []).length === 0 ? (
-            <p className="text-xs text-muted-foreground">No repositories yet.</p>
+            <p className="text-xs text-muted-foreground">尚未添加仓库。</p>
           ) : (
             <ul className="flex flex-wrap gap-2">
               {(styles.data ?? []).map((s) => (
@@ -246,7 +258,7 @@ export function ReviewStylesPanel() {
                   >
                     <span className="truncate">{s.full_name}</span>
                     <Badge variant={statusVariant(s.status)} className="shrink-0">
-                      {s.status}
+                      {statusLabel(s.status)}
                     </Badge>
                   </button>
                 </li>
@@ -261,21 +273,21 @@ export function ReviewStylesPanel() {
       <section className="space-y-3">
         {!selected || !active ? (
           <p className="text-xs text-muted-foreground">
-            Select a repository above to view or edit its review style prompt.
+            请先选择一个仓库，再查看或编辑其审查风格提示词。
           </p>
         ) : (
           <>
             <p className="text-sm font-medium text-foreground">{active.full_name}</p>
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <Badge variant={statusVariant(active.status)}>{active.status}</Badge>
+              <Badge variant={statusVariant(active.status)}>{statusLabel(active.status)}</Badge>
               {active.top_reviewers.length > 0 && (
                 <span className="text-muted-foreground">
-                  Reviewers: {active.top_reviewers.join(", ")}
+                  审查者：{active.top_reviewers.join(", ")}
                 </span>
               )}
               {active.prs_sampled > 0 && (
                 <span className="text-muted-foreground">
-                  {active.prs_sampled} PRs · {active.reviews_sampled} reviews sampled
+                  已采样 {active.prs_sampled} 个 PR、{active.reviews_sampled} 条审查
                 </span>
               )}
             </div>
@@ -292,7 +304,7 @@ export function ReviewStylesPanel() {
                   void analyze.mutateAsync(active.full_name).catch(() => undefined);
                 }}
               >
-                {active.status === "running" ? "Analyzing…" : "Run analysis"}
+                {active.status === "running" ? "正在分析…" : "运行分析"}
               </Button>
               {active.status === "running" && (
                 <Button
@@ -301,7 +313,7 @@ export function ReviewStylesPanel() {
                   disabled={cancelAnalysis.isPending}
                   onClick={() => void cancelAnalysis.mutateAsync(active.full_name)}
                 >
-                  Cancel
+                  取消
                 </Button>
               )}
               <Button
@@ -314,24 +326,15 @@ export function ReviewStylesPanel() {
                   })
                 }
               >
-                Save prompt
+                保存提示词
               </Button>
               <Button
                 size="sm"
                 variant="destructive"
                 disabled={removeStyle.isPending}
-                onClick={() => {
-                  if (
-                    !window.confirm(
-                      `Remove ${active.full_name} from review style prompts? This cannot be undone.`,
-                    )
-                  ) {
-                    return;
-                  }
-                  void removeStyle.mutateAsync(active.full_name);
-                }}
+                onClick={() => setRemoveOpen(true)}
               >
-                Remove
+                删除
               </Button>
             </div>
             <Textarea
@@ -340,8 +343,8 @@ export function ReviewStylesPanel() {
               onChange={(e) => setDraftPrompt(e.target.value)}
               placeholder={
                 active.status === "running"
-                  ? "Analysis in progress…"
-                  : "Run analysis or write a custom prompt for this repository."
+                  ? "正在分析…"
+                  : "运行分析，或为这个仓库编写自定义提示词。"
               }
               disabled={active.status === "running"}
             />
@@ -349,6 +352,20 @@ export function ReviewStylesPanel() {
         )}
         {error && <p className="text-xs text-destructive">{error}</p>}
       </section>
+      {active && (
+        <ConfirmDialog
+          open={removeOpen}
+          title="删除审查样式"
+          description={`将删除 ${active.full_name} 的审查样式提示词，此操作无法撤销。`}
+          confirmText="删除"
+          destructive
+          busy={removeStyle.isPending}
+          onOpenChange={setRemoveOpen}
+          onConfirm={() =>
+            void removeStyle.mutateAsync(active.full_name).then(() => setRemoveOpen(false))
+          }
+        />
+      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-// @ts-nocheck — ported from open-swe-app (Electron).
+// @ts-nocheck - ported from open-swe-app (Electron).
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { diffLines } from 'diff';
 import { getSingletonHighlighter, type ThemedToken } from 'shiki';
@@ -41,7 +41,7 @@ function HighlightedLine({ tokens, fallback, isAdd, isRemove }: {
 }) {
   if (!tokens) {
     return (
-      <span className={isAdd ? 'text-[#a5d6a7]' : isRemove ? 'text-[#ffb4ab]' : 'text-gray-400'}>
+      <span className={isAdd ? 'text-[color:var(--ui-success)]' : isRemove ? 'text-[color:var(--ui-danger)]' : 'text-[color:var(--ui-text-muted)]'}>
         {fallback}
       </span>
     );
@@ -230,8 +230,8 @@ export function DiffView({ diffData }: DiffViewProps) {
 
   if (isBinary) {
     return (
-      <div className="mt-2 text-gray-500 text-xs font-mono">
-        Binary file - diff not available
+      <div className="mt-2 font-mono text-xs text-[color:var(--ui-text-muted)]">
+        二进制文件，无法显示差异
       </div>
     );
   }
@@ -242,26 +242,26 @@ export function DiffView({ diffData }: DiffViewProps) {
 
   if (hunkLines.length === 0) {
     return (
-      <div className="mt-2 text-gray-500 text-xs font-mono">
-        No changes
+      <div className="mt-2 font-mono text-xs text-[color:var(--ui-text-muted)]">
+        没有变化
       </div>
     );
   }
 
   return (
     <div className="mt-2 font-mono text-xs">
-      <div className="flex items-center gap-2 text-gray-500 mb-1">
-        <span className="text-gray-400">{filePath.split('/').pop()}</span>
-        {isNewFile && <span>(new)</span>}
-        <span className="text-green-400">+{stats.additions}</span>
-        <span className="text-red-400">-{stats.deletions}</span>
+      <div className="mb-1 flex items-center gap-2 text-[color:var(--ui-text-muted)]">
+        <span>{filePath.split('/').pop()}</span>
+        {isNewFile && <span>（新文件）</span>}
+        <span className="text-[color:var(--ui-success)]">+{stats.additions}</span>
+        <span className="text-[color:var(--ui-danger)]">-{stats.deletions}</span>
       </div>
 
-      <div className="max-h-60 overflow-auto border-l border-gray-700 pl-2">
+      <div className="max-h-60 overflow-auto border-l border-[var(--ui-border)] pl-2">
         {displayLines.map((line, idx) => {
           if (line.type === 'separator') {
             return (
-              <div key={idx} className="text-gray-600 py-0.5">
+              <div key={idx} className="py-0.5 text-[color:var(--ui-text-dim)]">
                 {line.text}
               </div>
             );
@@ -276,16 +276,16 @@ export function DiffView({ diffData }: DiffViewProps) {
             <div
               key={idx}
               className={`whitespace-pre ${
-                isAdd ? 'bg-[#12261a]' :
-                isRemove ? 'bg-[#2d1a1f]' : ''
+                isAdd ? 'bg-[color-mix(in_oklab,var(--ui-success)_14%,transparent)]' :
+                isRemove ? 'bg-[color-mix(in_oklab,var(--ui-danger)_14%,transparent)]' : ''
               }`}
             >
-              <span className="text-gray-600 w-8 inline-block text-right pr-2">
+              <span className="inline-block w-8 pr-2 text-right text-[color:var(--ui-text-dim)]">
                 {line.oldLineNum || line.newLineNum || ''}
               </span>
               <span className={`w-4 inline-block ${
-                isAdd ? 'text-[#3fb950]' :
-                isRemove ? 'text-[#f85149]' : 'text-gray-600'
+                isAdd ? 'text-[color:var(--ui-success)]' :
+                isRemove ? 'text-[color:var(--ui-danger)]' : 'text-[color:var(--ui-text-dim)]'
               }`}>
                 {isAdd ? '+' : isRemove ? '-' : ' '}
               </span>
@@ -298,17 +298,17 @@ export function DiffView({ diffData }: DiffViewProps) {
       {hasMoreLines && !expanded && (
         <button
           onClick={() => setExpanded(true)}
-          className="mt-1 text-xs text-[#87CEEB] hover:text-[#a8d8ea]"
+          className="mt-1 text-xs text-[color:var(--ui-accent)] hover:underline"
         >
-          +{hiddenCount} more lines
+          还有 {hiddenCount} 行
         </button>
       )}
       {expanded && hasMoreLines && (
         <button
           onClick={() => setExpanded(false)}
-          className="mt-1 text-xs text-[#87CEEB] hover:text-[#a8d8ea]"
+          className="mt-1 text-xs text-[color:var(--ui-accent)] hover:underline"
         >
-          Show less
+          收起
         </button>
       )}
     </div>

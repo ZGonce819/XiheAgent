@@ -127,18 +127,18 @@ function ReviewPage() {
   return (
     <AppShell
       user={session.data}
-      title="PR Review"
-      description="Automatically review pull requests for bugs and issues. Runs are billed based on underlying agent usage."
+      title="代码审查"
+      description="自动检查 Pull Request 中的缺陷和风险，运行用量按实际智能体调用计算。"
     >
       <RepositoriesSection canEdit={canEdit} />
 
-      <SettingsSection title="Rules">
+      <SettingsSection title="规则">
         <Link
           to="/review/styles"
           className="flex items-center justify-between gap-6 px-4 py-3 hover:bg-muted/40"
         >
           <div className="flex flex-col gap-0.5">
-            <span className="text-xs font-medium text-foreground">Review Style Prompts</span>
+            <span className="text-xs font-medium text-foreground">审查样式提示词</span>
             <span className="text-xs text-muted-foreground">
               Per-repo style guides learned from past PR review feedback.
             </span>
@@ -148,15 +148,15 @@ function ReviewPage() {
       </SettingsSection>
 
       <SettingsSection
-        title="Organization Guidelines"
-        description="Org-wide instructions injected into every review, across all repositories. Repository-specific style prompts take precedence when they conflict."
+        title="组织规范"
+        description="应用于所有仓库审查的全局指令；发生冲突时，以仓库专属提示词为准。"
       >
         <div className="flex flex-col gap-2 p-4">
           <Textarea
             className="min-h-[200px] w-full font-mono text-xs"
             value={guidelinesDraft}
             onChange={(e) => setGuidelinesDraft(e.target.value)}
-            placeholder="e.g. Always flag missing input validation on new API endpoints. Prefer structured logging over print statements."
+            placeholder="例如：新 API 端点缺少输入校验时必须提示；优先使用结构化日志。"
             disabled={!canEdit}
           />
           {canEdit && (
@@ -169,17 +169,17 @@ function ReviewPage() {
                 Save guidelines
               </Button>
               {guidelinesDirty && (
-                <span className="text-xs text-muted-foreground">Unsaved changes</span>
+                <span className="text-xs text-muted-foreground">有未保存的修改</span>
               )}
             </div>
           )}
         </div>
       </SettingsSection>
 
-      <SettingsSection title="Configuration">
+      <SettingsSection title="配置">
         <div className="divide-y divide-border">
           <SettingsRow
-            label="Trigger Mode"
+            label="触发方式"
             description={triggerDescription}
             comingSoon
             control={
@@ -202,8 +202,8 @@ function ReviewPage() {
             }
           />
           <SettingsRow
-            label="Review Draft PRs"
-            description="Org-wide default for whether PR Review runs on draft PRs. Each user can override this in Profile Settings."
+            label="审查草稿 PR"
+            description="是否默认审查草稿 PR；每位用户可以在个人设置中覆盖此项。"
             control={
               <Switch
                 checked={current.review_draft_prs}
@@ -213,8 +213,8 @@ function ReviewPage() {
             }
           />
           <SettingsRow
-            label="PR Summaries"
-            description="Generate descriptions on pull requests"
+            label="PR 摘要"
+            description="自动为 Pull Request 生成说明"
             control={
               <Switch
                 checked={current.pr_summaries}
@@ -224,8 +224,8 @@ function ReviewPage() {
             }
           />
           <SettingsRow
-            label="Trace Links"
-            description="Include a LangSmith trace link in each review comment. Only members of your LangSmith workspace can open it."
+            label="跟踪链接"
+            description="在审查评论中附加 LangSmith 跟踪链接，仅工作区成员可以打开。"
             control={
               <Switch
                 checked={current.review_trace_links}
@@ -235,8 +235,8 @@ function ReviewPage() {
             }
           />
           <SettingsRow
-            label="Autofix Mode"
-            description="When enabled, the reviewer will propose fixes. Billed at plan rates."
+            label="自动修复模式"
+            description="开启后，审查器会提出修复方案，用量按计划执行计算。"
             comingSoon
             control={
               <Select
@@ -258,8 +258,8 @@ function ReviewPage() {
             }
           />
           <SettingsRow
-            label="Autofix Severity Threshold"
-            description="Findings at this severity or higher are auto-fixed"
+            label="自动修复严重程度阈值"
+            description="达到此严重程度及以上的问题将自动修复"
             comingSoon
             control={
               <Select
@@ -336,8 +336,8 @@ function RepositoriesSection({ canEdit: _canEdit }: { canEdit: boolean }) {
 
   return (
     <SettingsSection
-      title="Repositories"
-      description="Source-control installations. Click into one to enable repos for automatic review."
+      title="仓库"
+      description="选择代码托管安装，配置需要自动审查的仓库。"
     >
       <div className="divide-y divide-border">
         {loading && (
@@ -347,8 +347,7 @@ function RepositoriesSection({ canEdit: _canEdit }: { canEdit: boolean }) {
         )}
         {!loading && grouped.length === 0 && (
           <p className="px-4 py-3 text-xs text-muted-foreground">
-            No repository integrations found. Configure Gitee/GitHub access for an
-            account or org to manage repos here.
+            暂未找到仓库集成。请先为账号或组织配置 Gitee/GitHub 访问权限。
           </p>
         )}
         {grouped.map(([owner, list]) => {
@@ -371,7 +370,7 @@ function RepositoriesSection({ canEdit: _canEdit }: { canEdit: boolean }) {
               </div>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <span>
-                  {enabledCount}/{list.length} Repositories Enabled
+                  已启用 {enabledCount}/{list.length} 个仓库
                 </span>
                 <CaretRightIcon className="size-3.5" />
               </div>

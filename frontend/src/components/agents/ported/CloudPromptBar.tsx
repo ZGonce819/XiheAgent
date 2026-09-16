@@ -1,7 +1,6 @@
 import {
   ArrowUp,
   ChevronDown,
-  ImagePlus,
   LoaderCircle,
   Square,
   X,
@@ -19,6 +18,7 @@ import {
 import type { ModelOption } from "@/lib/api"
 import type { ImageChunk } from "@/lib/agents/types"
 import type { ModelSelection } from "@/lib/agents/useModelOptions"
+import type { RepoProvider } from "@/lib/repo"
 import { RepoSelector } from "@/components/agents/RepoSelector"
 import { formatModelSelection } from "@/lib/agents/useModelOptions"
 import { cn } from "@/lib/utils"
@@ -77,9 +77,9 @@ function fileToImageChunk(file: File): Promise<ImageChunk | null> {
   })
 }
 
-/** Web-adapted PromptBar from open-swe-app — local state, no Electron/Zustand deps. */
+/** Web-adapted PromptBar from open-swe-app - local state, no Electron/Zustand deps. */
 export const CloudPromptBar = memo(function CloudPromptBarComponent({
-  placeholder = "让 XiheAgent 构建、修复或检查一个 Gitee 仓库",
+  placeholder = "",
   compact = false,
   disabled = false,
   busy = false,
@@ -97,10 +97,22 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
   const [pendingImages, setPendingImages] = useState<Array<ImageChunk>>([])
   const [isDragOver, setIsDragOver] = useState(false)
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false)
+  const [repoProvider, setRepoProvider] = useState<RepoProvider>("github")
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
   const dragDepthRef = useRef(0)
   const modelDropdownRef = useRef<HTMLDivElement>(null)
+
+  const dynamicPlaceholder = useMemo(
+    () =>
+      `让 XiheAgent 构建、修复或检查一个 ${
+        repoProvider === "github"
+          ? "GitHub"
+          : repoProvider === "codeup"
+            ? "Codeup"
+            : "Gitee"
+      } 仓库`,
+    [repoProvider]
+  )
 
   const combos = useMemo<Array<ModelSelection>>(() => {
     const list: Array<ModelSelection> = []
@@ -163,15 +175,6 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
     )
   }, [])
 
-  const handleFileChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = e.target.files
-      if (files) void addFiles(files)
-      e.target.value = ""
-    },
-    [addFiles]
-  )
-
   const handleDragEnter = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     if (!e.dataTransfer.types.includes("Files")) return
     e.preventDefault()
@@ -217,7 +220,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
   return (
     <div
       className={cn(
-        "relative w-full font-sans text-[13px]",
+        "relative w-full font-sans text-[0.8125rem]",
         compact ? "max-w-none" : "max-w-2xl"
       )}
     >
@@ -227,6 +230,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
             repos={repos}
             selectedRepo={selectedRepo}
             onRepoChange={onRepoChange}
+            onProviderChange={setRepoProvider}
           />
         </div>
       )}
@@ -236,27 +240,18 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         className={cn(
-          "relative flex min-h-[106px] flex-col rounded-2xl border border-[var(--ui-border)] bg-[var(--ui-surface)] px-3 py-2.5 shadow-sm",
+        "relative flex min-h-[116px] flex-col rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface)] px-4 py-3 shadow-sm transition-[border-color,box-shadow] duration-150 focus-within:border-[var(--ui-accent)] focus-within:shadow-[0_0_0_3px_color-mix(in_oklab,var(--ui-accent)_12%,transparent)]",
           compact && "min-h-[88px]",
           isDragOver && "border-[var(--ui-accent)]"
         )}
       >
         {isDragOver && (
-          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-2xl bg-[var(--ui-surface)]/80 backdrop-blur-sm">
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-lg bg-[var(--ui-surface)]/90">
             <span className="rounded-md bg-[var(--ui-panel-2)] px-3 py-1.5 text-sm font-medium text-[color:var(--ui-accent)]">
-              Drop images here
+              在此放置图片
             </span>
           </div>
         )}
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/png,image/jpeg,image/gif,image/webp"
-          multiple
-          className="hidden"
-          onChange={handleFileChange}
-        />
 
         {pendingImages.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">
@@ -267,12 +262,12 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
               >
                 <img
                   src={`data:${image.mimeType};base64,${image.base64}`}
-                  alt={image.fileName || "pending image"}
+                  alt={image.fileName || "待发送图片"}
                   className="size-16 rounded-lg border border-[var(--ui-border)] object-cover"
                 />
                 <button
                   type="button"
-                  aria-label="Remove image"
+                  aria-label="移除图片"
                   onClick={() =>
                     setPendingImages((prev) =>
                       prev.filter((_, i) => i !== index)
@@ -293,10 +288,10 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={busy ? "Send a message to queue next..." : placeholder}
+          placeholder={busy ? "输入下一条指令，将在当前任务后执行" : (placeholder || dynamicPlaceholder)}
           disabled={disabled}
           className={cn(
-            "w-full min-w-0 resize-none overflow-hidden bg-transparent text-[13px] leading-[1.45] text-[color:var(--ui-text)] outline-none placeholder:text-[color:var(--ui-text-dim)]",
+            "w-full min-w-0 resize-none overflow-hidden bg-transparent text-[0.875rem] leading-6 text-[color:var(--ui-text)] outline-none placeholder:text-[color:var(--ui-text-dim)]",
             compact ? "min-h-[36px]" : "min-h-[52px]"
           )}
           style={{ maxHeight: PROMPT_TEXTAREA_MAX_HEIGHT }}
@@ -308,15 +303,15 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
               type="button"
               disabled={pickerDisabled}
               onClick={() => setModelDropdownOpen((open) => !open)}
-              className="flex max-w-[220px] cursor-pointer items-center gap-0.5 text-[13px] text-[color:var(--ui-text-muted)] transition-opacity hover:opacity-80 disabled:cursor-default disabled:opacity-60"
+              className="flex max-w-[220px] cursor-pointer items-center gap-0.5 text-[0.8125rem] text-[color:var(--ui-text-muted)] transition-[color,opacity,transform] duration-150 hover:opacity-80 active:scale-[0.98] disabled:cursor-default disabled:opacity-60"
             >
               <span className="truncate">{selectionLabel}</span>
               {!pickerDisabled && (
-                <ChevronDown className="size-3.5 shrink-0 opacity-60" />
+                <ChevronDown className={cn("size-3.5 shrink-0 opacity-60 transition-transform duration-200 ease-out", modelDropdownOpen && "rotate-180")} />
               )}
             </button>
             {modelDropdownOpen && combos.length > 0 && (
-              <div className="absolute bottom-full left-0 z-50 mb-1 max-h-72 overflow-hidden overflow-y-auto rounded border border-[var(--ui-border)] bg-[var(--ui-surface)] shadow-lg">
+              <div className="absolute bottom-full left-0 z-50 mb-1 max-h-72 origin-bottom-left animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-1 duration-150 ease-out overflow-hidden overflow-y-auto rounded border border-[var(--ui-border)] bg-[var(--ui-surface)] shadow-lg">
                 {combos.map((combo) => {
                   const selected =
                     !!selection &&
@@ -339,7 +334,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
                     >
                       {formatModelSelection(models, combo)}
                       {selected && (
-                        <span className="ml-auto pl-3 text-[color:var(--ui-text-dim)]">
+                        <span className="ml-auto animate-in fade-in-0 zoom-in-75 pl-3 text-[color:var(--ui-text-dim)] duration-150">
                           ✓
                         </span>
                       )}
@@ -350,26 +345,17 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
             )}
           </div>
 
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={disabled || pendingImages.length >= MAX_IMAGE_COUNT}
-            aria-label="Attach images"
-            className="ml-auto flex size-7 shrink-0 items-center justify-center rounded-full text-[color:var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-panel-2)] hover:text-[color:var(--ui-text)] disabled:cursor-default disabled:opacity-40"
-          >
-            <ImagePlus className="size-4" />
-          </button>
-
           {showStop ? (
             <button
               type="button"
               onClick={onStop}
               disabled={stopping}
-              aria-label="Stop run"
-              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--ui-accent)] text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-40"
+              aria-label="停止任务"
+              title="停止任务"
+              className="ml-auto flex size-[32px] shrink-0 items-center justify-center rounded-full bg-[var(--ui-accent)] text-white shadow-sm transition-[opacity,transform,box-shadow] duration-200 hover:shadow-md hover:opacity-90 active:scale-95 disabled:cursor-default disabled:opacity-40"
             >
               {stopping ? (
-                <LoaderCircle className="size-3.5 animate-spin" />
+                <LoaderCircle className="agents-spinner size-3.5" />
               ) : (
                 <Square className="size-3 fill-current" strokeWidth={0} />
               )}
@@ -379,11 +365,12 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
               type="button"
               onClick={handleSubmit}
               disabled={!canSubmit}
-              aria-label="Send message"
-              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--ui-accent)] text-white transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-40"
+              aria-label="发送消息"
+              title="发送"
+              className="ml-auto flex size-[32px] shrink-0 items-center justify-center rounded-full bg-[var(--ui-accent)] text-white shadow-sm transition-[opacity,transform,box-shadow] duration-200 hover:shadow-md hover:opacity-90 active:scale-95 disabled:cursor-default disabled:opacity-40"
             >
               {disabled ? (
-                <LoaderCircle className="size-3.5 animate-spin" />
+                <LoaderCircle className="agents-spinner size-3.5" />
               ) : (
                 <ArrowUp className="size-3.5" strokeWidth={2.5} />
               )}
@@ -394,3 +381,4 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
     </div>
   )
 })
+

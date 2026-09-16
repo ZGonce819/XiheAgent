@@ -27,9 +27,16 @@ export const Route = createFileRoute("/usage")({
 })
 
 const PERIOD_LABELS: Record<UsageLeaderboardPeriod, string> = {
-  "7d": "Last 7 days",
-  "30d": "Last 30 days",
-  all: "All time",
+  "7d": "最近 7 天",
+  "30d": "最近 30 天",
+  all: "全部时间",
+}
+
+const SEVERITY_LABELS: Record<string, string> = {
+  critical: "严重",
+  high: "高",
+  medium: "中",
+  low: "低",
 }
 
 function UsagePage() {
@@ -121,8 +128,8 @@ function UsagePage() {
       </SettingsSection>
 
       <SettingsSection
-        title="Reviewer stats"
-        description="Issues surfaced by PR Review and how often users addressed them."
+        title="审查统计"
+        description="代码审查发现的问题，以及用户处理这些问题的频率。"
       >
         {leaderboard.isLoading || reviewerIsPrecomputing ? (
           <div className="grid gap-3 p-4 sm:grid-cols-2">
@@ -133,14 +140,13 @@ function UsagePage() {
           </div>
         ) : leaderboard.isError ? (
           <p className="p-4 text-xs text-destructive">
-            Failed to load reviewer stats: {leaderboard.error.message}
+            加载审查统计失败：{leaderboard.error.message}
           </p>
         ) : leaderboard.data?.reviewer_stats ? (
           <ReviewerStats stats={leaderboard.data.reviewer_stats} />
         ) : (
           <div className="p-6 text-center text-sm text-muted-foreground">
-            No reviewer stats have been recorded for{" "}
-            {PERIOD_LABELS[activePeriod].toLowerCase()} yet.
+            {PERIOD_LABELS[activePeriod]}还没有审查统计。
           </div>
         )}
       </SettingsSection>
@@ -160,13 +166,13 @@ function UsageTable({
       <table className="w-full min-w-[760px] text-sm">
         <thead className="border-b border-border text-xs text-muted-foreground">
           <tr>
-            <th className="w-14 px-4 py-3 text-left font-normal">Rank</th>
-            <th className="px-2 py-3 text-left font-normal">User</th>
-            <th className="px-2 py-3 text-left font-normal">Favorite Model</th>
-            <th className="px-2 py-3 text-right font-normal">Agent Runs</th>
-            <th className="px-2 py-3 text-right font-normal">PRs Opened</th>
-            <th className="px-2 py-3 text-right font-normal">Merged PRs</th>
-            <th className="px-4 py-3 text-right font-normal">Agent LOC</th>
+            <th className="w-14 px-4 py-3 text-left font-normal">排名</th>
+            <th className="px-2 py-3 text-left font-normal">用户</th>
+            <th className="px-2 py-3 text-left font-normal">常用模型</th>
+            <th className="px-2 py-3 text-right font-normal">运行次数</th>
+            <th className="px-2 py-3 text-right font-normal">已创建 PR</th>
+            <th className="px-2 py-3 text-right font-normal">已合并 PR</th>
+            <th className="px-4 py-3 text-right font-normal">代码行数</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
@@ -192,7 +198,7 @@ function UsageTable({
               </td>
               <td
                 className="px-4 py-3 text-right tabular-nums"
-                title={`${formatNumber(row.additions)} additions, ${formatNumber(row.deletions)} deletions`}
+                title={`新增 ${formatNumber(row.additions)} 行，删除 ${formatNumber(row.deletions)} 行`}
               >
                 {formatNumber(row.agent_loc)}
               </td>
@@ -201,8 +207,7 @@ function UsageTable({
         </tbody>
       </table>
       <div className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
-        Top {Math.min(10, totalMembers)} of {formatNumber(totalMembers)} member
-        {totalMembers === 1 ? "" : "s"}
+        共 {formatNumber(totalMembers)} 位成员，显示前 {Math.min(10, totalMembers)} 位
       </div>
     </div>
   )
@@ -211,34 +216,34 @@ function UsageTable({
 function ReviewerStats({ stats }: { stats: ReviewerStatsPayload }) {
   const cards = [
     {
-      label: "Reviewed PRs",
+      label: "已审查 PR",
       value: stats.reviewed_prs,
-      helper: `${formatNumber(stats.prs_with_findings)} with findings`,
+      helper: `${formatNumber(stats.prs_with_findings)} 个发现问题`,
     },
     {
-      label: "Issues surfaced",
+      label: "发现的问题",
       value: stats.surfaced_findings,
-      helper: `${formatNumber(stats.findings_recorded)} recorded`,
+      helper: `已记录 ${formatNumber(stats.findings_recorded)} 个`,
     },
     {
-      label: "Addressed & resolved",
+      label: "已处理并解决",
       value: stats.addressed_findings,
-      helper: `${formatPercent(stats.resolution_rate)} of surfaced`,
+      helper: `占已发现问题的 ${formatPercent(stats.resolution_rate)}`,
     },
     {
-      label: "Resolved after update",
+      label: "更新后解决",
       value: stats.resolved_after_update,
-      helper: "Resolved on a later PR head",
+      helper: "在后续 PR 提交中解决",
     },
     {
-      label: "Awaiting follow-up",
+      label: "等待跟进",
       value: stats.unresolved_surfaced_findings,
-      helper: "Surfaced but not resolved/dismissed",
+      helper: "尚未解决或忽略",
     },
     {
-      label: "Dismissed",
+      label: "已忽略",
       value: stats.dismissed_findings,
-      helper: `${formatNumber(stats.human_replies)} human replies tracked`,
+      helper: `已跟踪 ${formatNumber(stats.human_replies)} 条人工回复`,
     },
   ]
 
@@ -258,8 +263,8 @@ function ReviewerStats({ stats }: { stats: ReviewerStatsPayload }) {
         ))}
       </div>
       <div className="grid gap-4 border-t border-border pt-4 sm:grid-cols-2">
-        <CounterList title="Top categories" rows={stats.top_categories} />
-        <CounterList title="Severity mix" rows={severityRows(stats)} />
+        <CounterList title="主要类别" rows={stats.top_categories} />
+        <CounterList title="严重程度" rows={severityRows(stats)} />
       </div>
     </div>
   )
@@ -270,7 +275,7 @@ function severityRows(
 ): Array<{ name: string; count: number }> {
   return ["critical", "high", "medium", "low"]
     .map((severity) => ({
-      name: severity,
+      name: SEVERITY_LABELS[severity] ?? severity,
       count: stats.severity_counts[severity] ?? 0,
     }))
     .filter((row) => row.count > 0)
@@ -301,7 +306,7 @@ function CounterList({
           ))}
         </ul>
       ) : (
-        <p className="mt-2 text-xs text-muted-foreground">No data yet.</p>
+        <p className="mt-2 text-xs text-muted-foreground">暂无数据。</p>
       )}
     </div>
   )
@@ -319,7 +324,7 @@ function UserCell({ row }: { row: UsageLeaderboardRow }) {
           {row.user.name}
         </span>
         <span className="truncate text-xs text-muted-foreground">
-          {row.user.email ?? row.user.github_login ?? "unknown"}
+          {row.user.email ?? row.user.github_login ?? "未知用户"}
         </span>
       </div>
     </div>
@@ -336,11 +341,11 @@ function initialsFor(name: string): string {
 }
 
 function formatNumber(value: number): string {
-  return new Intl.NumberFormat().format(value)
+  return new Intl.NumberFormat("zh-CN").format(value)
 }
 
 function formatPercent(value: number): string {
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat("zh-CN", {
     maximumFractionDigits: 0,
     style: "percent",
   }).format(value)

@@ -99,19 +99,19 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
   };
 
   return (
-    <div className="my-2 max-w-full overflow-hidden rounded-xl bg-[var(--ui-accent-bubble)]">
+    <div className="my-2 max-w-full overflow-hidden rounded-lg bg-[var(--ui-accent-bubble)]">
       <div className="flex items-center justify-between px-3 py-2 text-xs">
         <span className="text-[color:var(--ui-text-muted)]">{displayLanguage}</span>
         <button
           type="button"
           onClick={handleCopy}
           className="text-[color:var(--ui-text-muted)] hover:text-[color:var(--ui-text)] transition-colors"
-          title="Copy code"
+          title="复制代码"
         >
-          {copied ? "Copied" : "Copy"}
+          {copied ? "已复制" : "复制"}
         </button>
       </div>
-      <pre className="max-w-full px-3 pb-3 text-[12px] whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+      <pre className="max-w-full px-3 pb-3 text-[0.75rem] whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
         {tokens ? (
           <code className="block max-w-full">
             {tokens.map((lineTokens, lineIndex) => (

@@ -4,10 +4,7 @@ import {
   Scripts,
   createRootRoute,
 } from "@tanstack/react-router"
-import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools"
-import { TanStackDevtools } from "@tanstack/react-devtools"
 import { QueryClientProvider } from "@tanstack/react-query"
-import { ReactQueryDevtools } from "@tanstack/react-query-devtools"
 import { useState } from "react"
 
 import appCss from "../styles.css?url"
@@ -36,9 +33,7 @@ export const Route = createRootRoute({
   notFoundComponent: () => (
     <main className="container mx-auto p-4 pt-16">
       <h1 className="text-2xl font-medium">404</h1>
-      <p className="text-muted-foreground">
-        The requested page could not be found.
-      </p>
+      <p className="text-muted-foreground">找不到请求的页面。</p>
     </main>
   ),
   shellComponent: RootDocument,
@@ -46,8 +41,10 @@ export const Route = createRootRoute({
 
 function RootDocument({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => makeQueryClient())
+  // Theme is applied by the inline bootstrap before hydration, so the
+  // document root intentionally differs from the server's neutral markup.
   return (
-    <html lang="en">
+    <html lang="zh-CN" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
         <HeadContent />
@@ -55,16 +52,6 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       <body>
         <QueryClientProvider client={queryClient}>
           {children ?? <Outlet />}
-          <TanStackDevtools
-            config={{ position: "bottom-right" }}
-            plugins={[
-              {
-                name: "Tanstack Router",
-                render: <TanStackRouterDevtoolsPanel />,
-              },
-            ]}
-          />
-          <ReactQueryDevtools initialIsOpen={false} />
         </QueryClientProvider>
         <Scripts />
       </body>

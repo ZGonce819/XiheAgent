@@ -71,22 +71,30 @@ export function SidebarFrame({
 }: SidebarFrameProps) {
   if (collapsed) {
     return (
-      <button
-        type="button"
-        aria-label="Expand sidebar"
-        onClick={toggle}
-        className="fixed top-3 left-3 z-30 flex size-7 items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
+      <div
+        className={cn(
+          "relative flex h-svh w-12 shrink-0 items-start justify-center border-r border-border bg-background animate-in fade-in-0 slide-in-from-left-2 duration-200 ease-out",
+          "max-md:pointer-events-none max-md:w-0 max-md:border-0 max-md:bg-transparent",
+          className,
+        )}
       >
-        <SidebarSimpleIcon className="size-4" />
-      </button>
+        <button
+          type="button"
+          aria-label="展开侧栏"
+          onClick={toggle}
+          className="group pointer-events-auto mt-3 inline-flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm transition-[transform,background-color,color,box-shadow] duration-200 ease-out hover:scale-105 hover:bg-accent hover:text-foreground hover:shadow-md active:scale-95 max-md:fixed max-md:left-3 max-md:top-3 max-md:mt-0"
+        >
+          <SidebarSimpleIcon className="size-4 transition-transform duration-200 ease-out group-hover:scale-110" />
+        </button>
+      </div>
     );
   }
 
   return (
     <aside
-      style={{ width }}
+      style={{ width: `${width / 16}rem` }}
       className={cn(
-        "relative flex h-svh shrink-0 flex-col",
+        "relative flex h-svh shrink-0 flex-col animate-in fade-in-0 slide-in-from-left-2 duration-200 ease-out",
         "max-md:fixed max-md:inset-0 max-md:z-40 max-md:!w-full",
         "max-md:animate-in max-md:fade-in-0 max-md:slide-in-from-left-4 max-md:duration-200 max-md:ease-out",
         className,
@@ -101,19 +109,20 @@ export function SidebarFrame({
 }
 
 function ResizeHandle({ width, onResize }: { width: number; onResize: (next: number) => void }) {
-  const startRef = useRef<{ x: number; width: number } | null>(null);
+  const startRef = useRef<{ x: number; width: number; scale: number } | null>(null);
   const [dragging, setDragging] = useState(false);
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
-    startRef.current = { x: e.clientX, width };
+    const scale = parseFloat(getComputedStyle(document.documentElement).fontSize) / 16;
+    startRef.current = { x: e.clientX, width, scale };
     setDragging(true);
     e.currentTarget.setPointerCapture(e.pointerId);
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!startRef.current) return;
-    const next = startRef.current.width + (e.clientX - startRef.current.x);
+    const next = startRef.current.width + (e.clientX - startRef.current.x) / startRef.current.scale;
     onResize(next);
   };
 
@@ -161,7 +170,7 @@ export function SidebarCollapseButton({ onToggle, className }: SidebarCollapseBu
   return (
     <button
       type="button"
-      aria-label="Collapse sidebar"
+      aria-label="收起侧栏"
       onClick={onToggle}
       className={cn(
         "flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground",

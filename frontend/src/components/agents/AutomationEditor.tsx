@@ -14,6 +14,7 @@ import { RepoSelector } from "@/components/agents/RepoSelector"
 import { ScheduleTriggerPicker } from "@/components/agents/ScheduleTriggerPicker"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { describeCron, presetForCron } from "@/lib/agents/cron"
 import {
   useCreateAgentSchedule,
@@ -63,6 +64,7 @@ export function AutomationEditor({ mode, schedule }: AutomationEditorProps) {
   )
   const [repo, setRepo] = useState<string | null>(schedule?.repo ?? null)
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true)
+  const [deleteOpen, setDeleteOpen] = useState(false)
   // undefined = untouched (derive from the schedule / default as models load).
   const [selectionOverride, setSelectionOverride] = useState<
     ModelSelection | null | undefined
@@ -130,13 +132,11 @@ export function AutomationEditor({ mode, schedule }: AutomationEditorProps) {
 
   const handleDelete = () => {
     if (!schedule) return
-    if (!window.confirm(`Delete "${schedule.name}"?`)) return
-    deleteSchedule.mutate(schedule.id, {
-      onSuccess: () => navigate({ to: "/agents/automations" }),
-    })
+    setDeleteOpen(true)
   }
 
   return (
+    <>
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
       <header className="flex items-center justify-between gap-3 px-6 py-4 max-md:pt-14">
         <div className="flex min-w-0 items-center gap-1.5 text-sm text-[var(--ui-text-dim)]">
@@ -200,7 +200,7 @@ export function AutomationEditor({ mode, schedule }: AutomationEditorProps) {
         </div>
 
         <SectionLabel>触发器</SectionLabel>
-        <div className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-1.5">
+        <div className="rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface)] p-1.5">
           {cron && (
             <div className="flex items-center gap-3 rounded-lg px-3 py-2.5">
               <ClockIcon className="size-4 shrink-0 text-[var(--ui-text-muted)]" />
@@ -237,7 +237,7 @@ export function AutomationEditor({ mode, schedule }: AutomationEditorProps) {
         </div>
 
         <SectionLabel>智能体指令</SectionLabel>
-        <div className="rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3">
+        <div className="rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3">
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
@@ -258,7 +258,24 @@ export function AutomationEditor({ mode, schedule }: AutomationEditorProps) {
           <p className="mt-4 text-sm text-[var(--ui-danger)]">{errorMessage}</p>
         )}
       </div>
-    </div>
+      </div>
+      {schedule && (
+        <ConfirmDialog
+          open={deleteOpen}
+          title="删除自动任务"
+          description={`将永久删除“${schedule.name}”，此操作无法撤销。`}
+          confirmText="删除"
+          destructive
+          busy={deleteSchedule.isPending}
+          onOpenChange={setDeleteOpen}
+          onConfirm={() =>
+            deleteSchedule.mutate(schedule.id, {
+              onSuccess: () => navigate({ to: "/agents/automations" }),
+            })
+          }
+        />
+      )}
+    </>
   )
 }
 

@@ -202,12 +202,28 @@ def message_payload(thread: dict[str, Any]) -> list[dict[str, Any]]:
     return messages
 
 
-def conversation_snapshot(thread: dict[str, Any]) -> dict[str, Any]:
+def conversation_snapshot(
+    thread: dict[str, Any],
+    *,
+    edited_message_id: str | None = None,
+) -> dict[str, Any]:
     """Build the read-only UI state archived before a message edit."""
 
+    messages = message_payload(thread)
+    edited_user_index = None
+    if edited_message_id:
+        user_index = 0
+        for message in messages:
+            if message.get("role") == "user" or message.get("author") == "user":
+                if str(message.get("id") or "") == edited_message_id:
+                    edited_user_index = user_index
+                    break
+                user_index += 1
     return {
-        "messages": message_payload(thread),
+        "messages": messages,
         "runEvents": thread.get("run_events") or [],
+        "editedMessageId": edited_message_id,
+        "editedUserIndex": edited_user_index,
     }
 
 

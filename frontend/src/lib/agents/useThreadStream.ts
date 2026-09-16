@@ -1,6 +1,4 @@
-import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-
-import { agentsApi } from "./api";
+import type { QueryClient } from "@tanstack/react-query";
 import { agentThreadKeys } from "./queries";
 import type {
   AgentStatus,
@@ -54,6 +52,7 @@ interface ThreadMetaPayload {
   pr?: AgentThread["pr"];
   updatedAt?: number;
   runEvents?: Array<RunEvent>;
+  conversationVersions?: AgentThread["conversationVersions"];
 }
 
 interface TextDeltaPayload {
@@ -182,14 +181,6 @@ function applyMessageStart(
   if (!messageId) return thread;
 
   const messages = thread.messages.slice();
-  const previousIndex = findRunMessageIndex(messages, payloadRunId(data), "assistant");
-  if (previousIndex >= 0 && messages[previousIndex].id !== messageId) {
-    const previous = messages[previousIndex];
-    if (previous.chunks.some((chunk) => chunk.kind === "text" && chunk.text.trim())) {
-      messages[previousIndex] = { ...previous, executionNarration: true };
-    }
-  }
-
   if (!messages.some((message) => message.id === messageId)) {
     messages.push(ensureAgentMessage({ ...thread, messages }, messageId));
   }
@@ -271,10 +262,7 @@ function applyTodoDelta(thread: AgentThread, data: TodoDeltaPayload): AgentThrea
 
   const current = ensureAgentMessage(thread, messageId);
   const todoChunk: Chunk = { kind: "todo", todos };
-  const chunks: Array<Chunk> = [
-    { kind: "text", text: "任务计划" },
-    todoChunk,
-  ];
+  const chunks: Array<Chunk> = [todoChunk];
 
   const planMessage: Message = {
     ...current,
@@ -309,6 +297,7 @@ function applyThreadMeta(thread: AgentThread, data: ThreadMetaPayload): AgentThr
     pr: data.pr ?? thread.pr,
     updatedAt: data.updatedAt ?? thread.updatedAt,
     runEvents: data.runEvents ?? thread.runEvents,
+    conversationVersions: data.conversationVersions ?? thread.conversationVersions,
   };
 }
 
@@ -341,7 +330,7 @@ function toolChunkFromEvent(
   let input: Record<string, unknown> | undefined;
 
   if (toolKind === "read" || toolKind === "search") {
-    const path = args.path || args.file || args.text;
+    const path = args.file_path || args.path || args.file || args.text;
     if (path) input = { path: String(path) };
   } else if (["edit", "delete", "move"].includes(toolKind)) {
     const path = args.file_path || args.path || args.file;
@@ -383,12 +372,14 @@ function isExecutionEvent(event: RunEvent): boolean {
 
 export function normalizeThreadHistory(thread: AgentThread): AgentThread {
   const events = thread.runEvents ?? [];
-  if (!events.some(isAssistantStreamEvent)) return thread;
+  if (!events.some(isAssistantStreamEvent)) {
+    return thread;
+  }
 
   const rebuiltMessages: Message[] = [];
-  let phase: { id: string; timestamp: string; text: string; tools: ToolExecutionChunk[] } | null = null;
+  let phase: { id: string; timestamp: string; text: string; tools: ToolExecutionChunk[]; execution?: boolean } | null = null;
 
-  const flushPhase = (final: boolean) => {
+  const flushPhase = () => {
     if (!phase) return;
     const chunks: Chunk[] = [];
     if (phase.text) chunks.push({ kind: "text", text: phase.text });
@@ -399,7 +390,7 @@ export function normalizeThreadHistory(thread: AgentThread): AgentThread {
         author: "agent",
         timestamp: phase.timestamp,
         chunks,
-        executionNarration: !final,
+        executionNarration: Boolean(phase.execution || phase.tools.length),
       });
     }
     phase = null;
@@ -407,7 +398,7 @@ export function normalizeThreadHistory(thread: AgentThread): AgentThread {
 
   for (const event of events) {
     if (isAssistantStreamEvent(event)) {
-      flushPhase(false);
+      flushPhase();
       phase = {
         id: `history-${event.id}`,
         timestamp: event.created_at,
@@ -417,6 +408,7 @@ export function normalizeThreadHistory(thread: AgentThread): AgentThread {
       continue;
     }
     if (!isExecutionEvent(event)) continue;
+    if (phase) phase.execution = true;
     const tool = toolChunkFromEvent(event);
     if (!tool) continue;
     if (!phase) {
@@ -431,33 +423,13 @@ export function normalizeThreadHistory(thread: AgentThread): AgentThread {
     if (existingIndex >= 0) phase.tools[existingIndex] = tool;
     else phase.tools.push(tool);
   }
-  // The last assistant stream block is the user-facing answer. Keep it as
-  // normal body text even if a provider reports a trailing tool event.
-  if (phase) {
-    const finalPhase = phase;
-    if (finalPhase.tools.length > 0) {
-      rebuiltMessages.push({
-        id: `${finalPhase.id}-tools`,
-        author: "agent",
-        timestamp: finalPhase.timestamp,
-        chunks: finalPhase.tools,
-        executionNarration: true,
-      });
-    }
-    if (finalPhase.text) {
-      rebuiltMessages.push({
-        id: finalPhase.id,
-        author: "agent",
-        timestamp: finalPhase.timestamp,
-        chunks: [{ kind: "text", text: finalPhase.text }],
-      });
-    }
-    phase = null;
-  }
+  // A phase ending in tool calls is execution, even if the run stops there.
+  // Only a separate assistant phase without tools is answer text.
+  flushPhase();
 
   let lastUserIndex = -1;
   for (let index = thread.messages.length - 1; index >= 0; index -= 1) {
-    if (thread.messages[index].author === "user") {
+    if (thread.messages[index]!.author === "user") {
       lastUserIndex = index;
       break;
     }
@@ -465,6 +437,24 @@ export function normalizeThreadHistory(thread: AgentThread): AgentThread {
   const prefix = thread.messages.slice(0, lastUserIndex + 1);
   const suffix = thread.messages.slice(lastUserIndex + 1);
   const plans = suffix.filter((message) => message.chunks.some((chunk) => chunk.kind === "todo"));
+  const finalizedTodos = plans.flatMap((message) =>
+    message.chunks
+      .filter((chunk): chunk is Extract<Chunk, { kind: "todo" }> => chunk.kind === "todo"),
+  );
+  if (finalizedTodos.length > 0) {
+    const firstExecutionIndex = rebuiltMessages.findIndex((message) =>
+      message.author === "agent" && message.executionNarration,
+    );
+    if (firstExecutionIndex >= 0) {
+      const executionMessage = rebuiltMessages[firstExecutionIndex]!;
+      rebuiltMessages[firstExecutionIndex] = {
+        ...executionMessage,
+        chunks: [...finalizedTodos, ...executionMessage.chunks],
+      };
+    } else {
+      rebuiltMessages.unshift({ ...plans[0]!, chunks: finalizedTodos, executionNarration: true });
+    }
+  }
   const preserved = suffix.filter((message) =>
     !message.chunks.some((chunk) => chunk.kind === "todo")
     && message.chunks.some((chunk) => !["text", "tool-execution"].includes(chunk.kind)),
@@ -472,7 +462,12 @@ export function normalizeThreadHistory(thread: AgentThread): AgentThread {
 
   return {
     ...thread,
-    messages: [...prefix, ...plans, ...rebuiltMessages, ...preserved],
+    messages: [
+      ...prefix,
+      ...(finalizedTodos.length > 0 ? [] : plans),
+      ...rebuiltMessages,
+      ...preserved,
+    ],
   };
 }
 
@@ -498,7 +493,21 @@ export function handleStreamPart(
     const messageId = typeof data.message_id === "string" ? data.message_id : "";
     if (!messageId) return;
     updateThread(threadId, queryClient, (thread) => {
-      const index = thread.messages.findIndex((message) => message.id === messageId);
+      let index = thread.messages.findIndex((message) => message.id === messageId);
+      const originalContent = typeof data.message_content === "string" ? data.message_content.trim() : "";
+      if (index < 0 && originalContent) {
+        index = thread.messages.findLastIndex((message) =>
+          message.author === "user"
+          && message.chunks
+            .filter((chunk): chunk is Extract<Chunk, { kind: "text" }> => chunk.kind === "text")
+            .map((chunk) => chunk.text)
+            .join("")
+            .trim() === originalContent,
+        );
+      }
+      if (index < 0 && !originalContent) {
+        index = thread.messages.findLastIndex((message) => message.author === "user");
+      }
       return index < 0 ? thread : { ...thread, messages: thread.messages.slice(0, index) };
     });
     return;
@@ -561,7 +570,7 @@ export function handleStreamPart(
         updated[duplicateIndex] = {
           ...updated[duplicateIndex],
           ...runEvent,
-          created_at: updated[duplicateIndex].created_at,
+          created_at: updated[duplicateIndex]!.created_at,
         };
         updatedRunEvents = updated;
       } else {
@@ -570,6 +579,14 @@ export function handleStreamPart(
 
       let nextThread = { ...thread, runEvents: updatedRunEvents };
       if (toolName === "write_todos") {
+        const assistantIndex = findRunMessageIndex(nextThread.messages, payload.run_id || null, "assistant");
+        if (assistantIndex >= 0) {
+          nextThread = {
+            ...nextThread,
+            messages: nextThread.messages.map((message, index) => index === assistantIndex
+              ? { ...message, executionNarration: true } : message),
+          };
+        }
         const args = isRecord(detail.args) ? detail.args : {};
         const todos = Array.isArray(args.todos) ? args.todos as Array<TodoItem> : [];
         return todos.length > 0
@@ -618,12 +635,24 @@ export function handleStreamPart(
         };
         const planIndex = findRunMessageIndex(messages, payload.run_id || null, "plan");
         const userIndex = findRunMessageIndex(messages, payload.run_id || null, "user");
-        const insertAt = planIndex >= 0 ? planIndex + 1 : userIndex >= 0 ? userIndex + 1 : messages.length;
+        const lastRunMessageIndex = findRunMessageIndex(
+          messages,
+          payload.run_id || null,
+          "assistant",
+        );
+        const insertAt = lastRunMessageIndex >= 0
+          ? lastRunMessageIndex + 1
+          : planIndex >= 0
+            ? planIndex + 1
+            : userIndex >= 0
+              ? userIndex + 1
+              : messages.length;
         messages = insertOrReplaceAt(messages, newAgentMessage, insertAt);
         targetMessageIndex = messages.findIndex((message) => message.id === newAgentMessage.id);
       }
 
       const msg = messages[targetMessageIndex];
+      if (!msg) return nextThread;
       const existingChunkIndex = msg.chunks.findIndex(
         (chunk) => chunk.kind === "tool-execution" && chunk.toolCallId === toolChunk.toolCallId,
       );

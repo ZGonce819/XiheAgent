@@ -15,9 +15,9 @@ import { useTheme, type Theme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
 const THEME_OPTIONS: Array<{ value: Theme; label: string; icon: typeof IoSunnyOutline }> = [
-  { value: "light", label: "Light", icon: IoSunnyOutline },
-  { value: "dark", label: "Dark", icon: IoMoonOutline },
-  { value: "system", label: "System", icon: IoDesktopOutline },
+  { value: "light", label: "浅色", icon: IoSunnyOutline },
+  { value: "dark", label: "深色", icon: IoMoonOutline },
+  { value: "system", label: "跟随系统", icon: IoDesktopOutline },
 ];
 
 interface SidebarUserMenuProps {
@@ -73,7 +73,7 @@ export function SidebarUserMenu({ user, showSettingsLink = false }: SidebarUserM
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-xs font-medium">{user.login}</span>
           {user.email && (
-            <span className="truncate text-[10px] text-muted-foreground">{user.email}</span>
+            <span className="truncate text-[0.625rem] text-muted-foreground">{user.email}</span>
           )}
         </div>
       </button>
@@ -83,8 +83,8 @@ export function SidebarUserMenu({ user, showSettingsLink = false }: SidebarUserM
           className="absolute right-0 bottom-full left-0 mb-2 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
         >
           <div className="px-2 py-1.5">
-            <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-              Theme
+            <span className="text-[0.625rem] font-medium uppercase tracking-wide text-muted-foreground">
+              外观
             </span>
             <div className="mt-1.5 grid grid-cols-3 gap-1">
               {THEME_OPTIONS.map((option) => {
@@ -97,7 +97,7 @@ export function SidebarUserMenu({ user, showSettingsLink = false }: SidebarUserM
                     onClick={() => setTheme(option.value)}
                     aria-pressed={active}
                     className={cn(
-                      "flex flex-col items-center gap-1 rounded-sm border px-1 py-1.5 text-[10px] transition-colors",
+                      "flex flex-col items-center gap-1 rounded-sm border px-1 py-1.5 text-[0.625rem] transition-colors",
                       active
                         ? "border-primary/40 bg-primary/10 text-primary"
                         : "border-transparent text-muted-foreground hover:bg-muted",
@@ -119,7 +119,7 @@ export function SidebarUserMenu({ user, showSettingsLink = false }: SidebarUserM
               className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs/relaxed hover:bg-muted"
             >
               <IoSettingsOutline className="size-3.5" />
-              Dashboard settings
+              控制台设置
             </Link>
           )}
           <button
@@ -129,7 +129,7 @@ export function SidebarUserMenu({ user, showSettingsLink = false }: SidebarUserM
             className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs/relaxed hover:bg-muted"
           >
             <IoLogOutOutline className="size-3.5" />
-            Sign out
+            退出登录
           </button>
         </div>
       )}

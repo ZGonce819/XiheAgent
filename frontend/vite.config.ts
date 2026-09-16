@@ -2,18 +2,29 @@ import { defineConfig } from "vite"
 import { devtools } from "@tanstack/devtools-vite"
 import { tanstackStart } from "@tanstack/react-start/plugin/vite"
 import viteReact from "@vitejs/plugin-react"
-import viteTsConfigPaths from "vite-tsconfig-paths"
 import tailwindcss from "@tailwindcss/vite"
 import { nitro } from "nitro/vite"
 import { VitePWA } from "vite-plugin-pwa"
 
+const apiTarget = process.env.VITE_DASHBOARD_API_BASE_URL || "http://127.0.0.1:2024"
+
 const config = defineConfig({
+  server: {
+    host: "127.0.0.1",
+    port: 3000,
+    proxy: {
+      "/dashboard/api": {
+        target: apiTarget,
+        changeOrigin: true,
+      },
+    },
+  },
+  resolve: {
+    tsconfigPaths: true,
+  },
   plugins: [
     devtools(),
     nitro(),
-    viteTsConfigPaths({
-      projects: ["./tsconfig.json"],
-    }),
     tailwindcss(),
     tanstackStart({ spa: { enabled: true } }),
     VitePWA({

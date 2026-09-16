@@ -21,7 +21,7 @@ const OPTIONS: Array<{ id: string; label: string; cron: string | null }> = [
 
 export function ScheduleTriggerPicker({
   onSelect,
-  triggerLabel = "Add Trigger",
+  triggerLabel = "添加触发器",
 }: ScheduleTriggerPickerProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -48,8 +48,8 @@ export function ScheduleTriggerPicker({
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 z-50 mt-1 w-72 overflow-hidden rounded-xl border border-[var(--ui-border)] bg-[var(--ui-surface)] py-1 shadow-lg">
-          <div className="flex items-center gap-2 px-3 py-1.5 text-[11px] font-semibold tracking-wide text-[var(--ui-text-dim)] uppercase">
+        <div className="absolute top-full left-0 z-50 mt-1 w-72 overflow-hidden rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface)] py-1 shadow-lg">
+          <div className="flex items-center gap-2 px-3 py-1.5 text-[0.6875rem] font-semibold tracking-wide text-[var(--ui-text-dim)] uppercase">
             <ClockIcon className="size-3.5" />
             Scheduled
           </div>

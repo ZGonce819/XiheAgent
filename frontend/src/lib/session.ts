@@ -15,5 +15,9 @@ export function useSession() {
     },
     staleTime: 60_000,
     retry: false,
+    // Authentication is cookie-bound and the app is served as an SPA. Avoid
+    // issuing a server-side session request without the browser cookie; this
+    // keeps the SSR shell deterministic and lets the client resolve auth.
+    enabled: typeof window !== "undefined",
   });
 }

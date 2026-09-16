@@ -1,4 +1,5 @@
 import { memo, useState, useCallback, useRef, useLayoutEffect } from "react";
+import { ChevronDown } from "lucide-react";
 import { diffLines } from "diff";
 import { MultiFileDiff } from "@pierre/diffs/react";
 import type { ToolExecutionChunk, AcpToolKind } from "@/lib/agents/types";
@@ -16,9 +17,12 @@ interface ToolExecutionProps {
 }
 
 function stripProjectPath(path: string, projectPath?: string): string {
-  if (!projectPath || !path.startsWith(projectPath)) return path;
-  const relative = path.slice(projectPath.length);
-  return relative.startsWith("/") ? "." + relative : "./" + relative;
+  const normalizedPath = path.replace(/\\/g, "/");
+  if (!projectPath) return normalizedPath;
+  const normalizedProject = projectPath.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (normalizedPath === normalizedProject) return ".";
+  if (!normalizedPath.startsWith(`${normalizedProject}/`)) return normalizedPath;
+  return normalizedPath.slice(normalizedProject.length + 1);
 }
 
 function getFileName(path: string): string {
@@ -67,7 +71,7 @@ function formatToolDisplay(
   switch (toolKind) {
     case "read": {
       if (path) {
-        return `读取文件(${getFileName(path)})`;
+        return `读取文件(${stripProjectPath(path, projectPath)})`;
       }
       return "读取文件";
     }
@@ -160,13 +164,13 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
 
   if (!expanded) {
     return (
-      <div className="my-0.5 text-[12px] leading-5">
+      <div className="my-0.5 text-[0.75rem] leading-5">
         <button
           type="button"
           onClick={toggle}
           className="inline-flex items-center gap-1.5 text-left hover:brightness-125 transition-colors"
         >
-          <span className={isError ? "text-red-400" : "text-[color:var(--ui-text-muted)]"}>
+          <span className={isError ? "text-[color:var(--ui-danger)]" : "text-[color:var(--ui-text-muted)]"}>
             已编辑 <span className="text-[color:var(--ui-accent)]">{fileName}</span>
           </span>
         </button>
@@ -176,27 +180,27 @@ const InlineDiffCollapsible = memo(function InlineDiffCollapsible({
 
   return (
     <div className="my-1">
-      <div className="my-0.5 text-[12px] leading-5 mb-1.5">
+      <div className="my-0.5 text-[0.75rem] leading-5 mb-1.5">
         <button
           type="button"
           onClick={toggle}
           className="inline-flex items-center gap-1.5 text-left hover:brightness-125 transition-colors"
         >
-          <span className={isError ? "text-red-400" : "text-[color:var(--ui-text-muted)]"}>
+          <span className={isError ? "text-[color:var(--ui-danger)]" : "text-[color:var(--ui-text-muted)]"}>
             已编辑文件
           </span>
-          <span className="text-[color:var(--ui-text-dim)] text-[10px]">▾</span>
+          <span className="text-[color:var(--ui-text-dim)] text-[0.625rem]">▾</span>
         </button>
       </div>
 
       <div className="rounded-lg bg-[var(--ui-accent-bubble)] overflow-hidden border border-[var(--ui-border-subtle)]">
         <div className="px-3 py-2 flex items-center gap-2">
-          <span className={`text-[13px] truncate flex-1 min-w-0 ${isError ? "text-red-400" : "text-[color:var(--ui-accent)]"}`}>
+          <span className={`text-[0.8125rem] truncate flex-1 min-w-0 ${isError ? "text-[color:var(--ui-danger)]" : "text-[color:var(--ui-accent)]"}`}>
             {filePath}
           </span>
           <span className="shrink-0 text-xs flex items-center gap-2">
-            <span className="text-green-400">+{additions}</span>
-            <span className="text-red-400">-{deletions}</span>
+            <span className="text-[color:var(--ui-success)]">+{additions}</span>
+            <span className="text-[color:var(--ui-danger)]">-{deletions}</span>
           </span>
         </div>
 
@@ -249,7 +253,7 @@ export const ToolExecution = memo(function ToolExecution({
 
   if (isEditOp && status === "pending" && diffData) {
     return (
-      <div className="my-1 text-[12px] leading-5">
+      <div className="my-1 text-[0.75rem] leading-5">
         <DiffView diffData={diffData} />
         <span className="text-[color:var(--ui-text-muted)]">等待批准...</span>
       </div>
@@ -264,7 +268,7 @@ export const ToolExecution = memo(function ToolExecution({
       projectPath,
     );
     return (
-      <div className="my-0.5 text-[12px] leading-5">
+      <div className="my-0.5 text-[0.75rem] leading-5">
         <span className="text-[color:var(--ui-text-muted)]">正在编辑 {getFileName(path)}...</span>
       </div>
     );
@@ -273,15 +277,15 @@ export const ToolExecution = memo(function ToolExecution({
   const displayName = formatToolDisplay(title, toolKind, input, projectPath);
   const statusTextClass =
     status === "error"
-      ? "text-red-400"
+      ? "text-[color:var(--ui-danger)]"
       : "text-[color:var(--ui-text-muted)]";
 
   return (
-    <div className="my-0.5 text-[12px] leading-5">
+    <div className="my-0.5 text-[0.75rem] leading-5">
       <div className="flex items-center gap-2 min-w-0">
         <span className={`${statusTextClass} truncate`}>{displayName}</span>
         {status === "error" && output && (
-          <span className="text-red-400/80 truncate">{output.slice(0, 80)}</span>
+          <span className="truncate text-[color:var(--ui-danger)] opacity-80">{output.slice(0, 80)}</span>
         )}
       </div>
       {(output || input) && (
@@ -289,19 +293,20 @@ export const ToolExecution = memo(function ToolExecution({
           <button
             type="button"
             onClick={() => setDetailsExpanded((prev) => !prev)}
-            className="text-[11px] text-[color:var(--ui-text-dim)] hover:text-[color:var(--ui-text-muted)]"
+            className="inline-flex items-center gap-1 text-[0.6875rem] text-[color:var(--ui-text-dim)] transition-[color,transform] duration-150 hover:text-[color:var(--ui-text-muted)] active:scale-[0.98]"
           >
             {detailsExpanded ? "隐藏细节" : "显示细节"}
+            <ChevronDown className={`size-3 transition-transform duration-200 ease-out ${detailsExpanded ? "rotate-180" : ""}`} />
           </button>
           {detailsExpanded && (
-            <div className="mt-1 space-y-1">
+            <div className="mt-1 animate-in fade-in-0 slide-in-from-top-1 duration-150 ease-out space-y-1">
               {input && Object.keys(input).length > 0 && (
-                <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-[var(--ui-accent-bubble)] px-2 py-1 text-[11px] leading-5 text-[color:var(--ui-text-muted)]">
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-[var(--ui-accent-bubble)] px-2 py-1 text-[0.6875rem] leading-5 text-[color:var(--ui-text-muted)]">
                   {JSON.stringify(input, null, 2)}
                 </pre>
               )}
               {output && (
-                <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-[var(--ui-accent-bubble)] px-2 py-1 text-[11px] leading-5 text-[color:var(--ui-text-muted)]">
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-[var(--ui-accent-bubble)] px-2 py-1 text-[0.6875rem] leading-5 text-[color:var(--ui-text-muted)]">
                   {output}
                 </pre>
               )}
