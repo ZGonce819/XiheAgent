@@ -13,7 +13,7 @@
 - 📊 **多平台 SCM 集成** - 支持 Gitee / GitHub / Codeup，自动检测平台并路由到对应工具
 - 🧠 **长期记忆系统** - 工作区级和仓库级记忆，支持跨会话知识积累
 - 🎯 **意图识别路由** - 自动区分编码任务、方案生成、同步操作等不同流程
-- 🖥️ **现代化前端** - Vue 3 + Vite + TanStack Router，响应式设计，支持深色模式
+- 🖥️ **现代化前端** - React + Vite + TanStack Router，响应式设计，支持深色模式
 
 ## 技术栈
 
@@ -35,12 +35,12 @@
 
 | 组件 | 技术选型 |
 |------|----------|
-| 框架 | Vue 3 + Vite |
-| 状态管理 | Pinia |
+| 框架 | React 19 + Vite |
+| 状态管理 | TanStack Query + React Context |
 | 路由 | TanStack Router |
-| HTTP 客户端 | Axios |
+| HTTP 客户端 | Fetch API |
 | Markdown 渲染 | markdown-it + DOMPurify |
-| 构建工具 | Vite 7 |
+| 构建工具 | Vite 8 |
 
 ## 快速开始
 
@@ -55,16 +55,39 @@
 | **PostgreSQL** | LangGraph Store（长期记忆） | ⚠️ 可选（不使用 memories 功能可跳过） |
 | **OpenSandbox** | 内核级代码沙盒隔离（企业多租户场景） | ⚠️ 可选（默认使用本地后端） |
 
-#### 快速安装（Windows + Docker）
+#### 快速安装（Docker）
 
 ```bash
-# 使用 Docker Compose 一键启动所有数据库
-docker-compose up -d
+# MySQL 8.4
+docker run -d \
+  -p 3306:3306 \
+  -e MYSQL_ROOT_PASSWORD=root \
+  -v /home/user/data/mysql/conf:/etc/mysql/conf.d \
+  -v /home/user/data/mysql/data:/var/lib/mysql:rw \
+  -v /home/user/data/mysql/my.cnf:/etc/mysql/my.cnf \
+  --name mysql \
+  --restart=always \
+  mysql:8.4.9
 
-# 或单独启动
-docker run -d --name redis -p 6379:6379 redis:7-alpine
-docker run -d --name mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=root -e MYSQL_DATABASE=xihe-agent mysql:8
-docker run -d --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=xihe-agent postgres:16
+# Redis Stack（含 RedisInsight）
+docker run -d \
+  --restart=always \
+  --name redis-stack \
+  -p 6379:6379 \
+  -p 8001:8001 \
+  -v /home/user/data/redis/data:/data \
+  -e REDIS_ARGS="--requirepass root" \
+  redis/redis-stack:latest
+
+# PostgreSQL
+docker run -d \
+  --name postgresql \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=postgres \
+  -p 5432:5432 \
+  -v /home/user/data/postgres/data:/var/lib/postgresql/18/docker \
+  -v /home/user/data/postgres/logs:/var/log/postgresql \
+  postgres:latest
 ```
 
 #### 手动安装
@@ -259,7 +282,7 @@ SANDBOX_PORT=8080
 xihe-agent-start
 
 # 方式二：直接启动
-uvicorn xihe.app:app --reload --host 127.0.0.1 --port 2024
+uvicorn app:app --reload --host 127.0.0.1 --port 2024
 ```
 
 ### 启动前端服务
@@ -401,15 +424,14 @@ xihe-agent/
 │   ├── start_all.py       # 启动脚本
 │   └── stop_all.py        # 停止脚本
 │
-├── frontend/              # 前端项目（Vue 3 + Vite）
+├── frontend/              # 前端项目（React + Vite）
 │   ├── src/
-│   │   ├── api/           # API 客户端（axios + SSE 解析）
-│   │   ├── components/    # Vue 组件
+│   │   ├── components/    # React 组件
+│   │   ├── lib/           # API 客户端与数据层
 │   │   ├── routes/        # TanStack Router 路由
-│   │   ├── stores/        # Pinia 状态管理
 │   │   └── styles/        # 样式文件
 │   ├── package.json       # 前端依赖
-│   └── vite.config.js     # Vite 配置（代理到后端）
+│   └── vite.config.ts     # Vite 配置（代理到后端）
 │
 └── reviewer_rules/        # 代码审查规则
     └── default_review_rules.md
