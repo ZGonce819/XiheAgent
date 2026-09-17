@@ -71,6 +71,11 @@ def get_custom_model(model_id: str) -> dict[str, Any] | None:
 def create_custom_model(payload: dict[str, Any]) -> dict[str, Any]:
     """新增一个自定义模型。"""
     models = _load_models()
+    set_default = bool(payload.get("set_default", False))
+    if set_default:
+        for model in models:
+            model["is_default"] = False
+        _clear_builtin_default()
     new_model: dict[str, Any] = {
         "id": str(uuid.uuid4())[:8],
         "name": payload.get("name", ""),
@@ -80,11 +85,8 @@ def create_custom_model(payload: dict[str, Any]) -> dict[str, Any]:
         "max_tokens": int(payload.get("max_tokens", 4096)),
         "temperature": float(payload.get("temperature", 0.7)),
         "thinking": bool(payload.get("thinking", False)),
-        "is_default": False,
+        "is_default": set_default,
     }
-    # 如果这是第一个模型，自动设为默认
-    if not models:
-        new_model["is_default"] = True
     models.append(new_model)
     _save_models(models)
     return {**new_model, "api_key": _mask_key(new_model["api_key"])}

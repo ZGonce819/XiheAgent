@@ -1,6 +1,6 @@
 import { Navigate, createFileRoute } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { Fragment, useState, type Dispatch, type SetStateAction } from "react"
 import {
   PencilIcon,
   TrashIcon,
@@ -11,10 +11,12 @@ import {
 import type { CustomModel, CustomModelInput, BuiltinModel } from "@/lib/api"
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
+import { cn } from "@/lib/utils"
 
 export const Route = createFileRoute("/my-settings")({
   component: MySettingsPage,
@@ -35,6 +37,194 @@ interface FormState extends CustomModelInput {
   is_default: boolean
 }
 
+function AnimatedCheckbox({
+  checked,
+  label,
+  onChange,
+}: {
+  checked: boolean
+  label: string
+  onChange: (checked: boolean) => void
+}) {
+  return (
+    <label className="group flex cursor-pointer items-center gap-1.5 text-xs">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        className="peer sr-only"
+      />
+      <span
+        className={cn(
+          "grid size-4 shrink-0 place-items-center rounded border transition-[border-color,background-color,transform,box-shadow] duration-150",
+          "peer-focus-visible:ring-2 peer-focus-visible:ring-ring/30",
+          checked
+            ? "scale-100 border-primary bg-primary text-primary-foreground"
+            : "border-input bg-background text-transparent group-hover:border-foreground/40"
+        )}
+      >
+        <CheckIcon
+          className={cn(
+            "size-3 transition-[transform,opacity] duration-150 ease-out motion-reduce:transition-opacity",
+            checked
+              ? "scale-100 rotate-0 opacity-100"
+              : "scale-50 -rotate-12 opacity-0"
+          )}
+          weight="bold"
+        />
+      </span>
+      {label}
+    </label>
+  )
+}
+
+function ModelForm({
+  form,
+  setForm,
+  isEditing,
+  isEditingBuiltin,
+  saving,
+  onSave,
+  onCancel,
+}: {
+  form: FormState
+  setForm: Dispatch<SetStateAction<FormState>>
+  isEditing: boolean
+  isEditingBuiltin: boolean
+  saving: boolean
+  onSave: () => void
+  onCancel: () => void
+}) {
+  return (
+    <div className="animate-in space-y-3 p-4 duration-200 fade-in-0 slide-in-from-top-2 motion-reduce:fade-in-0 motion-reduce:slide-in-from-top-0">
+      {isEditingBuiltin && (
+        <p className="text-xs text-muted-foreground">
+          内置模型的名称和模型 ID 由环境配置决定，不可修改。
+        </p>
+      )}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <label className="text-xs font-medium">显示名称</label>
+          <Input
+            value={form.name}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                name: event.target.value,
+              }))
+            }
+            placeholder="如：DeepSeek V3"
+            disabled={isEditingBuiltin}
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium">模型 ID</label>
+          <Input
+            value={form.model_name}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                model_name: event.target.value,
+              }))
+            }
+            placeholder="如：deepseek-chat"
+            disabled={isEditingBuiltin}
+          />
+        </div>
+      </div>
+      <div className="space-y-1">
+        <label className="text-xs font-medium">API Base URL</label>
+        <Input
+          value={form.api_base}
+          onChange={(event) =>
+            setForm((current) => ({
+              ...current,
+              api_base: event.target.value,
+            }))
+          }
+          placeholder="如：https://api.deepseek.com"
+          disabled={isEditingBuiltin}
+        />
+      </div>
+      <div className="space-y-1">
+        <label className="text-xs font-medium">API Key</label>
+        <Input
+          type="password"
+          value={form.api_key ?? ""}
+          onChange={(event) =>
+            setForm((current) => ({
+              ...current,
+              api_key: event.target.value,
+            }))
+          }
+          placeholder={
+            isEditing
+              ? isEditingBuiltin
+                ? "留空使用 .env 配置"
+                : "留空保持不变"
+              : "sk-..."
+          }
+        />
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <div className="space-y-1">
+          <label className="text-xs font-medium">Max Tokens</label>
+          <Input
+            type="number"
+            value={form.max_tokens}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                max_tokens: Number(event.target.value),
+              }))
+            }
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium">Temperature</label>
+          <Input
+            type="number"
+            step="0.1"
+            min="0"
+            max="2"
+            value={form.temperature}
+            onChange={(event) =>
+              setForm((current) => ({
+                ...current,
+                temperature: Number(event.target.value),
+              }))
+            }
+          />
+        </div>
+        <div className="flex items-end gap-3 pb-1">
+          <AnimatedCheckbox
+            checked={Boolean(form.thinking)}
+            label="Thinking"
+            onChange={(checked) =>
+              setForm((current) => ({ ...current, thinking: checked }))
+            }
+          />
+          <AnimatedCheckbox
+            checked={form.is_default}
+            label="默认"
+            onChange={(checked) =>
+              setForm((current) => ({ ...current, is_default: checked }))
+            }
+          />
+        </div>
+      </div>
+      <div className="flex items-center gap-2 pt-1">
+        <Button size="sm" onClick={onSave} disabled={saving}>
+          {isEditing ? "保存修改" : "添加模型"}
+        </Button>
+        <Button size="sm" variant="outline" onClick={onCancel}>
+          取消
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 function CustomModelsSection() {
   const qc = useQueryClient()
   const models = useQuery({
@@ -49,6 +239,11 @@ function CustomModelsSection() {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<FormState>({ ...EMPTY_FORM })
   const [error, setError] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<CustomModel | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [defaultFeedbackId, setDefaultFeedbackId] = useState<string | null>(
+    null
+  )
 
   const isEditingBuiltin = editing === "__builtin__"
 
@@ -83,12 +278,74 @@ function CustomModelsSection() {
 
   const deleteMut = useMutation({
     mutationFn: (id: string) => api.deleteCustomModel(id),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: ["customModels"] })
+      const previous = qc.getQueryData<Array<CustomModel>>(["customModels"])
+      qc.setQueryData<Array<CustomModel>>(["customModels"], (current) =>
+        (current ?? []).filter((model) => model.id !== id)
+      )
+      return { previous }
+    },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["customModels"] })
       void qc.invalidateQueries({ queryKey: ["builtinModel"] })
       void qc.invalidateQueries({ queryKey: ["options"] })
     },
-    onError: (e: Error) => setError(e.message),
+    onError: (e: Error, _id, context) => {
+      if (context?.previous) {
+        qc.setQueryData(["customModels"], context.previous)
+      }
+      setError(e.message)
+    },
+    onSettled: () => setDeletingId(null),
+  })
+
+  const setDefaultMut = useMutation({
+    mutationFn: (target: { id: string; kind: "builtin" | "custom" }) =>
+      target.kind === "builtin"
+        ? api.updateBuiltinModel({ is_default: true })
+        : api.updateCustomModel(target.id, { set_default: true }),
+    onMutate: async (target) => {
+      await Promise.all([
+        qc.cancelQueries({ queryKey: ["builtinModel"] }),
+        qc.cancelQueries({ queryKey: ["customModels"] }),
+      ])
+      const previousBuiltin = qc.getQueryData<BuiltinModel>(["builtinModel"])
+      const previousCustom = qc.getQueryData<Array<CustomModel>>([
+        "customModels",
+      ])
+      qc.setQueryData<BuiltinModel>(["builtinModel"], (current) =>
+        current
+          ? { ...current, is_default: target.kind === "builtin" }
+          : current
+      )
+      qc.setQueryData<Array<CustomModel>>(["customModels"], (current) =>
+        (current ?? []).map((model) => ({
+          ...model,
+          is_default: target.kind === "custom" && model.id === target.id,
+        }))
+      )
+      setDefaultFeedbackId(target.id)
+      return { previousBuiltin, previousCustom }
+    },
+    onError: (e: Error, _target, context) => {
+      if (context?.previousBuiltin) {
+        qc.setQueryData(["builtinModel"], context.previousBuiltin)
+      }
+      if (context?.previousCustom) {
+        qc.setQueryData(["customModels"], context.previousCustom)
+      }
+      setDefaultFeedbackId(null)
+      setError(e.message)
+    },
+    onSuccess: () => {
+      window.setTimeout(() => setDefaultFeedbackId(null), 450)
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ["builtinModel"] })
+      void qc.invalidateQueries({ queryKey: ["customModels"] })
+      void qc.invalidateQueries({ queryKey: ["options"] })
+    },
   })
 
   const builtinMut = useMutation({
@@ -103,8 +360,13 @@ function CustomModelsSection() {
   })
 
   const startEditBuiltin = () => {
+    if (editing === "__builtin__") {
+      cancelEdit()
+      return
+    }
     const b = builtin.data
     if (!b) return
+    setError(null)
     setShowForm(false)
     setEditing("__builtin__")
     setForm({
@@ -120,6 +382,11 @@ function CustomModelsSection() {
   }
 
   const startEdit = (m: CustomModel) => {
+    if (editing === m.id) {
+      cancelEdit()
+      return
+    }
+    setError(null)
     setEditing(m.id)
     setShowForm(false)
     setForm({
@@ -135,6 +402,7 @@ function CustomModelsSection() {
   }
 
   const startAdd = () => {
+    setError(null)
     setShowForm(true)
     setEditing(null)
     setForm({ ...EMPTY_FORM })
@@ -173,11 +441,44 @@ function CustomModelsSection() {
         body: { ...form, set_default: form.is_default },
       })
     } else {
-      createMut.mutate(form)
+      const { is_default, ...model } = form
+      createMut.mutate({ ...model, set_default: is_default })
     }
   }
 
   const b = builtin.data
+
+  const makeDefault = (target: { id: string; kind: "builtin" | "custom" }) => {
+    if (editing) {
+      setForm((current) => ({
+        ...current,
+        is_default: editing === target.id,
+      }))
+    }
+    setDefaultMut.mutate(target)
+  }
+
+  const confirmDelete = () => {
+    if (!deleteTarget || deletingId) return
+    const id = deleteTarget.id
+    setDeleteTarget(null)
+    if (editing === id) cancelEdit()
+    setDeletingId(id)
+    window.setTimeout(() => deleteMut.mutate(id), 180)
+  }
+
+  const renderEditForm = (key: string) => (
+    <ModelForm
+      key={key}
+      form={form}
+      setForm={setForm}
+      isEditing
+      isEditingBuiltin={isEditingBuiltin}
+      saving={updateMut.isPending || builtinMut.isPending}
+      onSave={handleSave}
+      onCancel={cancelEdit}
+    />
+  )
 
   return (
     <SettingsSection
@@ -188,51 +489,67 @@ function CustomModelsSection() {
       <div className="divide-y divide-border">
         {/* ── 内置模型行 ── */}
         {b && (
-          <div className="flex animate-in items-center justify-between gap-4 px-4 py-3 duration-200 fade-in-0 slide-in-from-bottom-1 motion-reduce:animate-none">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium">{b.name}</span>
-                <span className="rounded bg-muted px-1.5 py-0.5 text-[0.625rem] text-muted-foreground">
-                  {b.model_name}
-                </span>
-                <span className="rounded bg-primary/5 px-1.5 py-0.5 text-[0.625rem] text-primary/70">
-                  内置
-                </span>
-                {b.is_default && (
-                  <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[0.625rem] font-medium text-primary">
-                    默认
+          <Fragment>
+            <div
+              className={cn(
+                "flex animate-in items-center justify-between gap-4 px-4 py-3 duration-200 fade-in-0 slide-in-from-bottom-1 motion-reduce:animate-none",
+                defaultFeedbackId === "__builtin__" && "model-default-flash"
+              )}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">{b.name}</span>
+                  <span className="rounded bg-muted px-1.5 py-0.5 text-[0.625rem] text-muted-foreground">
+                    {b.model_name}
                   </span>
+                  <span className="rounded bg-primary/5 px-1.5 py-0.5 text-[0.625rem] text-primary/70">
+                    内置
+                  </span>
+                  {b.is_default && (
+                    <span className="model-default-badge rounded-full bg-primary/10 px-2 py-0.5 text-[0.625rem] font-medium text-primary">
+                      默认
+                    </span>
+                  )}
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {b.api_base} · Key: {b.api_key_masked} · {b.max_tokens} tokens
+                  · T={b.temperature}
+                </div>
+              </div>
+              <div className="flex items-center gap-1">
+                {!b.is_default && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs"
+                    disabled={setDefaultMut.isPending}
+                    onClick={() =>
+                      makeDefault({
+                        id: "__builtin__",
+                        kind: "builtin",
+                      })
+                    }
+                  >
+                    <CheckIcon className="mr-1 size-3.5" />
+                    设为默认
+                  </Button>
                 )}
-              </div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                {b.api_base} · Key: {b.api_key_masked} · {b.max_tokens}{" "}
-                tokens · T={b.temperature}
-              </div>
-            </div>
-            <div className="flex items-center gap-1">
-              {!b.is_default && (
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="h-7 text-xs"
-                  onClick={() =>
-                    builtinMut.mutate({ is_default: true })
+                  className="h-7 w-7 p-0"
+                  onClick={startEditBuiltin}
+                  aria-label={
+                    isEditingBuiltin ? "关闭内置模型编辑" : "编辑内置模型"
                   }
+                  title={isEditingBuiltin ? "关闭编辑" : "编辑模型"}
                 >
-                  <CheckIcon className="mr-1 size-3.5" />
-                  设为默认
+                  <PencilIcon className="size-3.5" />
                 </Button>
-              )}
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 w-7 p-0"
-                onClick={startEditBuiltin}
-              >
-                <PencilIcon className="size-3.5" />
-              </Button>
+              </div>
             </div>
-          </div>
+            {isEditingBuiltin && renderEditForm("__builtin__")}
+          </Fragment>
         )}
         {builtin.isLoading && (
           <div className="px-4 py-3">
@@ -242,66 +559,78 @@ function CustomModelsSection() {
 
         {/* ── 自定义模型行 ── */}
         {models.data?.map((m, index) => (
-          <div
-            key={m.id}
-            className="flex animate-in items-center justify-between gap-4 px-4 py-3 duration-200 fade-in-0 slide-in-from-bottom-1 motion-reduce:animate-none"
-            style={{
-              animationDelay: `${Math.min(index * 35, 140)}ms`,
-              animationFillMode: "both",
-            }}
-          >
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium">{m.name}</span>
-                <span className="rounded bg-muted px-1.5 py-0.5 text-[0.625rem] text-muted-foreground">
-                  {m.model_name}
-                </span>
-                {m.is_default && (
-                  <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[0.625rem] font-medium text-primary">
-                    默认
+          <Fragment key={m.id}>
+            <div
+              className={cn(
+                "flex animate-in items-center justify-between gap-4 px-4 py-3 duration-200 fade-in-0 slide-in-from-bottom-1 motion-reduce:animate-none",
+                defaultFeedbackId === m.id && "model-default-flash",
+                deletingId === m.id && "model-row-exit pointer-events-none"
+              )}
+              style={{
+                animationDelay: `${Math.min(index * 35, 140)}ms`,
+                animationFillMode: "both",
+              }}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">{m.name}</span>
+                  <span className="rounded bg-muted px-1.5 py-0.5 text-[0.625rem] text-muted-foreground">
+                    {m.model_name}
                   </span>
+                  {m.is_default && (
+                    <span className="model-default-badge rounded-full bg-primary/10 px-2 py-0.5 text-[0.625rem] font-medium text-primary">
+                      默认
+                    </span>
+                  )}
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {m.api_base} · Key: {m.api_key} · {m.max_tokens} tokens · T=
+                  {m.temperature}
+                </div>
+              </div>
+              <div className="flex items-center gap-1">
+                {!m.is_default && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs"
+                    disabled={setDefaultMut.isPending}
+                    onClick={() => makeDefault({ id: m.id, kind: "custom" })}
+                  >
+                    <CheckIcon className="mr-1 size-3.5" />
+                    设为默认
+                  </Button>
                 )}
-              </div>
-              <div className="mt-1 text-xs text-muted-foreground">
-                {m.api_base} · Key: {m.api_key} · {m.max_tokens} tokens · T=
-                {m.temperature}
-              </div>
-            </div>
-            <div className="flex items-center gap-1">
-              {!m.is_default && (
                 <Button
                   size="sm"
                   variant="ghost"
-                  className="h-7 text-xs"
-                  onClick={() =>
-                    updateMut.mutate({ id: m.id, body: { set_default: true } })
+                  className="h-7 w-7 p-0"
+                  onClick={() => startEdit(m)}
+                  aria-label={
+                    editing === m.id ? `关闭 ${m.name} 编辑` : `编辑 ${m.name}`
                   }
+                  title={editing === m.id ? "关闭编辑" : "编辑模型"}
                 >
-                  <CheckIcon className="mr-1 size-3.5" />
-                  设为默认
+                  <PencilIcon className="size-3.5" />
                 </Button>
-              )}
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 w-7 p-0"
-                onClick={() => startEdit(m)}
-              >
-                <PencilIcon className="size-3.5" />
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-                onClick={() => deleteMut.mutate(m.id)}
-              >
-                <TrashIcon className="size-3.5" />
-              </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                  onClick={() => setDeleteTarget(m)}
+                  disabled={deletingId !== null}
+                  aria-label={`删除 ${m.name}`}
+                  title="删除模型"
+                >
+                  <TrashIcon className="size-3.5" />
+                </Button>
+              </div>
             </div>
-          </div>
+            {editing === m.id && renderEditForm(m.id)}
+          </Fragment>
         ))}
 
-        {models.data?.length === 0 && !showForm && !editing && !b?.is_default && (
+        {models.data?.length === 0 && !showForm && !editing && (
           <div className="flex min-h-36 animate-in flex-col items-center justify-center px-6 py-8 text-center duration-200 fade-in-0 zoom-in-95 motion-reduce:animate-none">
             <div className="mb-3 flex size-9 items-center justify-center rounded-md bg-muted text-muted-foreground">
               <PlusIcon className="size-4" />
@@ -321,8 +650,11 @@ function CustomModelsSection() {
       </div>
 
       {/* ── 编辑/新增表单 ── */}
-      {(showForm || editing) && (
-        <div className="animate-in space-y-3 border-t border-border p-4 duration-200 fade-in-0 slide-in-from-top-2 motion-reduce:animate-none">
+      {showForm && (
+        <div
+          key={editing ?? "__new__"}
+          className="animate-in space-y-3 border-t border-border p-4 duration-200 fade-in-0 slide-in-from-top-2 motion-reduce:fade-in-0 motion-reduce:slide-in-from-top-0"
+        >
           {isEditingBuiltin && (
             <p className="text-xs text-muted-foreground">
               内置模型的名称和模型 ID 由环境配置决定，不可修改。
@@ -399,28 +731,18 @@ function CustomModelsSection() {
               />
             </div>
             <div className="flex items-end gap-3 pb-1">
-              <label className="flex items-center gap-1.5 text-xs">
-                <input
-                  type="checkbox"
-                  checked={form.thinking}
-                  onChange={(e) =>
-                    setForm({ ...form, thinking: e.target.checked })
-                  }
-                  className="rounded border-border"
-                />
-                Thinking
-              </label>
-              <label className="flex items-center gap-1.5 text-xs">
-                <input
-                  type="checkbox"
-                  checked={form.is_default}
-                  onChange={(e) =>
-                    setForm({ ...form, is_default: e.target.checked })
-                  }
-                  className="rounded border-border"
-                />
-                默认
-              </label>
+              <AnimatedCheckbox
+                checked={Boolean(form.thinking)}
+                label="Thinking"
+                onChange={(checked) => setForm({ ...form, thinking: checked })}
+              />
+              <AnimatedCheckbox
+                checked={form.is_default}
+                label="默认"
+                onChange={(checked) =>
+                  setForm({ ...form, is_default: checked })
+                }
+              />
             </div>
           </div>
           <div className="flex items-center gap-2 pt-1">
@@ -428,7 +750,9 @@ function CustomModelsSection() {
               size="sm"
               onClick={handleSave}
               disabled={
-                createMut.isPending || updateMut.isPending || builtinMut.isPending
+                createMut.isPending ||
+                updateMut.isPending ||
+                builtinMut.isPending
               }
             >
               {editing ? "保存修改" : "添加模型"}
@@ -459,6 +783,22 @@ function CustomModelsSection() {
           {error}
         </p>
       )}
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="删除自定义模型"
+        description={
+          deleteTarget
+            ? `将永久删除“${deleteTarget.name}”的模型配置，此操作无法撤销。`
+            : ""
+        }
+        confirmText="删除"
+        destructive
+        busy={deleteMut.isPending}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null)
+        }}
+        onConfirm={confirmDelete}
+      />
     </SettingsSection>
   )
 }

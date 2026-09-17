@@ -35,21 +35,31 @@ export function AgentsHome() {
   const hasSubmitted = submission !== null
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--ui-border)] px-5 md:px-8 max-md:pl-14">
+    <div className="new-task-page-enter flex min-w-0 flex-1 flex-col overflow-y-auto">
+      <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--ui-border)] px-5 max-md:pl-14 md:px-8">
         <div className="flex items-center gap-3">
           <FolderGit2 className="size-4 text-[color:var(--ui-text-dim)]" />
-          <h1 className="text-sm font-medium text-[color:var(--ui-text)]">新任务</h1>
+          <h1 className="text-sm font-medium text-[color:var(--ui-text)]">
+            新任务
+          </h1>
         </div>
-        <span className="text-[0.6875rem] text-[color:var(--ui-text-dim)]">本地工作区</span>
+        <span className="text-[0.6875rem] text-[color:var(--ui-text-dim)]">
+          本地工作区
+        </span>
       </header>
-      <main className={`mx-auto flex w-full flex-1 flex-col px-5 pb-4 md:px-8 ${hasSubmitted ? "new-task-conversation max-w-4xl" : "max-w-3xl pt-[18vh] pb-12 max-md:pt-28"}`}>
-        {!hasSubmitted && <div className="mb-5 flex items-end justify-between gap-4 border-b border-[var(--ui-border)] pb-3">
-          <div>
-            <Logo className="h-auto" />
-            <p className="mt-1 text-xs text-[color:var(--ui-text-dim)]">本地代码任务</p>
+      <main
+        className={`mx-auto flex w-full flex-1 flex-col px-5 pb-4 md:px-8 ${hasSubmitted ? "new-task-conversation max-w-4xl" : "max-w-3xl pt-[18vh] pb-12 max-md:pt-28"}`}
+      >
+        {!hasSubmitted && (
+          <div className="mb-5 flex items-end justify-between gap-4 border-b border-[var(--ui-border)] pb-3">
+            <div>
+              <Logo className="h-auto" />
+              <p className="mt-1 text-xs text-[color:var(--ui-text-dim)]">
+                本地代码任务
+              </p>
+            </div>
           </div>
-        </div>}
+        )}
         {hasSubmitted ? (
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="min-h-0 flex-1 overflow-y-auto py-6">
@@ -89,35 +99,40 @@ export function AgentsHome() {
               />
             </div>
           </div>
-        ) : <div className="w-full">
-          <AgentPromptBar
-            onSubmit={(prompt, images) => {
-              setSubmission({ prompt, images })
-              createThread.mutate({
-                prompt,
-                images,
-                repo,
-                repo_explicitly_none: repoOverride === null,
-                model_id: activeSelection?.modelId ?? null,
-                effort: activeSelection?.effort ?? null,
-              }, {
-                onError: () => setSubmission(null),
-              })
-            }}
-            disabled={createThread.isPending}
-            models={models}
-            selection={activeSelection}
-            onSelectionChange={setSelection}
-            repos={reposQuery.data?.repositories}
-            selectedRepo={repo}
-            onRepoChange={setRepoOverride}
-          />
-          {createError ? (
-            <p className="mt-3 w-full border-l-2 border-[var(--ui-danger)] bg-[var(--ui-panel)] px-3 py-2 text-sm text-[color:var(--ui-danger)]">
-              {createError}
-            </p>
-          ) : null}
-        </div>}
+        ) : (
+          <div className="w-full">
+            <AgentPromptBar
+              onSubmit={(prompt, images) => {
+                setSubmission({ prompt, images })
+                createThread.mutate(
+                  {
+                    prompt,
+                    images,
+                    repo,
+                    repo_explicitly_none: repoOverride === null,
+                    model_id: activeSelection?.modelId ?? null,
+                    effort: activeSelection?.effort ?? null,
+                  },
+                  {
+                    onError: () => setSubmission(null),
+                  }
+                )
+              }}
+              disabled={createThread.isPending}
+              models={models}
+              selection={activeSelection}
+              onSelectionChange={setSelection}
+              repos={reposQuery.data?.repositories}
+              selectedRepo={repo}
+              onRepoChange={setRepoOverride}
+            />
+            {createError ? (
+              <p className="mt-3 w-full border-l-2 border-[var(--ui-danger)] bg-[var(--ui-panel)] px-3 py-2 text-sm text-[color:var(--ui-danger)]">
+                {createError}
+              </p>
+            ) : null}
+          </div>
+        )}
       </main>
     </div>
   )
