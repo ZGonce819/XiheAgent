@@ -240,9 +240,25 @@ export const agentsApi = {
         body: JSON.stringify({ title }),
       }
     ),
+  renameProject: (oldName: string, newName: string) =>
+    agentsRequest<{ renamed: number; name: string }>(
+      "/workspace/projects/rename",
+      {
+        method: "PATCH",
+        body: JSON.stringify({ old_name: oldName, new_name: newName }),
+      }
+    ),
   getPendingApproval: (threadId: string) =>
     agentsRequest<PendingCommandApproval | null>(
       `/threads/${encodeURIComponent(threadId)}/approval`
+    ),
+  explainApproval: (threadId: string, approvalId: string) =>
+    agentsRequest<{ explanation: string }>(
+      `/threads/${encodeURIComponent(threadId)}/approval/explanation`,
+      {
+        method: "POST",
+        body: JSON.stringify({ approval_id: approvalId }),
+      }
     ),
   decideApproval: (
     threadId: string,

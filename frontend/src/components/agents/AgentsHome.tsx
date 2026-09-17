@@ -9,7 +9,7 @@ import { useModelOptions } from "@/lib/agents/useModelOptions"
 import { useProfile, useRepos } from "@/lib/profile"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 
-export function AgentsHome() {
+export function AgentsHome({ initialProject = null }: { initialProject?: string | null } = {}) {
   const createThread = useCreateAgentThread()
   const createError =
     createThread.error instanceof Error ? createThread.error.message : null
@@ -24,12 +24,13 @@ export function AgentsHome() {
   const reposQuery = useRepos()
   const profileQuery = useProfile()
   const sandboxAvailable = profileQuery.data?.sandbox_available ?? false
+  // 从侧边栏项目「+」进入时强制本地环境；否则沿用 profile 默认
   const [backendType, setBackendType] = useState<string>(
-    profileQuery.data?.backendType ?? "local"
+    initialProject ? "local" : (profileQuery.data?.backendType ?? "local")
   )
   const [sandboxWarning, setSandboxWarning] = useState(false)
   const [repoWarning, setRepoWarning] = useState(false)
-  const [selectedProject, setSelectedProject] = useState<string | null>(null)
+  const [selectedProject, setSelectedProject] = useState<string | null>(initialProject)
 
   const handleBackendTypeChange = (next: string) => {
     if (next === "sandbox" && !sandboxAvailable) {

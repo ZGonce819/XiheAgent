@@ -194,6 +194,24 @@ class ThreadRepo(ConnectionManager):
         )
         return affected > 0
 
+    def rename_project(self, old_name: str, new_name: str) -> int:
+        """把某个项目名下所有会话的项目名批量改为新名称。
+
+        仅更新 ``project_name`` 字段，不触碰 ``updated_at``，
+        避免因重命名而打乱侧边栏按活跃时间的排序。
+
+        Args:
+            old_name: 原项目名称。
+            new_name: 新项目名称。
+
+        Returns:
+            受影响的会话条数。
+        """
+        return self.execute(
+            "UPDATE threads SET project_name = %s WHERE project_name = %s",
+            (new_name, old_name),
+        )
+
     def delete_thread(self, thread_id: str) -> bool:
         """删除 thread 主记录（级联清理由 LocalMySQLStore 协调）。
 

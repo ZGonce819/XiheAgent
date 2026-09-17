@@ -39,6 +39,8 @@ export function ProjectSelector({
   const [newProjectName, setNewProjectName] = useState("")
   const [localFolderPath, setLocalFolderPath] = useState("")
   const [picking, setPicking] = useState(false)
+  // 已创建的项目名：非空时顶部按钮变为项目行样式，再次点击可编辑
+  const [createdProject, setCreatedProject] = useState<string | null>(null)
 
   // 路径验证（实时）
   const folderValidation = useMemo(
@@ -97,10 +99,9 @@ export function ProjectSelector({
     // 如果有填写文件夹路径但验证不通过，阻止提交
     if (localFolderPath.trim() && !folderValidation.valid) return
     setCreateDialogOpen(false)
+    // 记录已创建项目；表单内容保留，供再次点击时编辑
+    setCreatedProject(newProjectName.trim())
     onProjectChange?.(newProjectName.trim())
-    // 重置表单
-    setNewProjectName("")
-    setLocalFolderPath("")
   }, [newProjectName, localFolderPath, folderValidation.valid, onProjectChange])
 
   const handleOpenCreate = useCallback(() => {
@@ -133,16 +134,28 @@ export function ProjectSelector({
 
         {open && (
           <div className="absolute left-0 top-full z-50 mt-1 min-w-[200px] origin-top-left animate-in fade-in-0 zoom-in-95 slide-in-from-top-1 duration-150 ease-out overflow-hidden rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface)] shadow-lg">
-            {/* 创建操作 */}
+            {/* 创建操作：已创建项目后显示为项目行，再次点击可编辑 */}
             <div className="border-b border-[var(--ui-border)] p-1">
-              <button
-                type="button"
-                onClick={handleOpenCreate}
-                className="flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-left text-xs text-[color:var(--ui-text)] transition-colors hover:bg-[var(--ui-panel-2)]"
-              >
-                <Plus className="size-3.5 text-[color:var(--ui-accent)]" />
-                <span>创建新项目</span>
-              </button>
+              {createdProject ? (
+                <button
+                  type="button"
+                  onClick={handleOpenCreate}
+                  title="点击编辑项目"
+                  className="flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-left text-xs text-[color:var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-panel-2)]"
+                >
+                  <FolderOpen className="size-3 shrink-0 text-[color:var(--ui-text-dim)]" />
+                  <span className="flex-1 truncate">{createdProject}</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleOpenCreate}
+                  className="flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-left text-xs text-[color:var(--ui-text)] transition-colors hover:bg-[var(--ui-panel-2)]"
+                >
+                  <Plus className="size-3.5 text-[color:var(--ui-accent)]" />
+                  <span>创建新项目</span>
+                </button>
+              )}
             </div>
 
             {/* 项目列表 */}
@@ -161,7 +174,7 @@ export function ProjectSelector({
                     )}
                     style={{ animationDelay: `${Math.min(index * 30, 150)}ms` }}
                   >
-                    <Folder className="size-3 shrink-0 text-[color:var(--ui-text-dim)]" />
+                    <FolderOpen className="size-3 shrink-0 text-[color:var(--ui-text-dim)]" />
                     <span className="flex-1 truncate">{item.name}</span>
                     {selectedProject === item.name && (
                       <span className="text-[color:var(--ui-text-dim)]">✓</span>
@@ -196,7 +209,7 @@ export function ProjectSelector({
             {/* 标题栏 */}
             <div className="flex items-center justify-between border-b border-border px-5 py-4">
               <Dialog.Title className="text-sm font-semibold text-foreground">
-                创建新项目
+                {createdProject ? "编辑项目" : "创建新项目"}
               </Dialog.Title>
               <Dialog.Close className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
                 <X className="size-4" />
@@ -272,7 +285,7 @@ export function ProjectSelector({
                 }
                 onClick={handleCreateConfirm}
               >
-                创建
+                {createdProject ? "保存" : "创建"}
               </Button>
             </div>
           </Dialog.Popup>

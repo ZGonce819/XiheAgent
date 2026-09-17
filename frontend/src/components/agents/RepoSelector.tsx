@@ -71,6 +71,16 @@ export function RepoSelector({
 
   const clearInputs = () => { setOwner(""); setRepoName(""); setValidationError(null) }
 
+  // 触发器标签拆分为「前缀（协议/主机/owner）」与「仓库名」，用于分阶段截断：
+  // 先前缀从前往后出前置省略号（保留 repo 前的 /），再仓库名从后往前出尾部省略号
+  const triggerParts = useMemo(() => {
+    if (!selectedRepo) return null
+    const idx = selectedRepo.lastIndexOf("/")
+    return idx >= 0
+      ? { prefix: selectedRepo.slice(0, idx), repo: selectedRepo.slice(idx + 1) }
+      : { prefix: "", repo: selectedRepo }
+  }, [selectedRepo])
+
   const handleEnterKey = useCallback(() => {
     if (!owner.trim() || !repoName.trim()) {
       setValidationError(!owner.trim() && !repoName.trim() ? "请填写 owner 和 repo" : !owner.trim() ? "请填写 owner" : "请填写 repo")
@@ -132,13 +142,30 @@ export function RepoSelector({
           })
         }}
         className={cn(
-          "flex max-w-[300px] cursor-pointer items-center gap-1.5 text-[0.8125rem] text-muted-foreground transition-[color,opacity,transform] duration-150 hover:opacity-80 active:scale-[0.98] disabled:cursor-default disabled:opacity-60",
+          "flex max-w-[300px] cursor-pointer items-center gap-1.5 rounded-md text-[0.8125rem] transition-[background-color,border-color,color,opacity,transform] duration-200 active:scale-[0.98] disabled:cursor-default disabled:opacity-60",
+          selectedRepo
+            ? // 已选仓库：与环境/项目选择器一致的胶囊背景，选中瞬间淡入+轻微缩放
+              "animate-in fade-in-0 zoom-in-95 border border-[var(--ui-border)] bg-[var(--ui-panel-2)] px-2 py-1 ease-out text-[color:var(--ui-text-muted)] hover:border-[var(--ui-accent)] hover:text-[color:var(--ui-text)]"
+            : "border-transparent px-0 py-1 text-muted-foreground hover:opacity-80",
           triggerClassName
         )}
       >
         <GitBranch className="size-3.5 shrink-0" />
-        <span className="flex-1 truncate text-left">
-          {selectedRepo || placeholder}
+        <span className="flex min-w-0 flex-1 items-center text-left">
+          {triggerParts?.prefix ? (
+            <>
+              <span
+                className="min-w-[1em] truncate"
+                style={{ flexShrink: 10000, direction: "rtl" }}
+              >
+                {triggerParts.prefix}
+              </span>
+              <span className="shrink-0">/</span>
+            </>
+          ) : null}
+          <span className="min-w-0 truncate" style={{ flexShrink: 1 }}>
+            {triggerParts ? triggerParts.repo : placeholder}
+          </span>
         </span>
         <CaretDownIcon className={cn("size-3 shrink-0 opacity-70 transition-transform duration-200 ease-out", open && "rotate-180")} />
       </button>

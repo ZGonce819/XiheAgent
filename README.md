@@ -561,7 +561,14 @@ XiheAgent 对 `execute` 工具采用统一的三段式策略：`ALLOW` 直接执
 
 个人设置可以按语义类别选择“自动允许”或“每次询问”。服务端会过滤未知类别，且设置无法覆盖高危规则，包括工作区外写入、受保护密钥、强制推送、破坏性重置、提权、系统/磁盘配置、凭据注入和沙箱逃逸。
 
-人工审批面板以内联方式显示在会话输入框上方，展示命令详情以及“解释”“拒绝”“允许一次”，不会使用遮挡会话内容的居中弹窗。
+人工审批面板以内联方式显示在会话输入框上方，展示命令详情以及”解释””拒绝””允许一次”，不会使用遮挡会话内容的居中弹窗。
+
+点击”解释”按钮时，系统会调用专门的审批解释模型（`COMMAND_APPROVAL_EXPLANATION_SYSTEM_PROMPT`），用中文向用户说明：
+- 命令会做什么
+- 从命令本身能判断的主要影响（修改工作区、访问网络、启动进程、安装依赖、提交代码、删除数据等）
+- 系统为什么要求人工确认
+
+解释器不会执行命令、改写命令或替用户决定，只依据输入的命令和审批原因作答。
 
 ## API 接口
 
@@ -615,6 +622,15 @@ POST   /dashboard/api/automations/{id}/run       # 立即执行自动化任务
 GET    /dashboard/api/skills                     # 获取已安装技能列表
 POST   /dashboard/api/skills/install             # 安装新技能
 DELETE /dashboard/api/skills/{name}              # 卸载技能
+```
+
+### 工作目录管理
+
+```
+GET    /dashboard/api/workspace                  # 获取工作目录配置
+PUT    /dashboard/api/workspace                  # 更新工作目录配置（workspace_root/projects_dir/skills_dir）
+GET    /dashboard/api/workspace/projects         # 获取项目列表
+GET    /dashboard/api/workspace/pick-folder      # 打开系统文件夹选择对话框
 ```
 
 ## 环境变量

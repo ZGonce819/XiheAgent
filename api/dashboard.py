@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
 import threading
 import uuid
@@ -14,8 +16,8 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from agent.graph.graph import get_store
 from agent.runtime import delete_task, get_task, list_tasks
@@ -43,10 +45,12 @@ from config.model_config import (
 )
 from schemas.request_schema import (
     DashboardEditPreviewRequest,
+    DashboardProjectRenameRequest,
     DashboardThreadMessageRequest,
     DashboardThreadTitleUpdateRequest,
     DashboardViewSnapshotRequest,
 )
+from services.approval_explanation import explain_pending_approval
 from services.repo_rollback import rollback_run
 from services.streaming_service import build_streaming_response
 from services.thread_service import (
@@ -58,6 +62,7 @@ from utils.platform_utils import normalize_repo_url
 from utils.redis_utils import cleanup_stream
 
 dashboard_router = APIRouter(prefix="/dashboard/api")
+logger = logging.getLogger(__name__)
 
 
 def _validate_automation_payload(body: dict[str, Any], partial: bool = False) -> None:
@@ -353,6 +358,32 @@ def dashboard_pending_approval(thread_id: str) -> dict[str, Any] | None:
     if get_task(thread_id) is None:
         raise HTTPException(status_code=404, detail="thread not found")
     return public_approval(get_pending_approval(thread_id))
+
+
+@dashboard_router.post("/threads/{thread_id}/approval/explanation")
+async def dashboard_explain_approval(
+    thread_id: str, body: dict[str, Any]
+) -> dict[str, str]:
+    if get_task(thread_id) is None:
+        raise HTTPException(status_code=404, detail="thread not found")
+    pending = get_pending_approval(thread_id)
+    if pending is None:
+        raise HTTPException(status_code=409, detail="当前会话没有待审批的操作")
+    approval_id = str(body.get("approval_id") or "")
+    if approval_id != str(pending.get("id") or ""):
+        raise HTTPException(status_code=409, detail="待审批操作已变化，请刷新页面后重试")
+    try:
+        explanation = await asyncio.to_thread(explain_pending_approval, pending)
+    except Exception as exc:
+        logger.warning(
+            "Failed to explain pending approval for thread %s (%s)",
+            thread_id,
+            type(exc).__name__,
+        )
+        raise HTTPException(
+            status_code=503, detail="暂时无法生成解释，请稍后重试"
+        ) from exc
+    return {"explanation": explanation}
 
 
 @dashboard_router.post("/threads/{thread_id}/approval")
@@ -676,3 +707,26 @@ def dashboard_list_projects() -> dict[str, Any]:
             })
 
     return {"projects": items, "projects_dir": str(projects_dir)}
+
+
+@dashboard_router.patch("/workspace/projects/rename")
+def dashboard_rename_project(body: DashboardProjectRenameRequest) -> dict[str, Any]:
+    """重命名项目：把该项目下所有会话的 project_name 更新为新名称。
+
+    Args:
+        body: 包含 ``old_name`` 和 ``new_name`` 的请求体。
+
+    Returns:
+        dict: ``renamed`` 为受影响会话数，``name`` 为新项目名。
+
+    Raises:
+        HTTPException: 项目名称为空时返回 400。
+    """
+    old_name = body.old_name.strip()
+    new_name = body.new_name.strip()
+    if not old_name or not new_name:
+        raise HTTPException(status_code=400, detail="项目名称不能为空")
+    if old_name == new_name:
+        return {"renamed": 0, "name": new_name}
+    affected = get_store().rename_project(old_name, new_name)
+    return {"renamed": affected, "name": new_name}

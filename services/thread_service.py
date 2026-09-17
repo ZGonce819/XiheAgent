@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from typing import Any
 
 from agent.graph.checkpoint_history import visible_checkpoint_messages
@@ -227,6 +228,39 @@ def conversation_snapshot(
     }
 
 
+def _local_work_dirs(thread: dict[str, Any]) -> tuple[str, str] | None:
+    """解析本地环境会话的本地工作目录（相对路径 + 绝对路径）。
+
+    解析规则与运行时保持一致：优先取仓库映射表登记的目录，
+    未登记时回退到默认的 ``projects/<repo>``。沙箱环境或未指定仓库时返回 ``None``。
+
+    Args:
+        thread: 包含会话原始字段的字典。
+
+    Returns:
+        ``(工作区相对路径, 绝对路径)`` 元组；不适用时返回 ``None``。
+    """
+    if (thread.get("backend_type") or "local") != "local":
+        return None
+    repo_url = thread.get("repo_url") or ""
+    if not repo_url:
+        return None
+    try:
+        from agent.graph.graph import get_store
+        from config.constants import WORKSPACE_ROOT
+        from services.repo_rollback import repository_path
+
+        abs_path = repository_path(repo_url, get_store())
+        try:
+            relative = abs_path.resolve().relative_to(Path(WORKSPACE_ROOT).resolve()).as_posix()
+        except ValueError:
+            relative = abs_path.name
+        return relative, str(abs_path)
+    except Exception:
+        logger.warning("解析本地工作目录失败：repo_url=%s", repo_url, exc_info=True)
+        return None
+
+
 def thread_payload(
     thread: dict[str, Any], *, include_versions: bool = False
 ) -> dict[str, Any]:
@@ -251,6 +285,7 @@ def thread_payload(
             pass
 
     run_events = thread.get("run_events") or []
+    work_dirs = _local_work_dirs(thread)
     payload = {
         "id": thread["thread_id"],
         "title": thread.get("title") or "XiheAgent Task",
@@ -266,6 +301,8 @@ def thread_payload(
         "status": status_for_frontend(thread.get("latest_run_status")),
         "backendType": thread.get("backend_type") or "local",
         "projectName": thread.get("project_name"),
+        "localWorkDir": work_dirs[0] if work_dirs else None,
+        "localWorkDirFull": work_dirs[1] if work_dirs else None,
         "createdAt": iso_to_millis(thread.get("created_at")),
         "updatedAt": iso_to_millis(thread.get("updated_at")),
         "messages": message_payload(thread),

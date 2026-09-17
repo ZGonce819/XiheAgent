@@ -2,6 +2,7 @@ import { useState } from "react"
 import {
   AlertTriangle,
   ChevronDown,
+  LoaderCircle,
   Sparkle,
   Terminal,
 } from "lucide-react"
@@ -14,7 +15,11 @@ interface CommandApprovalDialogProps {
   command: string
   reason: string
   error?: string | null
+  explanation?: string | null
+  explanationError?: string | null
+  explaining?: boolean
   onOpenChange?: (open: boolean) => void
+  onExplain: () => void
   onApprove: () => void
   onReject: () => void
 }
@@ -24,10 +29,14 @@ export function CommandApprovalDialog({
   command,
   reason,
   error,
+  explanation,
+  explanationError,
+  explaining = false,
+  onExplain,
   onApprove,
   onReject,
 }: CommandApprovalDialogProps) {
-  const [explaining, setExplaining] = useState(false)
+  const [showExplanation, setShowExplanation] = useState(false)
   const [expandedCommand, setExpandedCommand] = useState(false)
 
   if (!open) return null
@@ -39,17 +48,17 @@ export function CommandApprovalDialog({
     >
       <div className="flex items-start gap-3 px-4 pt-4 pb-3 sm:px-5 sm:pt-5">
         <AlertTriangle
-          className="command-approval-alert mt-0.5 size-5 shrink-0 text-[color:var(--ui-warning,#a16207)]"
+          className="command-approval-alert mt-0.5 size-4 shrink-0 text-[color:var(--ui-warning,#a16207)]"
           aria-hidden
         />
         <div className="min-w-0 flex-1">
           <h2
             id="command-approval-title"
-            className="text-sm font-semibold text-[var(--ui-text)] sm:text-base"
+            className="text-[0.875rem] font-semibold text-[var(--ui-text)]"
           >
             XiheAgent 想要执行一个操作
           </h2>
-          <p className="mt-1 text-xs leading-5 text-[color:var(--ui-text-muted)]">
+          <p className="mt-1 text-[0.8125rem] leading-5 text-[color:var(--ui-text-muted)]">
             请确认命令内容后再决定是否执行
           </p>
         </div>
@@ -66,7 +75,7 @@ export function CommandApprovalDialog({
             className="mr-2 inline size-4 text-[color:var(--ui-text-dim)]"
             aria-hidden
           />
-          <code className="font-mono text-xs leading-6 break-all whitespace-pre-wrap text-[color:var(--ui-text-muted)] sm:text-sm">
+          <code className="font-mono text-[0.8125rem] leading-5 break-all whitespace-pre-wrap text-[color:var(--ui-text-muted)]">
             {command}
           </code>
           {!expandedCommand && command.length > 180 ? (
@@ -91,12 +100,26 @@ export function CommandApprovalDialog({
         ) : null}
       </div>
 
-      {explaining ? (
-        <div className="command-approval-explanation mx-4 mb-4 rounded-md border border-[var(--ui-border)] bg-[var(--ui-bg)] px-3 py-2.5 text-xs leading-5 text-[color:var(--ui-text-muted)] sm:mx-5">
+      {showExplanation ? (
+        <div
+          aria-live="polite"
+          className="command-approval-explanation mx-4 mb-4 rounded-md border border-[var(--ui-border)] bg-[var(--ui-bg)] px-3 py-2.5 text-[0.8125rem] leading-5 text-[color:var(--ui-text-muted)] sm:mx-5"
+        >
           <p className="font-medium text-[var(--ui-text)]">为什么需要审批？</p>
-          <p className="mt-1">
-            {reason || "该命令可能改变工作区、访问网络或影响正在运行的进程。"}
-          </p>
+          {explaining ? (
+            <p className="mt-1 flex items-center gap-1.5">
+              <LoaderCircle className="size-3.5 animate-spin" aria-hidden />
+              正在生成解释...
+            </p>
+          ) : explanationError ? (
+            <p className="mt-1 text-[color:var(--ui-danger)]" role="alert">
+              {explanationError}
+            </p>
+          ) : (
+            <p className="mt-1">
+              {explanation || reason || "该命令可能改变工作区、访问网络或影响正在运行的进程。"}
+            </p>
+          )}
           <p className="mt-1">
             “允许一次”仅授权当前展示的命令；后续同类操作仍按设置中的审批规则处理。
           </p>
@@ -117,17 +140,26 @@ export function CommandApprovalDialog({
           type="button"
           variant="ghost"
           size="sm"
-          className="justify-start text-[color:var(--ui-text-muted)]"
-          onClick={() => setExplaining((value) => !value)}
+          className="justify-start text-[0.8125rem] text-[color:var(--ui-text-muted)]"
+          disabled={explaining}
+          onClick={() => {
+            if (showExplanation && !explanationError) {
+              setShowExplanation(false)
+              return
+            }
+            setShowExplanation(true)
+            onExplain()
+          }}
         >
           <Sparkle className="size-3.5" aria-hidden />
-          {explaining ? "收起解释" : "解释"}
+          {explaining ? "解释中" : showExplanation && !explanationError ? "收起解释" : explanationError ? "重试解释" : "解释"}
         </Button>
         <div className="grid grid-cols-2 gap-2 sm:flex">
           <Button
             type="button"
             variant="outline"
             size="sm"
+            className="text-[0.8125rem]"
             onClick={onReject}
           >
             拒绝
@@ -136,7 +168,7 @@ export function CommandApprovalDialog({
             type="button"
             size="sm"
             onClick={onApprove}
-            className="bg-[var(--ui-accent)] text-white hover:opacity-90"
+            className="bg-[var(--ui-accent)] text-[0.8125rem] text-white hover:opacity-90"
           >
             允许一次
           </Button>

@@ -178,6 +178,7 @@ export function useCreateAgentThread() {
                     model: body.model_id ?? "",
                     effort: body.effort ?? null,
                     status: "running",
+                    backendType: body.backend_type ?? "local",
                     projectName: body.project_name ?? null,
                     createdAt: now,
                     updatedAt: now,
@@ -377,6 +378,13 @@ export function useDecideCommandApproval(threadId: string) {
   })
 }
 
+export function useExplainCommandApproval(threadId: string) {
+  return useMutation({
+    mutationFn: (approvalId: string) =>
+      agentsApi.explainApproval(threadId, approvalId),
+  })
+}
+
 export function useDeleteAgentThread() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -401,6 +409,18 @@ export function useUpdateAgentThreadTitle(threadId: string) {
     mutationFn: (title: string) => agentsApi.updateThreadTitle(threadId, title),
     onSuccess: (thread) => {
       queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
+      invalidateThreadList(queryClient)
+    },
+  })
+}
+
+export function useRenameProject() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (vars: { oldName: string; newName: string }) =>
+      agentsApi.renameProject(vars.oldName, vars.newName),
+    onSuccess: () => {
       invalidateThreadList(queryClient)
     },
   })

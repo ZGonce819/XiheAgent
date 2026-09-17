@@ -195,6 +195,10 @@ export interface AgentThread {
   status: AgentStatus
   backendType?: string
   projectName?: string | null
+  /** 本地环境会话的工作目录（工作区相对路径），沙箱或无仓库时为 null */
+  localWorkDir?: string | null
+  /** 本地工作目录的绝对路径，用于悬停提示 */
+  localWorkDirFull?: string | null
   createdAt: number
   updatedAt: number
   messages: Array<Message>

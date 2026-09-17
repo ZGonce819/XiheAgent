@@ -155,6 +155,18 @@ class LocalMySQLStore:
         """
         return self.thread_repo.update_thread_title(thread_id, title)
 
+    def rename_project(self, old_name: str, new_name: str) -> int:
+        """把某个项目名下所有会话批量重命名。
+
+        Args:
+            old_name: 原项目名称。
+            new_name: 新项目名称。
+
+        Returns:
+            受影响的会话条数。
+        """
+        return self.thread_repo.rename_project(old_name, new_name)
+
     def delete_thread(self, thread_id: str) -> bool:
         """删除一个 Dashboard 会话及其所有业务附属记录。
 

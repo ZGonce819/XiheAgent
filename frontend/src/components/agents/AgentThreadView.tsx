@@ -16,7 +16,7 @@ import { useProfile } from "@/lib/profile";
 import { agentsApi } from "@/lib/agents/api";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { CommandApprovalDialog } from "@/components/agents/CommandApprovalDialog";
-import { useDecideCommandApproval } from "@/lib/agents/queries";
+import { useDecideCommandApproval, useExplainCommandApproval } from "@/lib/agents/queries";
 
 interface AgentThreadViewProps {
   user: SessionUser;
@@ -91,6 +91,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   const sendMessage = useSendAgentMessage(thread.id);
   const cancelThread = useCancelAgentThread(thread.id);
   const decideApproval = useDecideCommandApproval(thread.id);
+  const explainApproval = useExplainCommandApproval(thread.id);
   useAgentThreadStream(thread.id, thread.status === "running");
   const [pendingPrompts, setPendingPrompts] = useState<Array<PendingPrompt>>(() =>
     getPendingPrompts(thread.id),
@@ -384,7 +385,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   return (
     <AgentsShell user={user} activeThreadId={thread.id}>
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--ui-border)] px-6 max-md:pl-14">
+        <header className="flex min-h-14 shrink-0 items-center justify-between border-b border-[var(--ui-border)] px-6 py-2 max-md:pl-14">
           <div className="min-w-0 flex-1">
             {editingTitle ? (
               <input
@@ -410,12 +411,12 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                   }
                   setEditingTitle(false);
                 }}
-                className="relative z-10 block h-8 w-full min-w-0 truncate rounded bg-[var(--ui-bg)] px-1 text-[0.9375rem] font-semibold leading-7 text-[var(--ui-text)] outline-none ring-1 ring-[var(--ui-accent)]"
+                className="relative z-10 block h-5 w-full max-w-md min-w-0 truncate rounded bg-[var(--ui-bg)] px-1 text-[0.9375rem] font-semibold leading-4 text-[var(--ui-text)] outline-none ring-1 ring-[var(--ui-accent)]"
                 autoFocus
               />
             ) : (
               <h1
-                className="truncate text-[0.9375rem] font-semibold text-[var(--ui-text)] cursor-default select-none"
+                className="block h-5 truncate text-[0.9375rem] font-semibold leading-5 text-[var(--ui-text)] cursor-default select-none"
                 onDoubleClick={() => {
                   setDraftTitle(thread.title || "新任务");
                   setEditingTitle(true);
@@ -425,10 +426,20 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
               </h1>
             )}
             {displayRepo ? (
-              <p className="relative z-0 mt-0.5 flex items-center gap-1.5 truncate text-[0.6875rem] text-[color:var(--ui-text-muted)]">
+              <p className="relative z-0 mt-0.5 flex flex-wrap items-center gap-1.5 text-[0.6875rem] text-[color:var(--ui-text-muted)]">
                 {thread.platformDisplay ? <span className="shrink-0 rounded bg-[var(--ui-panel-2)] px-1 py-px text-[0.625rem] font-medium">{thread.platformDisplay}</span> : null}
                 <span className="shrink-0 rounded bg-[var(--ui-panel-2)] px-1 py-px text-[0.625rem] font-medium">{displayRepo}</span>
-                <span className="shrink-0 rounded bg-[var(--ui-panel-2)] px-1 py-px text-[0.625rem] font-medium">{backendType === "sandbox" ? "沙箱" : "本地"}</span>
+                {/* 徽章展示会话真实环境（thread.backendType），不受底部环境选择器状态影响，避免本地会话误显示为沙箱 */}
+                <span className="shrink-0 rounded bg-[var(--ui-panel-2)] px-1 py-px text-[0.625rem] font-medium">{thread.backendType === "sandbox" ? "沙箱" : "本地"}</span>
+                {thread.backendType !== "sandbox" && thread.localWorkDir ? (
+                  <span
+                    className="rounded bg-[var(--ui-panel-2)] px-1 py-px text-[0.625rem] font-medium break-all"
+                    title={thread.localWorkDirFull ?? thread.localWorkDir}
+                  >
+                    {/* 完整展示本地文件夹绝对地址，不截断 */}
+                    {thread.localWorkDirFull ?? thread.localWorkDir}
+                  </span>
+                ) : null}
               </p>
             ) : <p className="text-[0.6875rem] text-[color:var(--ui-text-dim)]">未指定仓库</p>}
           </div>
@@ -483,10 +494,15 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                   )}
                   {thread.pendingApproval ? (
                     <CommandApprovalDialog
+                      key={thread.pendingApproval.id}
                       open
                       command={thread.pendingApproval.actions.map((action) => action.command).join("\n")}
                       reason={thread.pendingApproval.actions.map((action) => action.description).filter(Boolean).join("；")}
                       error={decideApproval.error instanceof Error ? decideApproval.error.message : null}
+                      explanation={explainApproval.variables === thread.pendingApproval.id ? explainApproval.data?.explanation : null}
+                      explanationError={explainApproval.variables === thread.pendingApproval.id && explainApproval.error instanceof Error ? explainApproval.error.message : null}
+                      explaining={explainApproval.variables === thread.pendingApproval.id && explainApproval.isPending}
+                      onExplain={() => explainApproval.mutate(thread.pendingApproval!.id)}
                       onApprove={() => decideApproval.mutate({ approvalId: thread.pendingApproval!.id, decision: "approve" })}
                       onReject={() => decideApproval.mutate({ approvalId: thread.pendingApproval!.id, decision: "reject" })}
                     />

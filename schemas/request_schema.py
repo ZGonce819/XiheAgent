@@ -49,6 +49,18 @@ class DashboardThreadTitleUpdateRequest(BaseModel):
     title: str = Field(min_length=1, max_length=500, description="新的会话标题")
 
 
+class DashboardProjectRenameRequest(BaseModel):
+    """项目重命名请求体。
+
+    Attributes:
+        old_name: 原项目名称。
+        new_name: 新项目名称。
+    """
+
+    old_name: str = Field(min_length=1, max_length=256, description="原项目名称")
+    new_name: str = Field(min_length=1, max_length=256, description="新项目名称")
+
+
 class TaskCreateRequest(BaseModel):
     """通用任务创建请求体。
 
