@@ -57,6 +57,88 @@
 .agents-spinner {
   animation: agents-spin 0.85s linear infinite;
 }
+
+.workspace-settings-content {
+  animation: workspace-surface-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.workspace-folder-mark {
+  transition:
+    transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 180ms ease-out;
+}
+
+.workspace-root-block:hover .workspace-folder-mark {
+  transform: translateY(-1px) scale(1.04);
+  background-color: color-mix(in oklab, var(--ui-accent) 16%, transparent);
+}
+
+.workspace-root-path {
+  transition:
+    border-color 160ms ease-out,
+    background-color 160ms ease-out,
+    box-shadow 160ms ease-out;
+}
+
+.workspace-root-path:hover {
+  border-color: color-mix(in oklab, var(--ui-accent) 30%, var(--ui-border));
+  background-color: color-mix(in oklab, var(--ui-accent) 3%, var(--ui-bg));
+}
+
+.workspace-edit-button {
+  transition:
+    color 150ms ease-out,
+    background-color 150ms ease-out,
+    transform 150ms ease-out;
+}
+
+.workspace-edit-button:hover {
+  transform: translateX(1px);
+}
+
+.workspace-edit-form {
+  transform-origin: center top;
+}
+
+.workspace-derived-card {
+  animation: workspace-card-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  transition:
+    border-color 160ms ease-out,
+    background-color 160ms ease-out,
+    transform 160ms ease-out;
+}
+
+.workspace-derived-card:nth-child(2) {
+  animation-delay: 45ms;
+}
+
+.workspace-derived-card:hover {
+  border-color: color-mix(in oklab, var(--ui-accent) 26%, var(--ui-border));
+  background-color: color-mix(in oklab, var(--ui-accent) 3%, var(--ui-bg));
+  transform: translateY(-1px);
+}
+
+@keyframes workspace-surface-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes workspace-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 .agents-scroll-loader {
   position: absolute;
   inset: -1px;
@@ -451,6 +533,8 @@
     animation: model-default-badge-reduced 120ms ease-out both;
   }
   .automation-form-reveal,
+  .workspace-settings-content,
+  .workspace-derived-card,
   .automation-row,
   .skill-row,
   .skill-results,
@@ -466,6 +550,17 @@
   }
   .skill-icon {
     transition: background-color 120ms ease-out;
+  }
+  .workspace-folder-mark,
+  .workspace-root-path,
+  .workspace-edit-button,
+  .workspace-derived-card {
+    transition: none;
+  }
+  .workspace-root-block:hover .workspace-folder-mark,
+  .workspace-edit-button:hover,
+  .workspace-derived-card:hover {
+    transform: none;
   }
   .skill-row:hover .skill-icon {
     transform: none;

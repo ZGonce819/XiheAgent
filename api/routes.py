@@ -1,7 +1,6 @@
 """基础路由模块。
 
-提供健康检查等不依赖业务逻辑的轻量接口，用于验证服务状态
-与展示关键运行目录信息。
+提供健康检查等不依赖业务逻辑的轻量接口，用于验证服务状态。
 """
 
 from __future__ import annotations
@@ -54,3 +53,4 @@ def health() -> dict[str, Any]:
         "main_model": get_env("MAIN_MODEL", "deepseek-v4-pro"),
         "has_gitee_token": bool(get_env("GITEE_TOKEN")),
     }
+

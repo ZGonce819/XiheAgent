@@ -140,3 +140,51 @@
     font-size: 125%;
   }
 }
+
+/* ── Workspace browse button animation ─────────────────────────────── */
+
+@keyframes browse-pulse {
+  0% {
+    transform: scale(1) rotate(0deg);
+  }
+  25% {
+    transform: scale(1.15) rotate(-6deg);
+  }
+  50% {
+    transform: scale(1.05) rotate(4deg);
+  }
+  75% {
+    transform: scale(1.18) rotate(-3deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+.workspace-browse-btn--picking {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: oklch(from var(--primary) l c h / 8%);
+  animation: browse-btn-glow 1.2s ease-in-out infinite;
+}
+
+@keyframes browse-btn-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 oklch(from var(--primary) l c h / 0%);
+  }
+  50% {
+    box-shadow: 0 0 8px 2px oklch(from var(--primary) l c h / 20%);
+  }
+}
+
+.workspace-cdrive-error {
+  position: relative;
+  padding-left: 1rem;
+}
+
+.workspace-cdrive-error::before {
+  content: "⚠";
+  position: absolute;
+  left: 0;
+  font-size: 0.75rem;
+}

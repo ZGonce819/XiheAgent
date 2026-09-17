@@ -7,12 +7,14 @@
 from __future__ import annotations
 
 import re
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 
 from agent.graph.graph import get_store
@@ -527,3 +529,125 @@ def dashboard_delete_thread(thread_id: str) -> None:
     if get_settings().use_redis_stream:
         cleanup_stream(thread_id)
     return None
+
+
+# ── 工作目录配置 ────────────────────────────────────────────────────────────
+
+
+class _WorkspaceUpdateRequest(BaseModel):
+    workspace_root: str | None = None
+    projects_dir: str | None = None
+    skills_dir: str | None = None
+
+
+def _ensure_writable(path: Path, label: str) -> None:
+    """确保目录存在且可写，不存在时自动创建。
+
+    Args:
+        path: 要验证的路径。
+        label: 用于错误提示的目录名称。
+
+    Raises:
+        HTTPException: 目录无法创建或不可写时抛出 400。
+    """
+    if not path.exists():
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            raise HTTPException(status_code=400, detail=f"无法创建{label}：{e}")
+    try:
+        test = path / ".xihe_write_test"
+        test.touch()
+        test.unlink()
+    except OSError:
+        raise HTTPException(status_code=400, detail=f"{label}不可写：{path}")
+
+
+@dashboard_router.get("/workspace")
+def dashboard_get_workspace() -> dict[str, str]:
+    """返回当前工作目录配置。"""
+    settings = get_settings()
+    return {
+        "workspace_root": str(settings.workspace_root),
+        "projects_dir": str(settings.projects_dir),
+        "skills_dir": str(settings.skills_dir),
+    }
+
+
+@dashboard_router.put("/workspace")
+def dashboard_update_workspace(body: _WorkspaceUpdateRequest) -> dict[str, str]:
+    """更新工作目录配置。
+
+    支持单独更新 workspace_root、projects_dir、skills_dir 中的任意组合。
+
+    Raises:
+        HTTPException: 路径无效或不可写时返回 400。
+    """
+    settings = get_settings()
+
+    if body.workspace_root is not None:
+        new_path = Path(body.workspace_root).resolve()
+        _ensure_writable(new_path, "工作目录")
+        settings.workspace_root = new_path
+
+    if body.projects_dir is not None:
+        new_projects = Path(body.projects_dir).resolve()
+        _ensure_writable(new_projects, "项目目录")
+        settings.projects_dir = new_projects
+
+    if body.skills_dir is not None:
+        new_skills = Path(body.skills_dir).resolve()
+        _ensure_writable(new_skills, "技能目录")
+        settings.skills_dir = new_skills
+
+    return {
+        "workspace_root": str(settings.workspace_root),
+        "projects_dir": str(settings.projects_dir),
+        "skills_dir": str(settings.skills_dir),
+    }
+
+
+@dashboard_router.get("/workspace/pick-folder")
+def dashboard_pick_folder() -> dict[str, Any]:
+    """打开系统原生文件夹选择对话框。
+
+    使用 tkinter 的 filedialog 弹出目录选择窗口。由于 tkinter 必须在
+    独立线程中创建自己的 Tk 根窗口，这里通过守护线程启动并等待结果。
+
+    Returns:
+        dict: 包含 ``path`` 字段（用户选择的路径），取消时返回 ``null``。
+
+    Raises:
+        HTTPException: 对话框不可用或超时时返回错误。
+    """
+    result: dict[str, str | None] = {"path": None}
+    error: Exception | None = None
+    done = threading.Event()
+
+    def _pick() -> None:
+        nonlocal error
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            path = filedialog.askdirectory(title="选择工作目录", parent=root)
+            result["path"] = path if path else None
+            root.destroy()
+        except Exception as e:
+            error = e
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=_pick, daemon=True)
+    thread.start()
+    done.wait(timeout=120)
+
+    if error is not None:
+        raise HTTPException(status_code=500, detail=f"文件夹对话框失败：{error}")
+    if not done.is_set():
+        raise HTTPException(status_code=504, detail="文件夹选择超时")
+
+    return result

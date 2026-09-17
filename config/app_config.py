@@ -49,6 +49,8 @@ class Settings:
             get_env("XIHE_AGENT_LOG_DIR", str(PROJECT_ROOT / "logs"))
         ).resolve()
         self.workspace_root: Path = WORKSPACE_ROOT
+        self._projects_dir: Path | None = None
+        self._skills_dir: Path | None = None
 
         # ── 日志 ──────────────────────────────────────────────
         self.log_level: str = get_env("XIHE_AGENT_LOG_LEVEL", "INFO").upper()
@@ -97,19 +99,31 @@ class Settings:
     def projects_dir(self) -> Path:
         """Agent 操作代码仓库的工作区子目录。
 
+        优先使用显式设置的路径，否则返回 ``workspace_root/projects``。
+
         Returns:
-            ``workspace_root/projects`` 路径。
+            项目目录路径。
         """
-        return self.workspace_root / "projects"
+        return self._projects_dir if self._projects_dir is not None else self.workspace_root / "projects"
+
+    @projects_dir.setter
+    def projects_dir(self, value: Path) -> None:
+        self._projects_dir = value
 
     @property
     def skills_dir(self) -> Path:
         """DeepAgents skills 目录。
 
+        优先使用显式设置的路径，否则返回 ``workspace_root/skills``。
+
         Returns:
-            ``workspace_root/skills`` 路径。
+            技能目录路径。
         """
-        return self.workspace_root / "skills"
+        return self._skills_dir if self._skills_dir is not None else self.workspace_root / "skills"
+
+    @skills_dir.setter
+    def skills_dir(self, value: Path) -> None:
+        self._skills_dir = value
 
 
 _settings_instance: Settings | None = None

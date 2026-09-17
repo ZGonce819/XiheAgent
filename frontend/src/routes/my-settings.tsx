@@ -12,6 +12,8 @@ import {
   TrashIcon,
   PlusIcon,
   CheckIcon,
+  FolderIcon,
+  FolderOpenIcon,
 } from "@phosphor-icons/react"
 
 import type {
@@ -886,47 +888,53 @@ function CommandApprovalSection() {
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
               {value.categories.map((category, index) => {
-                const currentAction = value[environment][category.id] ?? "approval"
-                const actionLabel = currentAction === "allow" ? "自动允许" : "每次询问"
+                const currentAction =
+                  value[environment][category.id] ?? "approval"
+                const actionLabel =
+                  currentAction === "allow" ? "自动允许" : "每次询问"
                 return (
-                <label
-                  key={category.id}
-                  className="approval-policy-row flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2.5 text-xs"
-                  style={{ animationDelay: `${Math.min(index * 24, 120)}ms` }}
-                >
-                  <span className="min-w-0">
-                    <span className="block font-medium">{category.label}</span>
-                    <span className="mt-0.5 block text-muted-foreground">
-                      {category.description}
-                    </span>
-                  </span>
-                  <Select
-                    value={currentAction}
-                    onValueChange={(next) =>
-                      setAction(
-                        environment,
-                        category.id,
-                        next as "allow" | "approval"
-                      )
-                    }
+                  <label
+                    key={category.id}
+                    className="approval-policy-row flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2.5 text-xs"
+                    style={{ animationDelay: `${Math.min(index * 24, 120)}ms` }}
                   >
-                    <SelectTrigger
-                      size="sm"
-                      className="approval-policy-select w-[6.5rem] shrink-0 bg-background"
-                      aria-label={`${category.label}审批策略`}
+                    <span className="min-w-0">
+                      <span className="block font-medium">
+                        {category.label}
+                      </span>
+                      <span className="mt-0.5 block text-muted-foreground">
+                        {category.description}
+                      </span>
+                    </span>
+                    <Select
+                      value={currentAction}
+                      onValueChange={(next) =>
+                        setAction(
+                          environment,
+                          category.id,
+                          next as "allow" | "approval"
+                        )
+                      }
                     >
-                      <span className="flex flex-1 text-left">{actionLabel}</span>
-                    </SelectTrigger>
-                    <SelectContent
-                      align="end"
-                      alignItemWithTrigger={false}
-                      className="approval-policy-menu min-w-[8rem] origin-top-right animate-in duration-150 ease-out fade-in-0 zoom-in-95 slide-in-from-top-1"
-                    >
-                      <SelectItem value="approval">每次询问</SelectItem>
-                      <SelectItem value="allow">自动允许</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </label>
+                      <SelectTrigger
+                        size="sm"
+                        className="approval-policy-select w-[6.5rem] shrink-0 bg-background"
+                        aria-label={`${category.label}审批策略`}
+                      >
+                        <span className="flex flex-1 text-left">
+                          {actionLabel}
+                        </span>
+                      </SelectTrigger>
+                      <SelectContent
+                        align="end"
+                        alignItemWithTrigger={false}
+                        className="approval-policy-menu min-w-[8rem] origin-top-right animate-in duration-150 ease-out fade-in-0 zoom-in-95 slide-in-from-top-1"
+                      >
+                        <SelectItem value="approval">每次询问</SelectItem>
+                        <SelectItem value="allow">自动允许</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </label>
                 )
               })}
             </div>
@@ -948,6 +956,420 @@ function CommandApprovalSection() {
   )
 }
 
+function WorkspaceSection() {
+  const queryClient = useQueryClient()
+  const workspace = useQuery({
+    queryKey: ["workspace"],
+    queryFn: api.getWorkspace,
+  })
+  const [editing, setEditing] = useState(false)
+  const [draftPath, setDraftPath] = useState("")
+  const [picking, setPicking] = useState(false)
+  const [cDriveError, setCDriveError] = useState("")
+
+  // 项目目录 / 技能目录编辑状态
+  const [editingProjects, setEditingProjects] = useState(false)
+  const [draftProjects, setDraftProjects] = useState("")
+  const [pickingProjects, setPickingProjects] = useState(false)
+  const [cDriveErrorProjects, setCDriveErrorProjects] = useState("")
+
+  const [editingSkills, setEditingSkills] = useState(false)
+  const [draftSkills, setDraftSkills] = useState("")
+  const [pickingSkills, setPickingSkills] = useState(false)
+  const [cDriveErrorSkills, setCDriveErrorSkills] = useState("")
+
+  const update = useMutation({
+    mutationFn: (body: {
+      workspace_root?: string
+      projects_dir?: string
+      skills_dir?: string
+    }) => api.updateWorkspace(body),
+    onSuccess: () => {
+      setEditing(false)
+      setEditingProjects(false)
+      setEditingSkills(false)
+      void queryClient.invalidateQueries({ queryKey: ["workspace"] })
+    },
+  })
+
+  const isCDrive = (p: string) => /^[cC]:[/\\]/.test(p)
+
+  const handlePickFolder = async (
+    setDraft: (v: string) => void,
+    setPickingState: (v: boolean) => void,
+    setCDriveErr: (v: string) => void,
+    errMsg: string
+  ) => {
+    setPickingState(true)
+    setCDriveErr("")
+    try {
+      const result = await api.pickFolder()
+      if (result.path) {
+        if (isCDrive(result.path)) {
+          setCDriveErr(errMsg)
+        }
+        setDraft(result.path)
+      }
+    } catch {
+      // 用户取消或对话框不可用
+    } finally {
+      setPickingState(false)
+    }
+  }
+
+  if (workspace.isLoading) {
+    return (
+      <SettingsSection title="全局工作目录" description="加载工作目录配置…">
+        <Skeleton className="h-20 w-full" />
+      </SettingsSection>
+    )
+  }
+
+  if (!workspace.data) return null
+  const info = workspace.data
+
+  return (
+    <SettingsSection
+      title="全局工作目录"
+      description="Agent 创建和操作的代码仓库都存放在此目录下。修改后新任务将使用新路径。"
+      contentClassName="workspace-settings-panel overflow-hidden rounded-lg border"
+    >
+      <div className="workspace-settings-content space-y-4 p-4 sm:p-5">
+        {/* 当前路径展示 */}
+        <div className="workspace-root-block space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2 text-sm">
+              <span className="workspace-folder-mark grid size-7 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
+                <FolderIcon className="size-4" weight="fill" />
+              </span>
+              <span className="truncate font-medium">工作区根目录</span>
+            </div>
+            <span className="hidden text-[0.6875rem] text-muted-foreground sm:inline">
+              新任务默认使用
+            </span>
+          </div>
+          <div className="workspace-root-path group flex items-center gap-3 rounded-md border border-border bg-muted/35 px-3 py-2.5">
+            <code className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
+              {info.workspace_root}
+            </code>
+            {!editing && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="workspace-edit-button h-7 shrink-0 gap-1.5 px-2 text-xs"
+                onClick={() => {
+                  setDraftPath(info.workspace_root)
+                  setEditing(true)
+                }}
+                aria-label="修改全局工作目录"
+              >
+                <PencilIcon className="size-3.5 transition-transform duration-150 group-hover:rotate-[-8deg]" />
+                修改
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* 编辑模式 */}
+        {editing && (
+          <div className="workspace-edit-form animate-in space-y-3 rounded-md border border-primary/30 bg-primary/5 p-3 duration-200 fade-in-0 slide-in-from-top-2">
+            <div className="space-y-1">
+              <label className="text-xs font-medium">新路径</label>
+              <div className="flex items-center gap-2">
+                <Input
+                  value={draftPath}
+                  onChange={(e) => {
+                    setDraftPath(e.target.value)
+                    setCDriveError("")
+                  }}
+                  placeholder="例如：E:\ai_workspace"
+                  autoFocus
+                  className={cn(
+                    cDriveError && "border-destructive focus-visible:ring-destructive/30"
+                  )}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={picking}
+                  onClick={() =>
+                    handlePickFolder(
+                      setDraftPath,
+                      setPicking,
+                      setCDriveError,
+                      "不支持将 C 盘设为工作目录，请选择其他磁盘"
+                    )
+                  }
+                  className={cn(
+                    "workspace-browse-btn h-9 shrink-0 gap-1.5 px-3",
+                    picking && "workspace-browse-btn--picking"
+                  )}
+                  title="浏览文件夹"
+                >
+                  <FolderOpenIcon
+                    className={cn(
+                      "size-4 transition-transform duration-200",
+                      picking && "animate-[browse-pulse_1.2s_ease-in-out_infinite]"
+                    )}
+                    weight={picking ? "fill" : "regular"}
+                  />
+                  {picking ? "选择中…" : "浏览"}
+                </Button>
+              </div>
+              {cDriveError && (
+                <p className="workspace-cdrive-error animate-in text-xs text-destructive fade-in-0 slide-in-from-top-1 duration-150">
+                  {cDriveError}
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                disabled={
+                  update.isPending ||
+                  !draftPath.trim() ||
+                  isCDrive(draftPath.trim())
+                }
+                onClick={() =>
+                  update.mutate({ workspace_root: draftPath.trim() })
+                }
+              >
+                {update.isPending ? "保存中…" : "保存"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={update.isPending}
+                onClick={() => setEditing(false)}
+              >
+                取消
+              </Button>
+              {update.isError && (
+                <span className="text-xs text-destructive">
+                  {(update.error as Error)?.message ?? "保存失败"}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* 派生目录 */}
+        <div className="workspace-derived-grid grid gap-3 sm:grid-cols-2">
+          {/* 项目目录卡片 */}
+          <div className="workspace-derived-card space-y-2 rounded-md border border-border bg-card px-3 py-2.5">
+            <p className="text-xs font-medium text-muted-foreground">
+              项目目录
+            </p>
+            {!editingProjects ? (
+              <div className="group flex items-center gap-2">
+                <code className="min-w-0 flex-1 truncate text-xs text-foreground/90">
+                  {info.projects_dir}
+                </code>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 shrink-0 gap-1 px-1.5 text-[0.6875rem] opacity-0 transition-opacity group-hover:opacity-100"
+                  onClick={() => {
+                    setDraftProjects(info.projects_dir)
+                    setEditingProjects(true)
+                  }}
+                >
+                  <PencilIcon className="size-3" />
+                  修改
+                </Button>
+              </div>
+            ) : (
+              <div className="animate-in space-y-2 rounded-md border border-primary/20 bg-primary/5 p-2 fade-in-0 slide-in-from-top-1 duration-150">
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    value={draftProjects}
+                    onChange={(e) => {
+                      setDraftProjects(e.target.value)
+                      setCDriveErrorProjects("")
+                    }}
+                    placeholder="例如：E:\ai_workspace\projects"
+                    autoFocus
+                    className={cn(
+                      "h-7 text-xs",
+                      cDriveErrorProjects && "border-destructive focus-visible:ring-destructive/30"
+                    )}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={pickingProjects}
+                    onClick={() =>
+                      handlePickFolder(
+                        setDraftProjects,
+                        setPickingProjects,
+                        setCDriveErrorProjects,
+                        "不支持将 C 盘设为项目目录"
+                      )
+                    }
+                    className={cn(
+                      "workspace-browse-btn h-7 shrink-0 gap-1 px-2 text-xs",
+                      pickingProjects && "workspace-browse-btn--picking"
+                    )}
+                    title="浏览文件夹"
+                  >
+                    <FolderOpenIcon
+                      className={cn(
+                        "size-3.5 transition-transform duration-200",
+                        pickingProjects && "animate-[browse-pulse_1.2s_ease-in-out_infinite]"
+                      )}
+                      weight={pickingProjects ? "fill" : "regular"}
+                    />
+                  </Button>
+                </div>
+                {cDriveErrorProjects && (
+                  <p className="workspace-cdrive-error animate-in text-[0.6875rem] text-destructive fade-in-0 duration-150">
+                    {cDriveErrorProjects}
+                  </p>
+                )}
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    size="sm"
+                    className="h-6 text-xs"
+                    disabled={
+                      update.isPending ||
+                      !draftProjects.trim() ||
+                      isCDrive(draftProjects.trim())
+                    }
+                    onClick={() =>
+                      update.mutate({ projects_dir: draftProjects.trim() })
+                    }
+                  >
+                    {update.isPending ? "保存中…" : "保存"}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-xs"
+                    disabled={update.isPending}
+                    onClick={() => setEditingProjects(false)}
+                  >
+                    取消
+                  </Button>
+                  {update.isError && (
+                    <span className="text-[0.6875rem] text-destructive">
+                      {(update.error as Error)?.message ?? "保存失败"}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 技能目录卡片 */}
+          <div className="workspace-derived-card space-y-2 rounded-md border border-border bg-card px-3 py-2.5">
+            <p className="text-xs font-medium text-muted-foreground">
+              技能目录
+            </p>
+            {!editingSkills ? (
+              <div className="group flex items-center gap-2">
+                <code className="min-w-0 flex-1 truncate text-xs text-foreground/90">
+                  {info.skills_dir}
+                </code>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 shrink-0 gap-1 px-1.5 text-[0.6875rem] opacity-0 transition-opacity group-hover:opacity-100"
+                  onClick={() => {
+                    setDraftSkills(info.skills_dir)
+                    setEditingSkills(true)
+                  }}
+                >
+                  <PencilIcon className="size-3" />
+                  修改
+                </Button>
+              </div>
+            ) : (
+              <div className="animate-in space-y-2 rounded-md border border-primary/20 bg-primary/5 p-2 fade-in-0 slide-in-from-top-1 duration-150">
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    value={draftSkills}
+                    onChange={(e) => {
+                      setDraftSkills(e.target.value)
+                      setCDriveErrorSkills("")
+                    }}
+                    placeholder="例如：E:\ai_workspace\skills"
+                    autoFocus
+                    className={cn(
+                      "h-7 text-xs",
+                      cDriveErrorSkills && "border-destructive focus-visible:ring-destructive/30"
+                    )}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={pickingSkills}
+                    onClick={() =>
+                      handlePickFolder(
+                        setDraftSkills,
+                        setPickingSkills,
+                        setCDriveErrorSkills,
+                        "不支持将 C 盘设为技能目录"
+                      )
+                    }
+                    className={cn(
+                      "workspace-browse-btn h-7 shrink-0 gap-1 px-2 text-xs",
+                      pickingSkills && "workspace-browse-btn--picking"
+                    )}
+                    title="浏览文件夹"
+                  >
+                    <FolderOpenIcon
+                      className={cn(
+                        "size-3.5 transition-transform duration-200",
+                        pickingSkills && "animate-[browse-pulse_1.2s_ease-in-out_infinite]"
+                      )}
+                      weight={pickingSkills ? "fill" : "regular"}
+                    />
+                  </Button>
+                </div>
+                {cDriveErrorSkills && (
+                  <p className="workspace-cdrive-error animate-in text-[0.6875rem] text-destructive fade-in-0 duration-150">
+                    {cDriveErrorSkills}
+                  </p>
+                )}
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    size="sm"
+                    className="h-6 text-xs"
+                    disabled={
+                      update.isPending ||
+                      !draftSkills.trim() ||
+                      isCDrive(draftSkills.trim())
+                    }
+                    onClick={() =>
+                      update.mutate({ skills_dir: draftSkills.trim() })
+                    }
+                  >
+                    {update.isPending ? "保存中…" : "保存"}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-xs"
+                    disabled={update.isPending}
+                    onClick={() => setEditingSkills(false)}
+                  >
+                    取消
+                  </Button>
+                  {update.isError && (
+                    <span className="text-[0.6875rem] text-destructive">
+                      {(update.error as Error)?.message ?? "保存失败"}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </SettingsSection>
+  )
+}
+
 function MySettingsPage() {
   const session = useSession()
 
@@ -962,6 +1384,7 @@ function MySettingsPage() {
 
   return (
     <AppShell user={session.data} title="个人设置">
+      <WorkspaceSection />
       <CustomModelsSection />
       <CommandApprovalSection />
     </AppShell>

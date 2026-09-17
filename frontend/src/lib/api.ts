@@ -111,6 +111,12 @@ export interface BuiltinModel {
 
 export type ApprovalAction = "allow" | "approval"
 
+export interface WorkspaceInfo {
+  workspace_root: string
+  projects_dir: string
+  skills_dir: string
+}
+
 export interface CommandApprovalSettings {
   local: Record<string, ApprovalAction>
   sandbox: Record<string, ApprovalAction>
@@ -391,6 +397,17 @@ export const api = {
       { method: "DELETE" }
     ),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
+  getWorkspace: () => request<WorkspaceInfo>("/workspace"),
+  updateWorkspace: (body: {
+    workspace_root?: string
+    projects_dir?: string
+    skills_dir?: string
+  }) =>
+    request<WorkspaceInfo>("/workspace", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  pickFolder: () => request<{ path: string | null }>("/workspace/pick-folder"),
 }
 
 export function loginUrl(redirectTo?: string): string {
