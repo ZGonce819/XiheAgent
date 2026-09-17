@@ -64,6 +64,7 @@ def build_streaming_response(
     content: str,
     rollback_message_id: str | None = None,
     rollback_message_content: str | None = None,
+    model_id: str | None = None,
 ) -> StreamingResponse:
     """构造 POST SSE 流式响应。
 
@@ -211,6 +212,7 @@ def build_streaming_response(
                     event_sink=event_sink,
                     run_id=run_id,
                     checkpoint_id=checkpoint_id,
+                    model_id=model_id,
                 )
                 latest = get_task(thread_id) or initial_task
                 send_event("thread_done", thread_meta_payload(latest))

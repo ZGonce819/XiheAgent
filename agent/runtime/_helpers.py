@@ -62,6 +62,7 @@ def build_agent_for_runtime(
     thread_id: str,
     task_kind: str,
     repo_url: str | None = None,
+    model_id: str | None = None,
 ) -> Any:
     """为 runtime 构造 DeepAgent 实例。
 
@@ -72,6 +73,7 @@ def build_agent_for_runtime(
         thread_id: 用于绑定 LangGraph checkpoint、Store 业务记录和前端事件流。
         task_kind: 任务类型，影响系统提示词、工具权限、中间件行为和运行保护阈值。
         repo_url: 仓库地址，向下传给 Agent 工厂用于初始化仓库映射和记忆。
+        model_id: 自定义模型 ID，为 ``None`` 时使用默认模型。
 
     Returns:
         构造完成的 DeepAgent runnable 实例。
@@ -84,6 +86,8 @@ def build_agent_for_runtime(
     }
     if repo_url:
         configurable["repo_url"] = repo_url
+    if model_id:
+        configurable["model_id"] = model_id
     return get_agent({"configurable": configurable})
 
 

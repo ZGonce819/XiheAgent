@@ -1,136 +1,470 @@
-import { Navigate, createFileRoute, useNavigate } from "@tanstack/react-router"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { Navigate, createFileRoute } from "@tanstack/react-router"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
-import { IoLogoSlack } from "react-icons/io5"
+import {
+  PencilIcon,
+  TrashIcon,
+  PlusIcon,
+  CheckIcon,
+} from "@phosphor-icons/react"
 
-import type { SessionUser } from "@/lib/api"
-import { AppShell, SettingsRow, SettingsSection } from "@/components/AppShell"
+import type { CustomModel, CustomModelInput, BuiltinModel } from "@/lib/api"
+import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
-import { api, slackConnectUrl } from "@/lib/api"
-import {
-  buildProfileUpdate,
-  useOptions,
-  useProfile,
-  useSaveProfile,
-} from "@/lib/profile"
+import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
-import { cn } from "@/lib/utils"
 
 export const Route = createFileRoute("/my-settings")({
   component: MySettingsPage,
 })
 
-type DraftReviewChoice = "team_default" | "always_on" | "always_off"
-
-function toChoice(value: boolean | null | undefined): DraftReviewChoice {
-  if (value === true) return "always_on"
-  if (value === false) return "always_off"
-  return "team_default"
+const EMPTY_FORM: FormState = {
+  name: "",
+  api_base: "",
+  api_key: "",
+  model_name: "",
+  max_tokens: 4096,
+  temperature: 0.7,
+  thinking: false,
+  is_default: false,
 }
 
-function fromChoice(choice: DraftReviewChoice): boolean | null {
-  if (choice === "always_on") return true
-  if (choice === "always_off") return false
-  return null
+interface FormState extends CustomModelInput {
+  is_default: boolean
 }
 
-function UserMappingSection({ session }: { session: SessionUser }) {
+function CustomModelsSection() {
   const qc = useQueryClient()
-  const mapping = useQuery({ queryKey: ["myMapping"], queryFn: api.myMapping })
-  const [connecting, setConnecting] = useState(false)
+  const models = useQuery({
+    queryKey: ["customModels"],
+    queryFn: api.listCustomModels,
+  })
+  const builtin = useQuery({
+    queryKey: ["builtinModel"],
+    queryFn: api.getBuiltinModel,
+  })
+  const [editing, setEditing] = useState<string | null>(null)
+  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState<FormState>({ ...EMPTY_FORM })
+  const [error, setError] = useState<string | null>(null)
 
-  const slackUserId = mapping.data?.slack_user_id ?? null
-  const workEmail = mapping.data?.work_email ?? null
-  const connected = !!slackUserId
+  const isEditingBuiltin = editing === "__builtin__"
 
-  const connect = () => {
-    setConnecting(true)
-    // Refresh the cached mapping when the user returns from the OAuth redirect.
-    void qc.invalidateQueries({ queryKey: ["myMapping"] })
-    window.location.assign(slackConnectUrl())
+  const createMut = useMutation({
+    mutationFn: (body: CustomModelInput) => api.createCustomModel(body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["customModels"] })
+      void qc.invalidateQueries({ queryKey: ["builtinModel"] })
+      void qc.invalidateQueries({ queryKey: ["options"] })
+      setShowForm(false)
+      setForm({ ...EMPTY_FORM })
+    },
+    onError: (e: Error) => setError(e.message),
+  })
+
+  const updateMut = useMutation({
+    mutationFn: ({
+      id,
+      body,
+    }: {
+      id: string
+      body: Partial<CustomModelInput>
+    }) => api.updateCustomModel(id, body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["customModels"] })
+      void qc.invalidateQueries({ queryKey: ["builtinModel"] })
+      void qc.invalidateQueries({ queryKey: ["options"] })
+      setEditing(null)
+    },
+    onError: (e: Error) => setError(e.message),
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => api.deleteCustomModel(id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["customModels"] })
+      void qc.invalidateQueries({ queryKey: ["builtinModel"] })
+      void qc.invalidateQueries({ queryKey: ["options"] })
+    },
+    onError: (e: Error) => setError(e.message),
+  })
+
+  const builtinMut = useMutation({
+    mutationFn: (body: Record<string, unknown>) => api.updateBuiltinModel(body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["builtinModel"] })
+      void qc.invalidateQueries({ queryKey: ["customModels"] })
+      void qc.invalidateQueries({ queryKey: ["options"] })
+      setEditing(null)
+    },
+    onError: (e: Error) => setError(e.message),
+  })
+
+  const startEditBuiltin = () => {
+    const b = builtin.data
+    if (!b) return
+    setShowForm(false)
+    setEditing("__builtin__")
+    setForm({
+      name: b.name,
+      api_base: b.api_base,
+      api_key: "",
+      model_name: b.model_name,
+      max_tokens: b.max_tokens,
+      temperature: b.temperature,
+      thinking: b.thinking,
+      is_default: b.is_default,
+    })
   }
+
+  const startEdit = (m: CustomModel) => {
+    setEditing(m.id)
+    setShowForm(false)
+    setForm({
+      name: m.name,
+      api_base: m.api_base,
+      api_key: "",
+      model_name: m.model_name,
+      max_tokens: m.max_tokens,
+      temperature: m.temperature,
+      thinking: m.thinking,
+      is_default: m.is_default,
+    })
+  }
+
+  const startAdd = () => {
+    setShowForm(true)
+    setEditing(null)
+    setForm({ ...EMPTY_FORM })
+  }
+
+  const cancelEdit = () => {
+    setEditing(null)
+    setShowForm(false)
+    setForm({ ...EMPTY_FORM })
+  }
+
+  const handleSave = () => {
+    if (!isEditingBuiltin && !form.name) {
+      setError("名称不能为空")
+      return
+    }
+    if (!isEditingBuiltin && !form.api_base) {
+      setError("API 地址不能为空")
+      return
+    }
+    if (!isEditingBuiltin && !form.model_name) {
+      setError("模型名不能为空")
+      return
+    }
+    if (isEditingBuiltin) {
+      builtinMut.mutate({
+        api_key: form.api_key || undefined,
+        max_tokens: form.max_tokens,
+        temperature: form.temperature,
+        thinking: form.thinking,
+        is_default: form.is_default,
+      })
+    } else if (editing) {
+      updateMut.mutate({
+        id: editing,
+        body: { ...form, set_default: form.is_default },
+      })
+    } else {
+      createMut.mutate(form)
+    }
+  }
+
+  const b = builtin.data
 
   return (
     <SettingsSection
-      title="账号映射"
-      description="仅当你计划从 Slack 触发 XiheAgent 时才需要连接 Slack。手动 Gitee 任务使用服务端仓库令牌。"
+      title="自定义模型"
+      description="管理内置模型和自定义模型，设为默认后 Agent 将使用该模型进行推理。"
+      contentClassName="overflow-hidden sm:rounded-lg"
     >
       <div className="divide-y divide-border">
-        <SettingsRow
-          label="当前账号"
-          control={
-            <span className="text-xs text-muted-foreground">
-              {session.login}
-            </span>
-          }
-        />
-        <SettingsRow
-          label="Slack 账号"
-          description={
-            connected
-              ? `已关联 Slack 成员 ${slackUserId}${workEmail ? ` · ${workEmail}` : ""}。`
-              : "尚未连接；手动执行 Gitee 任务不需要 Slack。"
-          }
-          control={
-            <div className="flex items-center gap-2">
-              <span
-                className={cn(
-                  "rounded-full px-2 py-0.5 text-[0.625rem] font-medium",
-                  connected
-                    ? "bg-primary/10 text-primary"
-                    : "bg-muted text-muted-foreground"
+        {/* ── 内置模型行 ── */}
+        {b && (
+          <div className="flex animate-in items-center justify-between gap-4 px-4 py-3 duration-200 fade-in-0 slide-in-from-bottom-1 motion-reduce:animate-none">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium">{b.name}</span>
+                <span className="rounded bg-muted px-1.5 py-0.5 text-[0.625rem] text-muted-foreground">
+                  {b.model_name}
+                </span>
+                <span className="rounded bg-primary/5 px-1.5 py-0.5 text-[0.625rem] text-primary/70">
+                  内置
+                </span>
+                {b.is_default && (
+                  <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[0.625rem] font-medium text-primary">
+                    默认
+                  </span>
                 )}
-              >
-                {connected ? "已连接" : "未连接"}
-              </span>
-              {session.slack_oauth_enabled ? (
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {b.api_base} · Key: {b.api_key_masked} · {b.max_tokens}{" "}
+                tokens · T={b.temperature}
+              </div>
+            </div>
+            <div className="flex items-center gap-1">
+              {!b.is_default && (
                 <Button
                   size="sm"
-                  variant={connected ? "outline" : "default"}
-                  onClick={connect}
-                  disabled={connecting || mapping.isLoading}
+                  variant="ghost"
+                  className="h-7 text-xs"
+                  onClick={() =>
+                    builtinMut.mutate({ is_default: true })
+                  }
                 >
-                  <IoLogoSlack className="size-4" />
-                  {connecting
-                    ? "正在跳转..."
-                    : connected
-                      ? "重新连接"
-                      : "连接 Slack"}
+                  <CheckIcon className="mr-1 size-3.5" />
+                  设为默认
                 </Button>
-              ) : (
-                <span className="text-[0.625rem] text-muted-foreground">
-                  当前无法使用 Slack 登录
-                </span>
               )}
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 w-7 p-0"
+                onClick={startEditBuiltin}
+              >
+                <PencilIcon className="size-3.5" />
+              </Button>
             </div>
-          }
-        />
+          </div>
+        )}
+        {builtin.isLoading && (
+          <div className="px-4 py-3">
+            <Skeleton className="h-10 w-full" />
+          </div>
+        )}
+
+        {/* ── 自定义模型行 ── */}
+        {models.data?.map((m, index) => (
+          <div
+            key={m.id}
+            className="flex animate-in items-center justify-between gap-4 px-4 py-3 duration-200 fade-in-0 slide-in-from-bottom-1 motion-reduce:animate-none"
+            style={{
+              animationDelay: `${Math.min(index * 35, 140)}ms`,
+              animationFillMode: "both",
+            }}
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium">{m.name}</span>
+                <span className="rounded bg-muted px-1.5 py-0.5 text-[0.625rem] text-muted-foreground">
+                  {m.model_name}
+                </span>
+                {m.is_default && (
+                  <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[0.625rem] font-medium text-primary">
+                    默认
+                  </span>
+                )}
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {m.api_base} · Key: {m.api_key} · {m.max_tokens} tokens · T=
+                {m.temperature}
+              </div>
+            </div>
+            <div className="flex items-center gap-1">
+              {!m.is_default && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-xs"
+                  onClick={() =>
+                    updateMut.mutate({ id: m.id, body: { set_default: true } })
+                  }
+                >
+                  <CheckIcon className="mr-1 size-3.5" />
+                  设为默认
+                </Button>
+              )}
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 w-7 p-0"
+                onClick={() => startEdit(m)}
+              >
+                <PencilIcon className="size-3.5" />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                onClick={() => deleteMut.mutate(m.id)}
+              >
+                <TrashIcon className="size-3.5" />
+              </Button>
+            </div>
+          </div>
+        ))}
+
+        {models.data?.length === 0 && !showForm && !editing && !b?.is_default && (
+          <div className="flex min-h-36 animate-in flex-col items-center justify-center px-6 py-8 text-center duration-200 fade-in-0 zoom-in-95 motion-reduce:animate-none">
+            <div className="mb-3 flex size-9 items-center justify-center rounded-md bg-muted text-muted-foreground">
+              <PlusIcon className="size-4" />
+            </div>
+            <p className="text-sm font-medium text-foreground">
+              还没有自定义模型
+            </p>
+            <p className="mt-1 max-w-md text-xs leading-5 text-muted-foreground">
+              添加一个 OpenAI 兼容模型，保存后即可在 Agent 中选择使用。
+            </p>
+            <Button size="sm" className="mt-4" onClick={startAdd}>
+              <PlusIcon className="size-3.5" />
+              添加模型
+            </Button>
+          </div>
+        )}
       </div>
+
+      {/* ── 编辑/新增表单 ── */}
+      {(showForm || editing) && (
+        <div className="animate-in space-y-3 border-t border-border p-4 duration-200 fade-in-0 slide-in-from-top-2 motion-reduce:animate-none">
+          {isEditingBuiltin && (
+            <p className="text-xs text-muted-foreground">
+              内置模型的名称和模型 ID 由环境配置决定，不可修改。
+            </p>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs font-medium">显示名称</label>
+              <Input
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="如：DeepSeek V3"
+                disabled={isEditingBuiltin}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium">模型 ID</label>
+              <Input
+                value={form.model_name}
+                onChange={(e) =>
+                  setForm({ ...form, model_name: e.target.value })
+                }
+                placeholder="如：deepseek-chat"
+                disabled={isEditingBuiltin}
+              />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium">API Base URL</label>
+            <Input
+              value={form.api_base}
+              onChange={(e) => setForm({ ...form, api_base: e.target.value })}
+              placeholder="如：https://api.deepseek.com"
+              disabled={isEditingBuiltin}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium">API Key</label>
+            <Input
+              type="password"
+              value={form.api_key ?? ""}
+              onChange={(e) => setForm({ ...form, api_key: e.target.value })}
+              placeholder={
+                editing
+                  ? isEditingBuiltin
+                    ? "留空使用 .env 配置"
+                    : "留空保持不变"
+                  : "sk-..."
+              }
+            />
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs font-medium">Max Tokens</label>
+              <Input
+                type="number"
+                value={form.max_tokens}
+                onChange={(e) =>
+                  setForm({ ...form, max_tokens: Number(e.target.value) })
+                }
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium">Temperature</label>
+              <Input
+                type="number"
+                step="0.1"
+                min="0"
+                max="2"
+                value={form.temperature}
+                onChange={(e) =>
+                  setForm({ ...form, temperature: Number(e.target.value) })
+                }
+              />
+            </div>
+            <div className="flex items-end gap-3 pb-1">
+              <label className="flex items-center gap-1.5 text-xs">
+                <input
+                  type="checkbox"
+                  checked={form.thinking}
+                  onChange={(e) =>
+                    setForm({ ...form, thinking: e.target.checked })
+                  }
+                  className="rounded border-border"
+                />
+                Thinking
+              </label>
+              <label className="flex items-center gap-1.5 text-xs">
+                <input
+                  type="checkbox"
+                  checked={form.is_default}
+                  onChange={(e) =>
+                    setForm({ ...form, is_default: e.target.checked })
+                  }
+                  className="rounded border-border"
+                />
+                默认
+              </label>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 pt-1">
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={
+                createMut.isPending || updateMut.isPending || builtinMut.isPending
+              }
+            >
+              {editing ? "保存修改" : "添加模型"}
+            </Button>
+            <Button size="sm" variant="outline" onClick={cancelEdit}>
+              取消
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {!showForm && !editing && (models.data?.length ?? 0) > 0 && (
+        <div className="border-t border-border px-4 py-3">
+          <Button
+            size="sm"
+            variant="outline"
+            className="animate-in duration-150 fade-in-0 motion-reduce:animate-none"
+            onClick={startAdd}
+          >
+            <PlusIcon className="mr-1 size-4" />
+            添加模型
+          </Button>
+        </div>
+      )}
+
+      {error && (
+        <p className="border-t border-border px-4 py-3 text-xs text-destructive">
+          {error}
+        </p>
+      )}
     </SettingsSection>
   )
 }
 
 function MySettingsPage() {
   const session = useSession()
-  const qc = useQueryClient()
-  const navigate = useNavigate()
-  const profile = useProfile()
-  const options = useOptions()
-  const save = useSaveProfile()
-  const teamSettings = useQuery({
-    queryKey: ["teamSettings"],
-    queryFn: api.getTeamSettings,
-    enabled: !!session.data,
-  })
-  const [error, setError] = useState<string | null>(null)
 
   if (session.isLoading) {
     return (
@@ -141,98 +475,9 @@ function MySettingsPage() {
   }
   if (!session.data) return <Navigate to="/login" />
 
-  const handleLogout = async () => {
-    await api.logout()
-    qc.setQueryData(["session"], null)
-    void navigate({ to: "/login" })
-  }
-
-  const firstModel = options.data?.models[0]
-  const fallbackModel = options.data?.default_agent_model ?? firstModel?.id ?? ""
-  const fallbackEffort =
-    options.data?.default_agent_reasoning_effort ??
-    firstModel?.default_effort ??
-    ""
-
-  const draftChoice = toChoice(profile.data?.review_draft_prs)
-  const teamDefaultOn = teamSettings.data?.review_draft_prs ?? false
-  const teamDefaultLabel = `使用团队默认值（当前：${teamDefaultOn ? "开启" : "关闭"}）`
-
-  const handleDraftChoiceChange = (next: DraftReviewChoice) => {
-    setError(null)
-    save
-      .mutateAsync(
-        buildProfileUpdate(
-          profile.data,
-          { review_draft_prs: fromChoice(next) },
-          fallbackModel,
-          fallbackEffort
-        )
-      )
-      .catch((e: Error) => setError(e.message))
-  }
-
   return (
     <AppShell user={session.data} title="个人设置">
-      <SettingsSection title="个人资料">
-        <SettingsRow
-          label="邮箱"
-          control={
-            <span className="text-xs text-muted-foreground">
-              {session.data.email ?? "-"}
-            </span>
-          }
-        />
-      </SettingsSection>
-
-      <UserMappingSection session={session.data} />
-
-      <SettingsSection title="代码审查">
-        <SettingsRow
-          label="审查我的草稿 PR"
-          description="决定是否审查你创建的草稿 PR；选择团队默认值时使用管理员的全局设置。"
-          control={
-            <Select
-              value={draftChoice}
-              onValueChange={(v) =>
-                handleDraftChoiceChange(v as DraftReviewChoice)
-              }
-              disabled={profile.isLoading || save.isPending}
-            >
-              <SelectTrigger className="w-56">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="team_default">{teamDefaultLabel}</SelectItem>
-                <SelectItem value="always_on">
-                  始终审查我的草稿
-                </SelectItem>
-                <SelectItem value="always_off">
-                  从不审查我的草稿
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          }
-        />
-      </SettingsSection>
-
-      <SettingsSection title="账号">
-        <SettingsRow
-          label="退出登录"
-          description="结束当前会话。"
-          control={
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void handleLogout()}
-            >
-              退出登录
-            </Button>
-          }
-        />
-      </SettingsSection>
-
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      <CustomModelsSection />
     </AppShell>
   )
 }

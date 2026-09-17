@@ -46,6 +46,7 @@ def run_plan_response_task(
     event_sink: RuntimeEventSink | None = None,
     run_id: str | None = None,
     checkpoint_id: str | None = None,
+    model_id: str | None = None,
 ) -> dict[str, Any]:
     """为编码需求生成技术方案，并把方案作为普通回答直接展示。
 
@@ -107,7 +108,7 @@ def run_plan_response_task(
     record_event(thread_id, "agent", "构建方案生成 Agent", status="in_progress")
     # 方案任务也使用 DeepAgent，是因为它需要读取仓库结构、测试方式、关键文件等上下文。
     # 但 task_kind 固定为 planning，中间件和工具权限会保持只读。
-    agent = build_agent_for_runtime(thread_id=thread_id, task_kind="planning", repo_url=repo.clone_url)
+    agent = build_agent_for_runtime(thread_id=thread_id, task_kind="planning", repo_url=repo.clone_url, model_id=model_id)
     record_event(thread_id, "agent", "构建方案生成 Agent", status="completed")
 
     try:

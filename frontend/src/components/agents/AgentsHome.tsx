@@ -4,7 +4,6 @@ import { FolderGit2 } from "lucide-react"
 import type { ModelSelection } from "@/lib/agents/useModelOptions"
 import type { ImageChunk } from "@/lib/agents/types"
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar"
-import { SlackConnectDialog } from "@/components/agents/SlackConnectDialog"
 import { Logo } from "@/components/agents/ported/Logo"
 import { useCreateAgentThread } from "@/lib/agents/queries"
 import { useModelOptions } from "@/lib/agents/useModelOptions"
@@ -37,7 +36,6 @@ export function AgentsHome() {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-      <SlackConnectDialog />
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--ui-border)] px-5 md:px-8 max-md:pl-14">
         <div className="flex items-center gap-3">
           <FolderGit2 className="size-4 text-[color:var(--ui-text-dim)]" />

@@ -99,6 +99,7 @@ def run_agent_task(
     event_sink: RuntimeEventSink | None = None,
     run_id: str | None = None,
     checkpoint_id: str | None = None,
+    model_id: str | None = None,
 ) -> dict[str, Any]:
     """运行一次普通 Agent 任务的总入口。
 
@@ -159,6 +160,7 @@ def run_agent_task(
                 event_sink=event_sink,
                 run_id=run_id,
                 checkpoint_id=checkpoint_id,
+                model_id=model_id,
             )
     if existing_thread and approved_plan_text is None and is_approval_prompt(prompt):
         logger.warning("用户确认实施但未找到待确认方案：thread_id=%s", thread_id)
@@ -170,7 +172,7 @@ def run_agent_task(
         task_kind = "coding"
 
     if task_kind == "coding" and approved_plan_text is None:
-        return run_plan_response_task(repo_url=repo_url, prompt=prompt, thread_id=thread_id, event_sink=event_sink, run_id=run_id, checkpoint_id=checkpoint_id)
+        return run_plan_response_task(repo_url=repo_url, prompt=prompt, thread_id=thread_id, event_sink=event_sink, run_id=run_id, checkpoint_id=checkpoint_id, model_id=model_id)
 
     store.clear_run_events(thread_id)
     if approved_plan_text is not None:
@@ -200,7 +202,7 @@ def run_agent_task(
     store.record_run(run_id=run_id, thread_id=thread_id, status="running", base_commit=base_commit)
     logger.info("业务 Store 已记录运行：thread_id=%s run_id=%s", thread_id, run_id)
     record_event(thread_id, "agent", "构建 Agent 运行图", status="in_progress")
-    agent = build_agent_for_runtime(thread_id=thread_id, task_kind=task_kind, repo_url=repo.clone_url)
+    agent = build_agent_for_runtime(thread_id=thread_id, task_kind=task_kind, repo_url=repo.clone_url, model_id=model_id)
     logger.info("Agent 图已构建：thread_id=%s", thread_id)
     record_event(thread_id, "agent", "构建 Agent 运行图", status="completed")
     try:

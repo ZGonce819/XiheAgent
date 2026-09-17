@@ -63,6 +63,43 @@ export interface ModelOption {
   supports_images: boolean;
 }
 
+export interface CustomModel {
+  id: string;
+  name: string;
+  api_base: string;
+  api_key: string;
+  model_name: string;
+  max_tokens: number;
+  temperature: number;
+  thinking: boolean;
+  is_default: boolean;
+}
+
+export interface CustomModelInput {
+  name: string;
+  api_base: string;
+  api_key?: string;
+  model_name: string;
+  max_tokens?: number;
+  temperature?: number;
+  thinking?: boolean;
+  set_default?: boolean;
+}
+
+export interface BuiltinModel {
+  id: string;
+  name: string;
+  model_name: string;
+  api_base: string;
+  api_key: string;
+  api_key_masked: string;
+  max_tokens: number;
+  temperature: number;
+  thinking: boolean;
+  is_default: boolean;
+  has_overrides: boolean;
+}
+
 export interface OptionsPayload {
   models: Array<ModelOption>;
   default_agent_model: string;
@@ -273,6 +310,26 @@ export const api = {
       `/agent-usage-leaderboard?period=${encodeURIComponent(period)}&limit=${limit}`,
     ),
   myMapping: () => request<Partial<UserMapping>>("/my-mapping"),
+  listCustomModels: () => request<Array<CustomModel>>("/custom-models"),
+  createCustomModel: (body: CustomModelInput) =>
+    request<CustomModel>("/custom-models", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  updateCustomModel: (id: string, body: Partial<CustomModelInput>) =>
+    request<CustomModel>(`/custom-models/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteCustomModel: (id: string) =>
+    request<void>(`/custom-models/${id}`, { method: "DELETE" }),
+  getBuiltinModel: () =>
+    request<BuiltinModel>("/builtin-model"),
+  updateBuiltinModel: (body: Partial<CustomModelInput> & { is_default?: boolean }) =>
+    request<BuiltinModel>("/builtin-model", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
   adminListUserMappings: (page = 1, pageSize = 20) =>
     request<UserMappingsPage>(
       `/admin/user-mappings?page=${page}&page_size=${pageSize}`,

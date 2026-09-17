@@ -73,5 +73,6 @@ export function formatModelSelection(
   const model = models.find((m) => m.id === selection.modelId)
   const modelLabel = model?.label ?? selection.modelId
   const effortLabel = EFFORT_LABELS[selection.effort] ?? selection.effort
+  if (effortLabel === "default") return modelLabel
   return `${modelLabel} ${effortLabel}`
 }

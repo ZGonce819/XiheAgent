@@ -324,8 +324,8 @@ def get_agent(config: RunnableConfig):
     if repo_memory_content:
         configurable["_repo_memory_content"] = repo_memory_content
 
-    main_model = make_main_model()
-    subagent_model = make_main_model()
+    main_model = make_main_model(configurable.get("model_id"))
+    subagent_model = make_main_model(configurable.get("model_id"))
 
     logger.info(
         "返回带 Backend 的 Agent：thread_id=%s task_kind=%s",
