@@ -500,6 +500,36 @@ def _register_sandbox(thread_id: str, sandbox_id: str) -> None:
         logger.warning("沙箱注册或清理失败（不影响沙箱使用）", exc_info=True)
 
 
+def _init_sandbox_skills(backend: OpenSandboxBackend) -> None:
+    """将默认 skills 上传到沙盒。
+
+    从工作区 skills 目录读取所有已安装的 skills，在沙盒创建后自动上传
+    到 ``/workspace/skills/<skill_name>/SKILL.md``。
+
+    Args:
+        backend: 刚创建的 OpenSandboxBackend 实例。
+
+    Note:
+        - 只在沙盒首次创建时调用（由 create_opensandbox_backend 触发）。
+        - 如果工作区没有 skills，静默跳过。
+        - 上传失败仅记录警告，不阻断沙盒使用。
+    """
+    try:
+        from services.skill_installer import get_default_skills
+
+        upload_files = get_default_skills()
+        if not upload_files:
+            logger.debug("工作区没有 skills，跳过沙盒初始化")
+            return
+
+        logger.info("正在向沙盒 %s 上传 %d 个 skills", backend.id, len(upload_files))
+        backend.upload_files(upload_files)
+        logger.info("沙盒 skills 初始化完成：%s", backend.id)
+
+    except Exception:
+        logger.warning("沙盒 skills 初始化失败（不影响沙箱使用）", exc_info=True)
+
+
 def list_running_sandboxes(config: ConnectionConfigSync) -> list:
     """列出所有正在运行的沙箱。
 
@@ -559,4 +589,9 @@ def create_opensandbox_backend(
     sandbox = get_or_create_sandbox(
         config, thread_id=thread_id, sandbox_id=sandbox_id, image=image
     )
-    return OpenSandboxBackend(sandbox=sandbox)
+    backend = OpenSandboxBackend(sandbox=sandbox)
+
+    # 初始化沙盒 skills（从工作区上传）
+    _init_sandbox_skills(backend)
+
+    return backend

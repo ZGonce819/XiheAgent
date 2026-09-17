@@ -5,27 +5,19 @@ export interface CronPreset {
 }
 
 export const CRON_PRESETS: Array<CronPreset> = [
-  { id: "hourly", label: "Hourly", value: "0 * * * *" },
-  { id: "daily", label: "Daily", value: "0 9 * * *" },
-  { id: "weekly", label: "Weekly", value: "0 9 * * 1" },
+  { id: "hourly", label: "每小时", value: "0 * * * *" },
+  { id: "daily", label: "每天", value: "0 9 * * *" },
+  { id: "weekly", label: "每周", value: "0 9 * * 1" },
 ]
 
-const DAY_NAMES = [
-  "Sunday",
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-]
+const DAY_NAMES = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
 
 function pad(n: number): string {
   return n.toString().padStart(2, "0")
 }
 
 function formatTime(minute: number, hour: number): string {
-  return `${pad(hour)}:${pad(minute)} UTC`
+  return `UTC ${pad(hour)}:${pad(minute)}`
 }
 
 /** Best-effort human description of a 5-field cron expression. */
@@ -35,13 +27,19 @@ export function describeCron(expr: string): string {
   const [min, hour, dom, mon, dow] = parts
   if (!min || !hour || !dom || !mon || !dow) return expr
 
-  if (min === "0" && hour === "*" && dom === "*" && mon === "*" && dow === "*") {
-    return "Every hour"
+  if (
+    min === "0" &&
+    hour === "*" &&
+    dom === "*" &&
+    mon === "*" &&
+    dow === "*"
+  ) {
+    return "每小时"
   }
 
   const everyNHours = hour.match(/^\*\/(\d+)$/)
   if (everyNHours && min === "0" && dom === "*" && mon === "*" && dow === "*") {
-    return `Every ${everyNHours[1]} hours`
+    return `每 ${everyNHours[1]} 小时`
   }
 
   const minNum = Number(min)
@@ -53,12 +51,12 @@ export function describeCron(expr: string): string {
     hourNum >= 0
 
   if (timeKnown && dom === "*" && mon === "*") {
-    if (dow === "*") return `Daily at ${formatTime(minNum, hourNum)}`
-    if (dow === "1-5") return `Weekdays at ${formatTime(minNum, hourNum)}`
+    if (dow === "*") return `每天 ${formatTime(minNum, hourNum)}`
+    if (dow === "1-5") return `工作日 ${formatTime(minNum, hourNum)}`
     const dowNum = Number(dow)
     if (Number.isInteger(dowNum) && dowNum >= 0 && dowNum <= 7) {
       const name = DAY_NAMES[dowNum % 7]
-      return `Weekly on ${name} at ${formatTime(minNum, hourNum)}`
+      return `每${name} ${formatTime(minNum, hourNum)}`
     }
   }
 

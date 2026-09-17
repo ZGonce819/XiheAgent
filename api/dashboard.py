@@ -6,19 +6,24 @@
 
 from __future__ import annotations
 
+import re
 import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from agent.runtime import (
-    delete_task,
-    get_task,
-    list_tasks,
-)
 from agent.graph.graph import get_store
+from agent.runtime import delete_task, get_task, list_tasks
 from config.app_config import get_settings
+from config.automation_config import (
+    create_automation,
+    delete_automation,
+    list_automations,
+    update_automation,
+)
 from config.env_config import get_env
 from config.model_config import (
     create_custom_model,
@@ -29,15 +34,59 @@ from config.model_config import (
     update_builtin_model,
     update_custom_model,
 )
-from schemas.request_schema import DashboardEditPreviewRequest, DashboardThreadMessageRequest, DashboardThreadTitleUpdateRequest, DashboardViewSnapshotRequest
-from services.thread_service import conversation_snapshot, fetch_visible_messages
+from schemas.request_schema import (
+    DashboardEditPreviewRequest,
+    DashboardThreadMessageRequest,
+    DashboardThreadTitleUpdateRequest,
+    DashboardViewSnapshotRequest,
+)
 from services.repo_rollback import rollback_run
 from services.streaming_service import build_streaming_response
-from services.thread_service import thread_payload
-from utils.platform_utils import (normalize_repo_url)
+from services.thread_service import (
+    conversation_snapshot,
+    fetch_visible_messages,
+    thread_payload,
+)
+from utils.platform_utils import normalize_repo_url
 from utils.redis_utils import cleanup_stream
 
 dashboard_router = APIRouter(prefix="/dashboard/api")
+
+
+def _validate_automation_payload(body: dict[str, Any], partial: bool = False) -> None:
+    for field, label in (("name", "名称"), ("prompt", "任务指令"), ("schedule", "执行计划")):
+        if (not partial or field in body) and not str(body.get(field) or "").strip():
+            raise HTTPException(status_code=400, detail=f"{label}不能为空")
+    if "schedule" in body and len(str(body["schedule"]).split()) != 5:
+        raise HTTPException(status_code=400, detail="执行计划必须是 5 段 Cron 表达式")
+
+
+def _skill_summary(skill_file: Path) -> dict[str, Any]:
+    text = skill_file.read_text(encoding="utf-8", errors="replace")
+    name = skill_file.parent.name
+    description = ""
+    if text.startswith("---"):
+        frontmatter = text.split("---", 2)[1]
+        name_match = re.search(r"^name:\s*[\"']?(.+?)[\"']?\s*$", frontmatter, re.MULTILINE)
+        description_match = re.search(
+            r"^description:\s*[\"']?(.+?)[\"']?\s*$", frontmatter, re.MULTILINE
+        )
+        if name_match:
+            name = name_match.group(1).strip()
+        if description_match:
+            description = description_match.group(1).strip()
+    if not description:
+        heading = re.search(r"^#\s+(.+)$", text, re.MULTILINE)
+        description = heading.group(1).strip() if heading else "可由智能体按需加载的本地技能。"
+    return {
+        "id": skill_file.parent.name,
+        "name": name,
+        "description": description,
+        "virtualPath": f"/skills/{skill_file.parent.name}/SKILL.md",
+        "updatedAt": datetime.fromtimestamp(
+            skill_file.stat().st_mtime, tz=timezone.utc
+        ).isoformat(),
+    }
 
 
 def _is_latest_user_message(message_id: str, thread_id: str, messages: list[dict[str, Any]], original_content: str | None = None) -> bool:
@@ -195,6 +244,56 @@ def dashboard_repos() -> dict[str, Any]:
 def dashboard_my_mapping() -> dict[str, Any]:
     """返回当前用户的外部账号映射；未配置时返回空对象。"""
     return {}
+
+
+@dashboard_router.get("/schedules")
+def dashboard_schedules() -> list[dict[str, Any]]:
+    """Return persisted automation definitions."""
+    return list_automations()
+
+
+@dashboard_router.post("/schedules", status_code=201)
+def dashboard_create_schedule(body: dict[str, Any]) -> dict[str, Any]:
+    """Create an automation definition."""
+    _validate_automation_payload(body)
+    return create_automation(body)
+
+
+@dashboard_router.patch("/schedules/{schedule_id}")
+def dashboard_update_schedule(
+    schedule_id: str, body: dict[str, Any]
+) -> dict[str, Any]:
+    """Update an automation definition."""
+    _validate_automation_payload(body, partial=True)
+    result = update_automation(schedule_id, body)
+    if result is None:
+        raise HTTPException(status_code=404, detail="自动化任务不存在")
+    return result
+
+
+@dashboard_router.delete("/schedules/{schedule_id}", status_code=204)
+def dashboard_delete_schedule(schedule_id: str) -> None:
+    """Delete an automation definition."""
+    if not delete_automation(schedule_id):
+        raise HTTPException(status_code=404, detail="自动化任务不存在")
+
+
+@dashboard_router.get("/skills")
+def dashboard_skills() -> dict[str, Any]:
+    """Discover readable DeepAgents skills from the configured workspace."""
+    skills_dir = get_settings().skills_dir
+    skills: list[dict[str, Any]] = []
+    if skills_dir.is_dir():
+        for skill_file in sorted(skills_dir.glob("*/SKILL.md")):
+            try:
+                skills.append(_skill_summary(skill_file))
+            except OSError:
+                continue
+    return {
+        "items": skills,
+        "virtualRoot": "/skills",
+        "available": skills_dir.is_dir(),
+    }
 
 
 @dashboard_router.get("/threads")

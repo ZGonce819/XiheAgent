@@ -11,8 +11,10 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AgentsRouteImport } from './routes/agents'
+import { Route as AutomationsRouteImport } from './routes/automations'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as MySettingsRouteImport } from './routes/my-settings'
+import { Route as SkillsRouteImport } from './routes/skills'
 import { Route as AgentsIndexRouteImport } from './routes/agents/index'
 import { Route as AgentsThreadIdRouteImport } from './routes/agents/$threadId'
 
@@ -26,6 +28,11 @@ const AgentsRoute = AgentsRouteImport.update({
   path: '/agents',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AutomationsRoute = AutomationsRouteImport.update({
+  id: '/automations',
+  path: '/automations',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
@@ -34,6 +41,11 @@ const LoginRoute = LoginRouteImport.update({
 const MySettingsRoute = MySettingsRouteImport.update({
   id: '/my-settings',
   path: '/my-settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SkillsRoute = SkillsRouteImport.update({
+  id: '/skills',
+  path: '/skills',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentsIndexRoute = AgentsIndexRouteImport.update({
@@ -50,15 +62,19 @@ const AgentsThreadIdRoute = AgentsThreadIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/agents': typeof AgentsRouteWithChildren
+  '/automations': typeof AutomationsRoute
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
+  '/skills': typeof SkillsRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents/': typeof AgentsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/automations': typeof AutomationsRoute
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
+  '/skills': typeof SkillsRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents': typeof AgentsIndexRoute
 }
@@ -66,8 +82,10 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/agents': typeof AgentsRouteWithChildren
+  '/automations': typeof AutomationsRoute
   '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
+  '/skills': typeof SkillsRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
   '/agents/': typeof AgentsIndexRoute
 }
@@ -76,18 +94,29 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/agents'
+    | '/automations'
     | '/login'
     | '/my-settings'
+    | '/skills'
     | '/agents/$threadId'
     | '/agents/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/my-settings' | '/agents/$threadId' | '/agents'
+  to:
+    | '/'
+    | '/automations'
+    | '/login'
+    | '/my-settings'
+    | '/skills'
+    | '/agents/$threadId'
+    | '/agents'
   id:
     | '__root__'
     | '/'
     | '/agents'
+    | '/automations'
     | '/login'
     | '/my-settings'
+    | '/skills'
     | '/agents/$threadId'
     | '/agents/'
   fileRoutesById: FileRoutesById
@@ -95,8 +124,10 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AgentsRoute: typeof AgentsRouteWithChildren
+  AutomationsRoute: typeof AutomationsRoute
   LoginRoute: typeof LoginRoute
   MySettingsRoute: typeof MySettingsRoute
+  SkillsRoute: typeof SkillsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -115,6 +146,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/automations': {
+      id: '/automations'
+      path: '/automations'
+      fullPath: '/automations'
+      preLoaderRoute: typeof AutomationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/login': {
       id: '/login'
       path: '/login'
@@ -127,6 +165,13 @@ declare module '@tanstack/react-router' {
       path: '/my-settings'
       fullPath: '/my-settings'
       preLoaderRoute: typeof MySettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/skills': {
+      id: '/skills'
+      path: '/skills'
+      fullPath: '/skills'
+      preLoaderRoute: typeof SkillsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agents/': {
@@ -162,8 +207,10 @@ const AgentsRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentsRoute: AgentsRouteWithChildren,
+  AutomationsRoute: AutomationsRoute,
   LoginRoute: LoginRoute,
   MySettingsRoute: MySettingsRoute,
+  SkillsRoute: SkillsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

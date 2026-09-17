@@ -5,14 +5,23 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config.env_config import load_environment
 from config.logging_config import configure_logging
+from services.skill_installer import ensure_default_skills
 
 load_environment()
 configure_logging()
+
+# 安装默认 skills（从 agent/skills 拷贝到工作区）
+logger = logging.getLogger(__name__)
+installed = ensure_default_skills()
+if installed:
+    logger.info("已安装 %d 个默认 skill(s): %s", len(installed), ", ".join(installed))
 
 from api import dashboard_router, router  # noqa: E402
 
