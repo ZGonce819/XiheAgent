@@ -8,7 +8,7 @@ import {
 } from "@phosphor-icons/react"
 import { IoLogoGithub, IoLogoSlack, IoSettingsOutline } from "react-icons/io5"
 import { SiLinear } from "react-icons/si"
-import { useState, type ComponentType, type SVGProps } from "react"
+import { useState, useMemo, type ComponentType, type SVGProps } from "react"
 
 import type { SessionUser } from "@/lib/api"
 import type { AgentSource, AgentThread } from "@/lib/agents/types"
@@ -57,10 +57,11 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
     >
       <div className="flex items-center justify-between px-4 pt-5 pb-4">
         <Link
-          to="/my-settings"
-          className="flex items-center gap-2 font-heading text-sm font-medium tracking-tight text-[var(--ui-text)]"
+          to="/agents"
+          onClick={layout.closeOnMobile}
+          className="font-heading text-sm font-medium tracking-tight text-[var(--ui-text)]"
         >
-          <Logo />
+          XiheAgent
         </Link>
         <SidebarCollapseButton onToggle={layout.toggle} />
       </div>
@@ -155,6 +156,28 @@ function ThreadGroup({
   )
 }
 
+function formatLastMessageTime(messages: Array<{ timestamp: string }>): string {
+  if (messages.length === 0) return ""
+  const last = messages[messages.length - 1]
+  const date = new Date(last.timestamp)
+  if (Number.isNaN(date.getTime())) return ""
+  const pad = (n: number) => String(n).padStart(2, "0")
+  const now = new Date()
+  const isToday = date.toDateString() === now.toDateString()
+  if (isToday) return `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  return `${date.getMonth() + 1}/${date.getDate()} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function getDisplayRepo(repo: string): string {
+  if (!/^https?:\/\//i.test(repo)) return repo
+  try {
+    const parts = new URL(repo).pathname.split("/").filter(Boolean)
+    return parts.length >= 2 ? `${parts[0]}/${parts[1]}` : repo
+  } catch {
+    return repo
+  }
+}
+
 function ThreadRow({
   thread,
   isActive,
@@ -186,6 +209,16 @@ function ThreadRow({
       : null
   const SourceIcon = source?.icon
 
+  const lastMessageTime = useMemo(
+    () => formatLastMessageTime(thread.messages),
+    [thread.messages],
+  )
+  const displayRepo = useMemo(
+    () => getDisplayRepo(thread.repoFullName || thread.repo || ""),
+    [thread.repoFullName, thread.repo],
+  )
+  const envLabel = thread.backendType === "sandbox" ? "沙箱" : "本地"
+
   return (
     <>
     <Link
@@ -193,46 +226,65 @@ function ThreadRow({
       params={{ threadId: thread.id }}
       onClick={onNavigate}
       className={cn(
-        "group mb-0.5 flex items-center gap-2 rounded-lg px-2.5 py-1.5 transition-colors",
+        "group mb-0.5 flex flex-col gap-0.5 rounded-lg px-2.5 py-1.5 transition-colors",
         isActive
           ? "bg-[var(--ui-accent-bubble)] text-[var(--ui-text)]"
           : "text-[var(--ui-text-muted)] hover:bg-[var(--ui-sidebar-hover)]",
         isDeleting && "opacity-50"
       )}
     >
-      <span
-        className={cn(
-          "size-2 shrink-0 rounded-full",
-          thread.status === "running"
-            ? "animate-pulse bg-[var(--ui-accent)]"
-            : thread.status === "finished"
-              ? "bg-[var(--ui-accent)]"
-              : "bg-[var(--ui-border)]"
-        )}
-      />
-      {source && SourceIcon && (
-        <SourceIcon
-          className="size-3.5 shrink-0 text-[var(--ui-text-dim)]"
-          aria-label={source.label}
-        >
-          <title>{source.label}</title>
-        </SourceIcon>
-      )}
-      <span className="min-w-0 flex-1 truncate text-xs">{thread.title}</span>
-      {badge && (
-        <span className="shrink-0 rounded bg-[var(--ui-panel-2)] px-1.5 py-0.5 text-[0.625rem] text-[var(--ui-text-dim)] group-hover:hidden">
-          {badge}
-        </span>
-      )}
-      <button
-        type="button"
-        aria-label="删除会话"
-        onClick={onDelete}
-        disabled={isDeleting}
-        className="hidden size-4 shrink-0 items-center justify-center rounded text-[var(--ui-text-dim)] group-hover:flex hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
-      >
-        <XIcon className="size-3" weight="bold" />
-      </button>
+      <div className="flex items-center gap-2">
+        <span
+          className={cn(
+            "-mt-0.5 size-2 shrink-0 self-center rounded-full",
+            thread.status === "running"
+              ? "animate-pulse bg-[var(--ui-accent)]"
+              : thread.status === "finished"
+                ? "bg-[var(--ui-accent)]"
+                : "bg-[var(--ui-border)]"
+          )}
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            {source && SourceIcon && (
+              <SourceIcon
+                className="size-3.5 shrink-0 text-[var(--ui-text-dim)]"
+                aria-label={source.label}
+              >
+                <title>{source.label}</title>
+              </SourceIcon>
+            )}
+            <span className="min-w-0 flex-1 truncate text-xs">{thread.title}</span>
+            {badge && (
+              <span className="shrink-0 rounded bg-[var(--ui-panel-2)] px-1.5 py-0.5 text-[0.625rem] text-[var(--ui-text-dim)] group-hover:hidden">
+                {badge}
+              </span>
+            )}
+            <button
+              type="button"
+              aria-label="删除会话"
+              onClick={onDelete}
+              disabled={isDeleting}
+              className="hidden size-4 shrink-0 items-center justify-center rounded text-[var(--ui-text-dim)] group-hover:flex hover:bg-[var(--ui-panel-2)] hover:text-[var(--ui-text)]"
+            >
+              <XIcon className="size-3" weight="bold" />
+            </button>
+          </div>
+          {(lastMessageTime || displayRepo) && (
+            <div className="flex items-center gap-1 text-[0.5625rem] text-[var(--ui-text-dim)]">
+              {lastMessageTime && <span>{lastMessageTime}</span>}
+              {displayRepo && (
+                <>
+                  {lastMessageTime && <span className="opacity-50">·</span>}
+                  <span className="truncate">{displayRepo}</span>
+                </>
+              )}
+              {lastMessageTime && <span className="opacity-50">·</span>}
+              <span>{envLabel}</span>
+            </div>
+          )}
+        </div>
+      </div>
     </Link>
     <ConfirmDialog
       open={deleteOpen}

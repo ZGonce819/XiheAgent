@@ -1,6 +1,6 @@
-import { Navigate, createFileRoute } from "@tanstack/react-router"
+import { Navigate, createFileRoute, useLocation } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Fragment, useState, type Dispatch, type SetStateAction } from "react"
+import { Fragment, useEffect, useState, type Dispatch, type SetStateAction } from "react"
 import {
   PencilIcon,
   TrashIcon,
@@ -218,6 +218,7 @@ function ModelForm({
 }
 
 function CustomModelsSection() {
+  const location = useLocation()
   const qc = useQueryClient()
   const models = useQuery({
     queryKey: ["customModels"],
@@ -236,6 +237,19 @@ function CustomModelsSection() {
   const [defaultFeedbackId, setDefaultFeedbackId] = useState<string | null>(
     null
   )
+
+  const startAdd = () => {
+    setError(null)
+    setShowForm(true)
+    setEditing(null)
+    setForm({ ...EMPTY_FORM })
+  }
+
+  useEffect(() => {
+    if (location.state?.addModel) {
+      startAdd()
+    }
+  }, [location.state])
 
   const isEditingBuiltin = editing === "__builtin__"
 
@@ -389,13 +403,6 @@ function CustomModelsSection() {
       temperature: m.temperature,
       is_default: m.is_default,
     })
-  }
-
-  const startAdd = () => {
-    setError(null)
-    setShowForm(true)
-    setEditing(null)
-    setForm({ ...EMPTY_FORM })
   }
 
   const cancelEdit = () => {

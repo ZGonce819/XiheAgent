@@ -212,12 +212,7 @@ export function RepoSelector({
                 <span className="ml-auto animate-in fade-in-0 zoom-in-75 pl-3 text-muted-foreground duration-150">✓</span>
               )}
             </button>
-            {filteredRepos.length === 0 ? (
-              <div className="px-2 py-1.5 text-muted-foreground">
-                {noMatchesLabel}
-              </div>
-            ) : (
-              filteredRepos.map((repo) => {
+            {filteredRepos.length > 0 && filteredRepos.map((repo) => {
                 const selected = repo.full_name === selectedRepo
                 return (
                   <button
@@ -241,8 +236,7 @@ export function RepoSelector({
                     )}
                   </button>
                 )
-              })
-            )}
+              })}
             {customRepo && (
               <button
                 type="button"

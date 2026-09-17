@@ -422,7 +422,8 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
             {displayRepo ? (
               <p className="relative z-0 mt-0.5 flex items-center gap-1.5 truncate text-[0.6875rem] text-[color:var(--ui-text-muted)]">
                 {thread.platformDisplay ? <span className="shrink-0 rounded bg-[var(--ui-panel-2)] px-1 py-px text-[0.625rem] font-medium">{thread.platformDisplay}</span> : null}
-                <span className="truncate">{displayRepo}</span>
+                <span className="shrink-0 rounded bg-[var(--ui-panel-2)] px-1 py-px text-[0.625rem] font-medium">{displayRepo}</span>
+                <span className="shrink-0 rounded bg-[var(--ui-panel-2)] px-1 py-px text-[0.625rem] font-medium">{backendType === "sandbox" ? "沙箱" : "本地"}</span>
               </p>
             ) : <p className="text-[0.6875rem] text-[color:var(--ui-text-dim)]">未指定仓库</p>}
           </div>

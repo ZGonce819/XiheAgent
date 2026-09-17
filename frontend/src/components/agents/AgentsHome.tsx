@@ -76,7 +76,7 @@ export function AgentsHome() {
         {!hasSubmitted && (
           <div className="mb-5 flex items-end justify-between gap-4 border-b border-[var(--ui-border)] pb-3">
             <div>
-              <Logo className="h-auto" />
+              <span className="font-heading text-sm font-semibold text-[color:var(--ui-text)]">XiheAgent</span>
               <p className="mt-1 text-xs text-[color:var(--ui-text-dim)]">
                 本地代码任务
               </p>

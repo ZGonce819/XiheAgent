@@ -17,6 +17,8 @@ import {
   useState,
 } from "react"
 
+import { useNavigate } from "@tanstack/react-router"
+
 import type { ModelOption } from "@/lib/api"
 import type { ImageChunk } from "@/lib/agents/types"
 import type { ModelSelection } from "@/lib/agents/useModelOptions"
@@ -104,6 +106,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
   backendType = "local",
   onBackendTypeChange,
 }: CloudPromptBarProps) {
+  const navigate = useNavigate()
   const [value, setValue] = useState("")
   const [pendingImages, setPendingImages] = useState<Array<ImageChunk>>([])
   const [isDragOver, setIsDragOver] = useState(false)
@@ -386,36 +389,53 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
               )}
             </button>
             {modelDropdownOpen && combos.length > 0 && (
-              <div className="absolute bottom-full left-0 z-50 mb-1 max-h-72 origin-bottom-left animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-1 duration-150 ease-out overflow-hidden overflow-y-auto rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface)] shadow-lg">
-                {combos.map((combo) => {
-                  const selected =
-                    !!selection &&
-                    selection.modelId === combo.modelId &&
-                    selection.effort === combo.effort
-                  return (
-                    <button
-                      key={`${combo.modelId}::${combo.effort}`}
-                      type="button"
-                      onClick={() => {
-                        onSelectionChange?.(combo)
-                        setModelDropdownOpen(false)
-                      }}
-                      className={cn(
-                        "flex w-full items-center gap-2 px-3 py-1.5 text-left whitespace-nowrap transition-colors hover:bg-[var(--ui-panel-2)]",
-                        selected
-                          ? "text-[color:var(--ui-text)]"
-                          : "text-[color:var(--ui-text-muted)]"
-                      )}
-                    >
-                      {formatModelSelection(models, combo)}
-                      {selected && (
-                        <span className="ml-auto animate-in fade-in-0 zoom-in-75 pl-3 text-[color:var(--ui-text-dim)] duration-150">
-                          ✓
-                        </span>
-                      )}
-                    </button>
-                  )
-                })}
+              <div className="absolute bottom-full left-0 z-50 mb-1 max-h-72 origin-bottom-left animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-1 duration-150 ease-out overflow-hidden flex flex-col rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface)] shadow-lg">
+                <div className="flex-1 overflow-y-auto">
+                  {combos.map((combo) => {
+                    const selected =
+                      !!selection &&
+                      selection.modelId === combo.modelId &&
+                      selection.effort === combo.effort
+                    return (
+                      <button
+                        key={`${combo.modelId}::${combo.effort}`}
+                        type="button"
+                        onClick={() => {
+                          onSelectionChange?.(combo)
+                          setModelDropdownOpen(false)
+                        }}
+                        className={cn(
+                          "flex w-full items-center gap-2 px-3 py-1.5 text-left whitespace-nowrap transition-colors hover:bg-[var(--ui-panel-2)]",
+                          selected
+                            ? "text-[color:var(--ui-text)]"
+                            : "text-[color:var(--ui-text-muted)]"
+                        )}
+                      >
+                        {formatModelSelection(models, combo)}
+                        {selected && (
+                          <span className="ml-auto animate-in fade-in-0 zoom-in-75 pl-3 text-[color:var(--ui-text-dim)] duration-150">
+                            ✓
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+                <div className="shrink-0 border-t border-[var(--ui-border)]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModelDropdownOpen(false)
+                      navigate({
+                        to: "/my-settings",
+                        state: { addModel: true },
+                      })
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[color:var(--ui-accent)] transition-colors hover:bg-[var(--ui-panel-2)]"
+                  >
+                    自定义模型
+                  </button>
+                </div>
               </div>
             )}
           </div>
