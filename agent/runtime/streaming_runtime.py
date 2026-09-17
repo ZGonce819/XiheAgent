@@ -878,6 +878,7 @@ def run_agent_with_event_stream(
     task_kind: str | None = None,
     event_sink: StreamEventSink | None = None,
     checkpoint_id: str | None = None,
+    resume_decisions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """使用官方 v3 event streaming 驱动 DeepAgent。
 
@@ -906,10 +907,17 @@ def run_agent_with_event_stream(
     configurable = {"thread_id": thread_id}
     if checkpoint_id:
         configurable["checkpoint_id"] = checkpoint_id
+    if resume_decisions is None:
+        graph_input: Any = {"messages": [{"role": "user", "content": content}]}
+    else:
+        from langgraph.types import Command
+
+        graph_input = Command(resume={"decisions": resume_decisions})
+    run_config = {"configurable": configurable}
     stream = agent.stream_events(
-        {"messages": [{"role": "user", "content": content}]},
+        graph_input,
         version="v3",
-        config={"configurable": configurable},
+        config=run_config,
     )
     record_event(thread_id, "model", "调用大模型", kind="other", status="in_progress")
     # raw protocol events 是当前版本里唯一能拿到 token/chunk 的通道。
@@ -934,7 +942,19 @@ def run_agent_with_event_stream(
         record_event(thread_id, "model", "调用大模型", kind="other", status="error", detail=str(exc))
         raise
 
-    output = stream.output
+    snapshot = agent.get_state(run_config)
+    interrupts = list(getattr(snapshot, "interrupts", ()) or ())
+    output = getattr(snapshot, "values", None) or stream.output
+    if interrupts:
+        approval = getattr(interrupts[0], "value", None)
+        record_event(thread_id, "model", "等待人工审批", kind="other", status="pending")
+        return {
+            "messages": _messages_from_output(output),
+            "raw_output": output,
+            "interrupted": True,
+            "interrupt_id": getattr(interrupts[0], "id", ""),
+            "approval": approval if isinstance(approval, dict) else {},
+        }
     record_event(thread_id, "model", "调用大模型", kind="other", status="completed")
     logger.info(
         "官方事件流消费完成：thread_id=%s tool_calls=%s subagents=%s",

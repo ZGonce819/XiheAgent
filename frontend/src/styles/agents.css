@@ -119,6 +119,97 @@
   animation-delay: 0ms !important;
 }
 
+.automation-form-reveal {
+  animation: automation-form-reveal 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  transform-origin: center top;
+}
+
+.automation-row,
+.skill-row,
+.approval-policy-row {
+  animation: surface-row-enter 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.automation-row:hover,
+.approval-policy-row:focus-within {
+  background-color: color-mix(in oklab, var(--ui-accent) 4%, transparent);
+}
+
+.approval-policy-select {
+  transition:
+    border-color 160ms ease-out,
+    background-color 160ms ease-out,
+    box-shadow 160ms ease-out;
+}
+
+[data-slot="select-trigger"][data-popup-open] > svg {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-slot="select-trigger"] > svg {
+    transition: none;
+  }
+}
+
+.approval-policy-select[data-popup-open] {
+  border-color: color-mix(in oklab, var(--ui-accent) 48%, var(--ui-border));
+  background-color: color-mix(in oklab, var(--ui-accent) 6%, var(--ui-bg));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ui-accent) 12%, transparent);
+}
+
+.skill-results,
+.surface-state-enter {
+  animation: surface-content-swap 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.skill-icon {
+  transition:
+    transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 180ms ease-out;
+}
+
+.skill-row:hover .skill-icon {
+  transform: rotate(-6deg) scale(1.04);
+  background-color: color-mix(in oklab, var(--ui-accent) 16%, transparent);
+}
+
+.command-approval-panel {
+  animation: command-approval-enter 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.command-approval-alert {
+  animation: command-approval-alert 420ms 90ms cubic-bezier(0.16, 1, 0.3, 1)
+    both;
+}
+
+.command-approval-command {
+  animation: command-approval-layer-enter 240ms 70ms
+    cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.command-approval-actions {
+  animation: command-approval-layer-enter 220ms 120ms
+    cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.command-approval-explanation {
+  animation: command-explanation-open 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  transform-origin: center top;
+}
+
+.command-approval-busy {
+  border-color: color-mix(in oklab, var(--ui-accent) 36%, var(--ui-border));
+  transition:
+    border-color 160ms ease-out,
+    box-shadow 160ms ease-out;
+  box-shadow: 0 10px 26px color-mix(in oklab, var(--ui-accent) 9%, transparent);
+}
+
+.approval-save-check {
+  animation: approval-save-check 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
 @keyframes new-task-page-enter {
   from {
     opacity: 0;
@@ -161,6 +252,100 @@
   to {
     opacity: 0;
     transform: translateX(8px);
+  }
+}
+
+@keyframes automation-form-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scaleY(0.97);
+    clip-path: inset(0 0 18% 0);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scaleY(1);
+    clip-path: inset(0);
+  }
+}
+
+@keyframes surface-row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes surface-content-swap {
+  from {
+    opacity: 0.55;
+    clip-path: inset(0 0 6px 0);
+  }
+  to {
+    opacity: 1;
+    clip-path: inset(0);
+  }
+}
+
+@keyframes command-approval-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+    clip-path: inset(12% 0 0 0 round 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    clip-path: inset(0 round 8px);
+  }
+}
+
+@keyframes command-approval-alert {
+  from {
+    opacity: 0;
+    transform: scale(0.72) rotate(-8deg);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) rotate(0);
+  }
+}
+
+@keyframes command-approval-layer-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes command-explanation-open {
+  from {
+    opacity: 0;
+    transform: scaleY(0.96);
+    clip-path: inset(0 0 25% 0);
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+    clip-path: inset(0);
+  }
+}
+
+@keyframes approval-save-check {
+  from {
+    opacity: 0;
+    transform: scale(0.65) rotate(-10deg);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) rotate(0);
   }
 }
 
@@ -264,6 +449,26 @@
   }
   .model-default-badge {
     animation: model-default-badge-reduced 120ms ease-out both;
+  }
+  .automation-form-reveal,
+  .automation-row,
+  .skill-row,
+  .skill-results,
+  .surface-state-enter,
+  .approval-policy-row,
+  .command-approval-panel,
+  .command-approval-alert,
+  .command-approval-command,
+  .command-approval-actions,
+  .command-approval-explanation,
+  .approval-save-check {
+    animation: none;
+  }
+  .skill-icon {
+    transition: background-color 120ms ease-out;
+  }
+  .skill-row:hover .skill-icon {
+    transform: none;
   }
 }
 

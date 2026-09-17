@@ -38,6 +38,7 @@ from deepagents.backends.protocol import (
 )
 from deepagents.backends.sandbox import BaseSandbox
 
+from .command_policy import evaluate_command
 from .permissions import normalize_safe_command
 from .workspace import Workspace
 
@@ -102,11 +103,9 @@ _DANGEROUS_PATTERNS = (
     r"\breg\s+(delete|add|import|save|restore)\b",
     r"\bnet\s+user\b",
     r"\bnet\s+localgroup\b",
-    r"\btaskkill\b",
     r"\bdiskpart\b",
     r"\bbcdedit\b",
 )
-
 
 def _mask_token(text: str) -> str:
     """把文本中的 Gitee Token 替换为 ***，防止泄露到日志和返回值里。
@@ -285,9 +284,12 @@ class LocalShellBackend(BaseSandbox):
         """
         if self.command_guard_enabled:
             denied = self._deny_reason(command)
-            if denied:
+            policy = evaluate_command(command, "local")
+            if denied or policy.action == "deny":
                 return ExecuteResponse(
-                    output=f"命令被拒绝：{denied}", exit_code=126, truncated=False
+                    output=f"命令被拒绝：{denied or policy.reason}",
+                    exit_code=126,
+                    truncated=False,
                 )
 
         prepared_command = self._prepare_command(command, cwd_path=self.projects_dir)

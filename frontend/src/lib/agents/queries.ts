@@ -26,7 +26,10 @@ function invalidateThreadList(queryClient: ReturnType<typeof useQueryClient>) {
   // TanStack Query 默认按前缀匹配，如果不加 exact，会连当前 detail
   // `["agent-threads", threadId]` 一起 refetch。Agent 正在或刚刚完成流式输出时，
   // detail refetch 会用 checkpoint 快照覆盖前端本地已经追加好的 messages。
-  void queryClient.invalidateQueries({ queryKey: agentThreadKeys.all, exact: true })
+  void queryClient.invalidateQueries({
+    queryKey: agentThreadKeys.all,
+    exact: true,
+  })
 }
 
 export function useAgentThreads() {
@@ -38,13 +41,15 @@ export function useAgentThreads() {
 
 export function useAgentThread(
   threadId: string,
-  options?: { refetchInterval?: number | false },
+  options?: { refetchInterval?: number | false }
 ) {
   const queryClient = useQueryClient()
   return useQuery({
     queryKey: agentThreadKeys.detail(threadId),
     queryFn: async () => {
-      const cached = queryClient.getQueryData<AgentThread>(agentThreadKeys.detail(threadId))
+      const cached = queryClient.getQueryData<AgentThread>(
+        agentThreadKeys.detail(threadId)
+      )
 
       // 缓存正在运行 → SSE 正在实时更新，不能拉服务端（checkpoint 可能还没写入本轮）
       if (cached?.status === "running") {
@@ -143,11 +148,17 @@ export function useCreateAgentThread() {
             const parsed = parseSseBlock(block)
             if (parsed) {
               const data =
-                parsed.data && typeof parsed.data === "object" && !Array.isArray(parsed.data)
-                  ? parsed.data as Record<string, unknown>
+                parsed.data &&
+                typeof parsed.data === "object" &&
+                !Array.isArray(parsed.data)
+                  ? (parsed.data as Record<string, unknown>)
                   : {}
               const candidate = data.thread_id || data.id
-              if (!capturedThreadId && typeof candidate === "string" && candidate) {
+              if (
+                !capturedThreadId &&
+                typeof candidate === "string" &&
+                candidate
+              ) {
                 capturedThreadId = candidate
                 addPendingPrompt(capturedThreadId, body.prompt, 0, body.images)
                 const now = Date.now()
@@ -170,13 +181,13 @@ export function useCreateAgentThread() {
                     updatedAt: now,
                     messages: [],
                     runEvents: [],
-                  },
+                  }
                 )
                 if (typeof window !== "undefined") {
                   try {
                     window.sessionStorage.setItem(
                       `xihe:new-thread-transition:${capturedThreadId}`,
-                      "1",
+                      "1"
                     )
                   } catch {
                     // The transition still works on the temporary screen when storage is unavailable.
@@ -188,7 +199,8 @@ export function useCreateAgentThread() {
                   params: { threadId: capturedThreadId },
                 })
               }
-              if (capturedThreadId) handleStreamPart(capturedThreadId, parsed, queryClient)
+              if (capturedThreadId)
+                handleStreamPart(capturedThreadId, parsed, queryClient)
             }
           } catch {
             // Ignore malformed individual events and continue consuming the stream.
@@ -199,15 +211,21 @@ export function useCreateAgentThread() {
 
       if (capturedThreadId) {
         const completedThread = normalizeThreadHistory(
-          await agentsApi.getThread(capturedThreadId),
+          await agentsApi.getThread(capturedThreadId)
         )
-        await agentsApi.saveViewSnapshot(capturedThreadId, completedThread.messages)
+        await agentsApi.saveViewSnapshot(
+          capturedThreadId,
+          completedThread.messages
+        )
         queryClient.setQueryData(
           agentThreadKeys.detail(capturedThreadId),
-          completedThread,
+          completedThread
         )
         if (!enteredThread) {
-          navigate({ to: "/agents/$threadId", params: { threadId: capturedThreadId } })
+          navigate({
+            to: "/agents/$threadId",
+            params: { threadId: capturedThreadId },
+          })
         }
       }
       return capturedThreadId
@@ -237,15 +255,22 @@ export function useSendAgentMessage(threadId: string) {
   return useMutation({
     mutationFn: async (vars: SendAgentMessageVariables) => {
       // 取消正在排队的 query，防止 polling 在 SSE 流开始之前拉取旧数据
-      await queryClient.cancelQueries({ queryKey: agentThreadKeys.detail(threadId) })
-
-      // 立即把状态标记为 running，这样后续 polling query 看到 running 就会跳过服务端拉取
-      queryClient.setQueryData<AgentThread>(agentThreadKeys.detail(threadId), (prev) => {
-        if (!prev) return prev
-        return { ...prev, status: "running" }
+      await queryClient.cancelQueries({
+        queryKey: agentThreadKeys.detail(threadId),
       })
 
-      const cached = queryClient.getQueryData<AgentThread>(agentThreadKeys.detail(threadId))
+      // 立即把状态标记为 running，这样后续 polling query 看到 running 就会跳过服务端拉取
+      queryClient.setQueryData<AgentThread>(
+        agentThreadKeys.detail(threadId),
+        (prev) => {
+          if (!prev) return prev
+          return { ...prev, status: "running" }
+        }
+      )
+
+      const cached = queryClient.getQueryData<AgentThread>(
+        agentThreadKeys.detail(threadId)
+      )
       const response = await agentsApi.sendMessage(threadId, {
         content: vars.content,
         images: vars.images,
@@ -260,7 +285,7 @@ export function useSendAgentMessage(threadId: string) {
       })
       await processStreamResponse(response, queryClient)
       const completedThread = queryClient.getQueryData<AgentThread>(
-        agentThreadKeys.detail(threadId),
+        agentThreadKeys.detail(threadId)
       )
       if (completedThread) {
         await agentsApi.saveViewSnapshot(threadId, completedThread.messages)
@@ -293,6 +318,37 @@ export function useCancelAgentThread(threadId: string) {
       queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
       invalidateThreadList(queryClient)
     },
+  })
+}
+
+export function useDecideCommandApproval(threadId: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({
+      approvalId,
+      decision,
+    }: {
+      approvalId: string
+      decision: "approve" | "reject"
+    }) => {
+      queryClient.setQueryData<AgentThread>(
+        agentThreadKeys.detail(threadId),
+        (thread) => (thread ? { ...thread, status: "running" } : thread)
+      )
+      const response = await agentsApi.decideApproval(
+        threadId,
+        approvalId,
+        decision
+      )
+      await processStreamResponse(response, queryClient)
+      const refreshed = normalizeThreadHistory(
+        await agentsApi.getThread(threadId)
+      )
+      queryClient.setQueryData(agentThreadKeys.detail(threadId), refreshed)
+      return refreshed
+    },
+    onSettled: () => invalidateThreadList(queryClient),
   })
 }
 

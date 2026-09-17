@@ -38,6 +38,12 @@ from agent.runtime.task_intent import (
     is_pull_only_task,
     is_workspace_listing_task,
 )
+from config.approval_runtime import (
+    claim_pending_approval,
+    clear_pending_approval,
+    release_approval_claim,
+    save_pending_approval,
+)
 from utils import extract_final_assistant_text
 from utils.gitee_utils import mask_token
 from utils.platform_utils import parse_repo_url
@@ -229,6 +235,31 @@ def run_agent_task(
             event_sink=event_sink,
             checkpoint_id=checkpoint_id,
         )
+        if result.get("interrupted"):
+            pending = save_pending_approval(
+                thread_id=thread_id,
+                run_id=run_id,
+                interrupt_id=str(result.get("interrupt_id") or ""),
+                approval=result.get("approval") or {},
+                repo_url=repo.clone_url,
+                backend_type=backend_type,
+                task_kind=task_kind,
+                model_id=model_id,
+            )
+            store.update_thread_status(thread_id, "awaiting_approval")
+            store.record_run(
+                run_id=run_id,
+                thread_id=thread_id,
+                status="awaiting_approval",
+                base_commit=base_commit,
+            )
+            return {
+                "thread_id": thread_id,
+                "run_id": run_id,
+                "status": "awaiting_approval",
+                "approval": pending,
+                "messages": result.get("messages", []),
+            }
         store.finish_open_run_events(thread_id, status="completed")
         store.update_thread_status(thread_id, "completed")
         head_commit = git_head(repo.clone_url, store)
@@ -279,6 +310,147 @@ def run_agent_task(
         raise
 
 
+def resume_agent_task(
+    *,
+    thread_id: str,
+    decision: str,
+    approval_id: str,
+    event_sink: RuntimeEventSink | None = None,
+) -> dict[str, Any]:
+    """Resume the exact LangGraph checkpoint paused for command approval."""
+    if decision not in {"approve", "reject"}:
+        raise ValueError("无效的审批决定")
+    pending = claim_pending_approval(thread_id, approval_id)
+    try:
+        actions = pending.get("actions") or []
+        if not actions:
+            raise ValueError("待审批操作已失效，请重新发起任务")
+
+        store = get_store()
+        thread = store.get_thread(thread_id)
+        if thread is None:
+            clear_pending_approval(thread_id)
+            raise ValueError("会话不存在")
+
+        repo_url = str(pending.get("repoUrl") or thread.get("repo_url") or "")
+        task_kind = str(pending.get("taskKind") or "coding")
+        backend_type = str(
+            pending.get("backendType") or thread.get("backend_type") or "local"
+        )
+        model_id = pending.get("modelId")
+        run_id = str(pending.get("runId") or uuid.uuid4())
+        repo = parse_repo_url(repo_url)
+        latest_run = store.get_latest_run(thread_id) or {}
+        base_commit = latest_run.get("base_commit")
+
+        store.update_thread_status(thread_id, "running")
+        store.record_run(
+            run_id=run_id,
+            thread_id=thread_id,
+            status="running",
+            base_commit=base_commit,
+        )
+        agent = build_agent_for_runtime(
+            thread_id=thread_id,
+            task_kind=task_kind,
+            repo_url=repo.clone_url,
+            model_id=model_id,
+            backend_type=backend_type,
+        )
+        decisions = [
+            {"type": "approve"}
+            if decision == "approve"
+            else {"type": "reject", "message": "用户拒绝了这次命令执行。"}
+            for _action in actions
+        ]
+    except Exception:
+        release_approval_claim(thread_id)
+        raise
+
+    try:
+        result = run_agent_with_event_stream(
+            agent=agent,
+            thread_id=thread_id,
+            run_id=run_id,
+            content="",
+            task_kind=task_kind,
+            event_sink=event_sink,
+            resume_decisions=decisions,
+        )
+        if result.get("interrupted"):
+            next_pending = save_pending_approval(
+                thread_id=thread_id,
+                run_id=run_id,
+                interrupt_id=str(result.get("interrupt_id") or ""),
+                approval=result.get("approval") or {},
+                repo_url=repo.clone_url,
+                backend_type=backend_type,
+                task_kind=task_kind,
+                model_id=model_id,
+            )
+            store.update_thread_status(thread_id, "awaiting_approval")
+            store.record_run(
+                run_id=run_id,
+                thread_id=thread_id,
+                status="awaiting_approval",
+                base_commit=base_commit,
+            )
+            return {
+                "thread_id": thread_id,
+                "run_id": run_id,
+                "status": "awaiting_approval",
+                "approval": next_pending,
+                "messages": result.get("messages", []),
+            }
+
+        clear_pending_approval(thread_id)
+        store.finish_open_run_events(thread_id, status="completed")
+        store.update_thread_status(thread_id, "completed")
+        if task_kind == "planning":
+            from utils.message_utils import extract_best_plan_text
+
+            if not extract_best_plan_text(result.get("messages", [])):
+                raise RuntimeError("技术方案生成失败：模型没有返回可用方案")
+            record_event(
+                thread_id,
+                "plan",
+                "技术方案已输出，等待确认",
+                kind="other",
+                status="completed",
+            )
+        from services.repo_rollback import git_head
+
+        head_commit = git_head(repo.clone_url, store)
+        store.record_run(
+            run_id=run_id,
+            thread_id=thread_id,
+            status="completed",
+            base_commit=base_commit,
+            head_commit=head_commit,
+            finished=True,
+        )
+        if task_kind != "planning":
+            record_event(thread_id, "done", "任务完成", status="completed")
+        return {
+            "thread_id": thread_id,
+            "run_id": run_id,
+            "status": "completed",
+            "messages": result.get("messages", []),
+        }
+    except Exception as exc:
+        release_approval_claim(thread_id)
+        store.finish_open_run_events(thread_id, status="error")
+        store.update_thread_status(thread_id, "failed")
+        store.record_run(
+            run_id=run_id,
+            thread_id=thread_id,
+            status="failed",
+            error=mask_token(str(exc)),
+            finished=True,
+        )
+        raise
+
+
 def get_task(thread_id: str) -> dict[str, Any] | None:
     """读取单个任务摘要，并附带 reviewer findings。
 
@@ -324,6 +496,7 @@ def delete_task(thread_id: str) -> bool:
     deleted = get_store().delete_thread(thread_id)
     if not deleted:
         return False
+    clear_pending_approval(thread_id)
     try:
         get_checkpointer().delete_thread(thread_id)
     except Exception as exc:

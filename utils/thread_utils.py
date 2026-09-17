@@ -25,7 +25,9 @@ def status_for_frontend(status: str | None) -> str:
 
     if status in {"running", "pushed", "pr_created"}:
         return "running"
-    if status in {"completed", "awaiting_approval"}:
+    if status == "awaiting_approval":
+        return "interrupted"
+    if status == "completed":
         return "finished"
     if status == "failed":
         return "error"

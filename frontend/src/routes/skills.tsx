@@ -114,10 +114,17 @@ function SkillsDirectory() {
             }
           />
         ) : (
-          <div className="divide-y divide-border">
-            {filtered.map((skill) => (
-              <article key={skill.id} className="flex gap-3 px-4 py-3.5">
-                <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+          <div
+            key={filtered.map((skill) => skill.id).join(":")}
+            className="skill-results divide-y divide-border"
+          >
+            {filtered.map((skill, index) => (
+              <article
+                key={skill.id}
+                className="skill-row flex gap-3 px-4 py-3.5"
+                style={{ animationDelay: `${Math.min(index * 30, 150)}ms` }}
+              >
+                <div className="skill-icon mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
                   <WrenchIcon className="size-4" />
                 </div>
                 <div className="min-w-0 flex-1">
@@ -178,7 +185,7 @@ function EmptyState({
   action?: React.ReactNode
 }) {
   return (
-    <div className="flex min-h-48 flex-col items-center justify-center px-6 py-10 text-center">
+    <div className="surface-state-enter flex min-h-48 flex-col items-center justify-center px-6 py-10 text-center">
       <div className="mb-3 text-muted-foreground">{icon}</div>
       <p className="text-xs font-medium">{title}</p>
       <p className="mt-1 max-w-sm text-xs text-muted-foreground">

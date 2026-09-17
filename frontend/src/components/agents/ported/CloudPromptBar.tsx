@@ -428,7 +428,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
                       setModelDropdownOpen(false)
                       navigate({
                         to: "/my-settings",
-                        state: { addModel: true },
+                        state: (previous) => ({ ...previous, addModel: true } as typeof previous),
                       })
                     }}
                     className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[color:var(--ui-accent)] transition-colors hover:bg-[var(--ui-panel-2)]"

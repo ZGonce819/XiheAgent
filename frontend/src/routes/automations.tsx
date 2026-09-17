@@ -206,10 +206,11 @@ function AutomationManager() {
           />
         ) : (
           <div className="divide-y divide-border">
-            {items.map((item) => (
+            {items.map((item, index) => (
               <AutomationRow
                 key={item.id}
                 schedule={item}
+                index={index}
                 disabled={updateSchedule.isPending}
                 onEdit={() => startEdit(item)}
                 onDelete={() => setDeleteTarget(item)}
@@ -226,147 +227,152 @@ function AutomationManager() {
       </SettingsSection>
 
       {formOpen && (
-        <SettingsSection
-          title={editing ? "编辑任务" : "新建任务"}
-          description="时间统一按 UTC 解释，执行结果将出现在会话列表中。"
-          contentClassName="rounded-lg"
+        <div
+          key={editing?.id ?? "new-automation"}
+          className="automation-form-reveal"
         >
-          <div className="space-y-4 p-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="任务名称" htmlFor="automation-name">
-                <Input
-                  id="automation-name"
-                  value={form.name}
-                  placeholder="例如：每日依赖检查"
+          <SettingsSection
+            title={editing ? "编辑任务" : "新建任务"}
+            description="时间统一按 UTC 解释，执行结果将出现在会话列表中。"
+            contentClassName="rounded-lg"
+          >
+            <div className="space-y-4 p-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="任务名称" htmlFor="automation-name">
+                  <Input
+                    id="automation-name"
+                    value={form.name}
+                    placeholder="例如：每日依赖检查"
+                    onChange={(event) =>
+                      setForm({ ...form, name: event.target.value })
+                    }
+                  />
+                </Field>
+                <Field label="代码仓库" htmlFor="automation-repo" hint="可选">
+                  <Input
+                    id="automation-repo"
+                    value={form.repo}
+                    placeholder="owner/repository"
+                    onChange={(event) =>
+                      setForm({ ...form, repo: event.target.value })
+                    }
+                  />
+                </Field>
+              </div>
+              <Field label="任务指令" htmlFor="automation-prompt">
+                <Textarea
+                  id="automation-prompt"
+                  className="min-h-24"
+                  value={form.prompt}
+                  placeholder="清楚描述每次运行需要完成的工作。"
                   onChange={(event) =>
-                    setForm({ ...form, name: event.target.value })
+                    setForm({ ...form, prompt: event.target.value })
                   }
                 />
               </Field>
-              <Field label="代码仓库" htmlFor="automation-repo" hint="可选">
-                <Input
-                  id="automation-repo"
-                  value={form.repo}
-                  placeholder="owner/repository"
-                  onChange={(event) =>
-                    setForm({ ...form, repo: event.target.value })
-                  }
-                />
-              </Field>
-            </div>
-            <Field label="任务指令" htmlFor="automation-prompt">
-              <Textarea
-                id="automation-prompt"
-                className="min-h-24"
-                value={form.prompt}
-                placeholder="清楚描述每次运行需要完成的工作。"
-                onChange={(event) =>
-                  setForm({ ...form, prompt: event.target.value })
-                }
-              />
-            </Field>
-            <div className="grid gap-4 sm:grid-cols-3">
-              <Field label="执行频率" htmlFor="automation-preset">
-                <select
-                  id="automation-preset"
-                  className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
-                  value={form.preset}
-                  onChange={(event) => {
-                    const preset = event.target.value as FormState["preset"]
-                    const match = CRON_PRESETS.find(
-                      (item) => item.id === preset
-                    )
-                    setForm({
-                      ...form,
-                      preset,
-                      schedule: match?.value ?? form.schedule,
-                    })
-                  }}
+              <div className="grid gap-4 sm:grid-cols-3">
+                <Field label="执行频率" htmlFor="automation-preset">
+                  <select
+                    id="automation-preset"
+                    className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+                    value={form.preset}
+                    onChange={(event) => {
+                      const preset = event.target.value as FormState["preset"]
+                      const match = CRON_PRESETS.find(
+                        (item) => item.id === preset
+                      )
+                      setForm({
+                        ...form,
+                        preset,
+                        schedule: match?.value ?? form.schedule,
+                      })
+                    }}
+                  >
+                    {CRON_PRESETS.map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.label}
+                      </option>
+                    ))}
+                    <option value="custom">自定义</option>
+                  </select>
+                </Field>
+                <Field label="Cron 表达式" htmlFor="automation-cron">
+                  <Input
+                    id="automation-cron"
+                    className="font-mono tabular-nums"
+                    value={form.schedule}
+                    onChange={(event) =>
+                      setForm({
+                        ...form,
+                        schedule: event.target.value,
+                        preset: presetForCron(event.target.value),
+                      })
+                    }
+                  />
+                </Field>
+                <Field label="模型" htmlFor="automation-model">
+                  <select
+                    id="automation-model"
+                    className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+                    value={form.modelId}
+                    onChange={(event) => {
+                      const model = modelOptions.models.find(
+                        (item) => item.id === event.target.value
+                      )
+                      setForm({
+                        ...form,
+                        modelId: event.target.value,
+                        effort: model?.default_effort ?? "default",
+                      })
+                    }}
+                  >
+                    {modelOptions.models.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+              {selectedModel && selectedModel.efforts.length > 1 && (
+                <Field label="推理强度" htmlFor="automation-effort">
+                  <select
+                    id="automation-effort"
+                    className="h-7 rounded-md border border-input bg-background px-2 text-xs"
+                    value={form.effort}
+                    onChange={(event) =>
+                      setForm({ ...form, effort: event.target.value })
+                    }
+                  >
+                    {selectedModel.efforts.map((effort) => (
+                      <option key={effort} value={effort}>
+                        {effort}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+              {error && (
+                <p role="alert" className="text-xs text-destructive">
+                  {error}
+                </p>
+              )}
+              <div className="flex gap-2 pt-1">
+                <Button size="sm" disabled={busy} onClick={save}>
+                  {busy ? "保存中..." : editing ? "保存修改" : "创建任务"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={resetForm}
                 >
-                  {CRON_PRESETS.map((preset) => (
-                    <option key={preset.id} value={preset.id}>
-                      {preset.label}
-                    </option>
-                  ))}
-                  <option value="custom">自定义</option>
-                </select>
-              </Field>
-              <Field label="Cron 表达式" htmlFor="automation-cron">
-                <Input
-                  id="automation-cron"
-                  className="font-mono tabular-nums"
-                  value={form.schedule}
-                  onChange={(event) =>
-                    setForm({
-                      ...form,
-                      schedule: event.target.value,
-                      preset: presetForCron(event.target.value),
-                    })
-                  }
-                />
-              </Field>
-              <Field label="模型" htmlFor="automation-model">
-                <select
-                  id="automation-model"
-                  className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
-                  value={form.modelId}
-                  onChange={(event) => {
-                    const model = modelOptions.models.find(
-                      (item) => item.id === event.target.value
-                    )
-                    setForm({
-                      ...form,
-                      modelId: event.target.value,
-                      effort: model?.default_effort ?? "default",
-                    })
-                  }}
-                >
-                  {modelOptions.models.map((model) => (
-                    <option key={model.id} value={model.id}>
-                      {model.label}
-                    </option>
-                  ))}
-                </select>
-              </Field>
+                  取消
+                </Button>
+              </div>
             </div>
-            {selectedModel && selectedModel.efforts.length > 1 && (
-              <Field label="推理强度" htmlFor="automation-effort">
-                <select
-                  id="automation-effort"
-                  className="h-7 rounded-md border border-input bg-background px-2 text-xs"
-                  value={form.effort}
-                  onChange={(event) =>
-                    setForm({ ...form, effort: event.target.value })
-                  }
-                >
-                  {selectedModel.efforts.map((effort) => (
-                    <option key={effort} value={effort}>
-                      {effort}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-            )}
-            {error && (
-              <p role="alert" className="text-xs text-destructive">
-                {error}
-              </p>
-            )}
-            <div className="flex gap-2 pt-1">
-              <Button size="sm" disabled={busy} onClick={save}>
-                {busy ? "保存中..." : editing ? "保存修改" : "创建任务"}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={busy}
-                onClick={resetForm}
-              >
-                取消
-              </Button>
-            </div>
-          </div>
-        </SettingsSection>
+          </SettingsSection>
+        </div>
       )}
 
       <ConfirmDialog
@@ -396,12 +402,14 @@ function AutomationManager() {
 
 function AutomationRow({
   schedule,
+  index,
   disabled,
   onEdit,
   onDelete,
   onToggle,
 }: {
   schedule: AgentSchedule
+  index: number
   disabled: boolean
   onEdit: () => void
   onDelete: () => void
@@ -410,9 +418,10 @@ function AutomationRow({
   return (
     <div
       className={cn(
-        "flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center",
+        "automation-row flex flex-col gap-3 px-4 py-3 transition-[background-color,opacity] duration-150 sm:flex-row sm:items-center",
         !schedule.enabled && "opacity-60"
       )}
+      style={{ animationDelay: `${Math.min(index * 35, 140)}ms` }}
     >
       <div className="flex min-w-0 flex-1 gap-3">
         <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">

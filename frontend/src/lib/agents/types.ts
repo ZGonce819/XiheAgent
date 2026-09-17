@@ -218,6 +218,16 @@ export interface AgentThread {
     deletions: number
     patch?: string
   }>
+  pendingApproval?: PendingCommandApproval | null
+}
+
+export interface PendingCommandApproval {
+  id: string
+  threadId: string
+  runId: string
+  backendType: string
+  createdAt: string
+  actions: Array<{ name: string; command: string; description: string }>
 }
 
 export type GitFileStatus =

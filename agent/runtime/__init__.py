@@ -26,6 +26,7 @@ from agent.runtime.task_router import (
     initialize_task_record,
     list_tasks,
     run_agent_task,
+    resume_agent_task,
 )
 
 __all__ = [
@@ -41,6 +42,7 @@ __all__ = [
     "list_tasks",
     "record_event",
     "run_agent_task",
+    "resume_agent_task",
     "run_agent_with_event_stream",
     "run_plan_response_task",
     "run_pull_only_task",

@@ -1,4 +1,4 @@
-import type { AgentSchedule, AgentThread, ImageChunk, Message } from "./types"
+import type { AgentSchedule, AgentThread, ImageChunk, Message, PendingCommandApproval } from "./types"
 
 export type { AgentSchedule, AgentThread, Message }
 
@@ -88,6 +88,25 @@ async function agentsRequest<T>(
   return (await res.json()) as T
 }
 
+async function agentsStreamRequest(path: string, init: RequestInit): Promise<Response> {
+  const response = await fetch(`${API_BASE}/dashboard/api${path}`, {
+    ...init,
+    credentials: "include",
+    headers: { "Content-Type": "application/json", ...(init.headers ?? {}) },
+  })
+  if (!response.ok) {
+    let message = response.statusText
+    try {
+      const body = await response.json()
+      if (body?.detail) message = String(body.detail)
+    } catch {
+      // Keep the HTTP status text when the response is not JSON.
+    }
+    throw new Error(message)
+  }
+  return response
+}
+
 export const agentsApi = {
   listThreads: () => agentsRequest<Array<AgentThread>>("/threads"),
   listSchedules: () => agentsRequest<Array<AgentSchedule>>("/schedules"),
@@ -162,6 +181,13 @@ export const agentsApi = {
     agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}/title`, {
       method: "PATCH",
       body: JSON.stringify({ title }),
+    }),
+  getPendingApproval: (threadId: string) =>
+    agentsRequest<PendingCommandApproval | null>(`/threads/${encodeURIComponent(threadId)}/approval`),
+  decideApproval: (threadId: string, approvalId: string, decision: "approve" | "reject") =>
+    agentsStreamRequest(`/threads/${encodeURIComponent(threadId)}/approval`, {
+      method: "POST",
+      body: JSON.stringify({ approval_id: approvalId, decision }),
     }),
   streamUrl: (threadId: string) =>
     `${API_BASE}/dashboard/api/threads/${encodeURIComponent(threadId)}/stream`,

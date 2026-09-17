@@ -96,6 +96,7 @@ class ThreadDetailResponse(BaseModel):
     latestPlan: dict[str, Any] | None = None
     diffStats: dict[str, Any] | None = None
     changedFiles: list[str] = []
+    pendingApproval: dict[str, Any] | None = None
 
 
 class ThreadMetaResponse(BaseModel):
@@ -136,3 +137,4 @@ class ThreadMetaResponse(BaseModel):
     latestPlan: dict[str, Any] | None = None
     diffStats: dict[str, Any] | None = None
     changedFiles: list[str] = []
+    pendingApproval: dict[str, Any] | None = None

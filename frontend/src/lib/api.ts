@@ -109,6 +109,15 @@ export interface BuiltinModel {
   has_overrides: boolean
 }
 
+export type ApprovalAction = "allow" | "approval"
+
+export interface CommandApprovalSettings {
+  local: Record<string, ApprovalAction>
+  sandbox: Record<string, ApprovalAction>
+  categories: Array<{ id: string; label: string; description: string }>
+  lockedRules: Array<{ label: string; action: "approval" | "deny" }>
+}
+
 export interface OptionsPayload {
   models: Array<ModelOption>
   default_agent_model: string
@@ -362,6 +371,13 @@ export const api = {
     body: Partial<CustomModelInput> & { is_default?: boolean }
   ) =>
     request<BuiltinModel>("/builtin-model", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  getCommandApprovalSettings: () =>
+    request<CommandApprovalSettings>("/command-approval-settings"),
+  saveCommandApprovalSettings: (body: Pick<CommandApprovalSettings, "local" | "sandbox">) =>
+    request<CommandApprovalSettings>("/command-approval-settings", {
       method: "PUT",
       body: JSON.stringify(body),
     }),

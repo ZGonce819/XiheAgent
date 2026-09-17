@@ -1,6 +1,12 @@
 import { Navigate, createFileRoute, useLocation } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Fragment, useEffect, useState, type Dispatch, type SetStateAction } from "react"
+import {
+  Fragment,
+  useEffect,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react"
 import {
   PencilIcon,
   TrashIcon,
@@ -8,11 +14,22 @@ import {
   CheckIcon,
 } from "@phosphor-icons/react"
 
-import type { CustomModel, CustomModelInput, BuiltinModel } from "@/lib/api"
+import type {
+  CustomModel,
+  CustomModelInput,
+  BuiltinModel,
+  CommandApprovalSettings,
+} from "@/lib/api"
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
@@ -246,7 +263,10 @@ function CustomModelsSection() {
   }
 
   useEffect(() => {
-    if (location.state?.addModel) {
+    const locationState = location.state as typeof location.state & {
+      addModel?: boolean
+    }
+    if (locationState?.addModel) {
       startAdd()
     }
   }, [location.state])
@@ -794,6 +814,140 @@ function CustomModelsSection() {
   )
 }
 
+function CommandApprovalSection() {
+  const queryClient = useQueryClient()
+  const settings = useQuery({
+    queryKey: ["commandApprovalSettings"],
+    queryFn: api.getCommandApprovalSettings,
+  })
+  const [draft, setDraft] = useState<CommandApprovalSettings | null>(null)
+  const save = useMutation({
+    mutationFn: (value: CommandApprovalSettings) =>
+      api.saveCommandApprovalSettings({
+        local: value.local,
+        sandbox: value.sandbox,
+      }),
+    onSuccess: (value) => {
+      setDraft(value)
+      void queryClient.invalidateQueries({
+        queryKey: ["commandApprovalSettings"],
+      })
+    },
+  })
+  const value = draft ?? settings.data
+  if (!value) return null
+  const setAction = (
+    environment: "local" | "sandbox",
+    id: string,
+    action: "allow" | "approval"
+  ) => {
+    setDraft({
+      ...value,
+      [environment]: { ...value[environment], [id]: action },
+    })
+  }
+  return (
+    <SettingsSection
+      title="命令审批"
+      description="为本地工作区和沙箱分别设置普通操作的默认行为。高危规则由系统锁定，无法在此放开。"
+      contentClassName="overflow-hidden rounded-lg border"
+    >
+      <div className="divide-y divide-border">
+        {(["local", "sandbox"] as const).map((environment) => (
+          <div key={environment} className="p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium">
+                  {environment === "local" ? "本地工作区" : "OpenSandbox 沙箱"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {environment === "local"
+                    ? "更保守，适合访问真实电脑"
+                    : "隔离环境内可自动执行更多可恢复操作"}
+                </p>
+              </div>
+              <Button
+                size="sm"
+                onClick={() => save.mutate(value)}
+                disabled={save.isPending}
+              >
+                {save.isSuccess && !save.isPending ? (
+                  <CheckIcon
+                    className="approval-save-check size-3.5"
+                    weight="bold"
+                  />
+                ) : null}
+                {save.isPending
+                  ? "保存中"
+                  : save.isSuccess
+                    ? "已保存"
+                    : "保存设置"}
+              </Button>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {value.categories.map((category, index) => {
+                const currentAction = value[environment][category.id] ?? "approval"
+                const actionLabel = currentAction === "allow" ? "自动允许" : "每次询问"
+                return (
+                <label
+                  key={category.id}
+                  className="approval-policy-row flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2.5 text-xs"
+                  style={{ animationDelay: `${Math.min(index * 24, 120)}ms` }}
+                >
+                  <span className="min-w-0">
+                    <span className="block font-medium">{category.label}</span>
+                    <span className="mt-0.5 block text-muted-foreground">
+                      {category.description}
+                    </span>
+                  </span>
+                  <Select
+                    value={currentAction}
+                    onValueChange={(next) =>
+                      setAction(
+                        environment,
+                        category.id,
+                        next as "allow" | "approval"
+                      )
+                    }
+                  >
+                    <SelectTrigger
+                      size="sm"
+                      className="approval-policy-select w-[6.5rem] shrink-0 bg-background"
+                      aria-label={`${category.label}审批策略`}
+                    >
+                      <span className="flex flex-1 text-left">{actionLabel}</span>
+                    </SelectTrigger>
+                    <SelectContent
+                      align="end"
+                      alignItemWithTrigger={false}
+                      className="approval-policy-menu min-w-[8rem] origin-top-right animate-in duration-150 ease-out fade-in-0 zoom-in-95 slide-in-from-top-1"
+                    >
+                      <SelectItem value="approval">每次询问</SelectItem>
+                      <SelectItem value="allow">自动允许</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </label>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+        <div className="bg-muted/30 p-4">
+          <p className="text-xs font-medium">始终由系统拦截或强制审批</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            {value.lockedRules
+              .map(
+                (rule) =>
+                  `${rule.label}（${rule.action === "deny" ? "直接拒绝" : "必须审批"}）`
+              )
+              .join(" · ")}
+          </p>
+        </div>
+      </div>
+    </SettingsSection>
+  )
+}
+
 function MySettingsPage() {
   const session = useSession()
 
@@ -809,6 +963,7 @@ function MySettingsPage() {
   return (
     <AppShell user={session.data} title="个人设置">
       <CustomModelsSection />
+      <CommandApprovalSection />
     </AppShell>
   )
 }

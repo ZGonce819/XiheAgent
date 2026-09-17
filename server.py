@@ -36,6 +36,7 @@ from agent.middleware import (
 )
 from agent.runtime.task_intent import TaskKind
 from backends import create_backend
+from backends.command_policy import evaluate_command
 from deepagents.backends.sandbox import BaseSandbox
 from prompt import get_system_prompt
 from tools import (
@@ -336,6 +337,17 @@ def get_agent(config: RunnableConfig):
         task_kind,
     )
 
+    effective_backend_type = "sandbox" if backend_type == "sandbox" else "local"
+
+    def should_interrupt_execute(request: Any) -> bool:
+        command = str(request.tool_call.get("args", {}).get("command") or "")
+        return evaluate_command(command, effective_backend_type).action == "approval"
+
+    def describe_execute(tool_call: Any, _state: Any, _runtime: Any) -> str:
+        command = str(tool_call.get("args", {}).get("command") or "")
+        result = evaluate_command(command, effective_backend_type)
+        return result.reason
+
     return create_deep_agent(
         model=main_model,
         tools=[
@@ -379,4 +391,11 @@ def get_agent(config: RunnableConfig):
         memory=memory_paths,
         checkpointer=get_checkpointer(),
         store=langgraph_store,
+        interrupt_on={
+            "execute": {
+                "allowed_decisions": ["approve", "reject"],
+                "when": should_interrupt_execute,
+                "description": describe_execute,
+            }
+        },
     ).with_config(config)

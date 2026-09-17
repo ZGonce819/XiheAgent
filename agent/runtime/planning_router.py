@@ -27,6 +27,7 @@ from agent.runtime._helpers import (
 )
 from agent.runtime.events import record_event
 from agent.runtime.streaming_runtime import run_agent_with_event_stream
+from config.approval_runtime import save_pending_approval
 from utils import extract_best_plan_text
 from utils.gitee_utils import mask_token
 from utils.platform_utils import parse_repo_url
@@ -104,6 +105,7 @@ def run_plan_response_task(
         repo_owner=repo.owner,
         repo_name=repo.repo,
         latest_run_status="running",
+        backend_type=backend_type,
     )
     run_id = run_id or str(uuid.uuid4())
     store.record_run(run_id=run_id, thread_id=thread_id, status="running")
@@ -132,6 +134,29 @@ def run_plan_response_task(
             event_sink=event_sink,
             checkpoint_id=checkpoint_id,
         )
+        if result.get("interrupted"):
+            pending = save_pending_approval(
+                thread_id=thread_id,
+                run_id=run_id,
+                interrupt_id=str(result.get("interrupt_id") or ""),
+                approval=result.get("approval") or {},
+                repo_url=repo.clone_url,
+                backend_type=backend_type or "local",
+                task_kind="planning",
+                model_id=model_id,
+            )
+            store.update_thread_status(thread_id, "awaiting_approval")
+            store.record_run(
+                run_id=run_id,
+                thread_id=thread_id,
+                status="awaiting_approval",
+            )
+            return {
+                "thread_id": thread_id,
+                "run_id": run_id,
+                "status": "awaiting_approval",
+                "approval": pending,
+            }
         store.finish_open_run_events(thread_id, status="completed")
         messages = result.get("messages", [])
         if not extract_best_plan_text(messages):

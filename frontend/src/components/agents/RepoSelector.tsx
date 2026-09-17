@@ -236,7 +236,10 @@ export function RepoSelector({
                     )}
                   </button>
                 )
-              })}
+            })}
+            {filteredRepos.length === 0 && !customRepo ? (
+              <p className="px-3 py-2 text-xs text-[color:var(--ui-text-dim)]">{noMatchesLabel}</p>
+            ) : null}
             {customRepo && (
               <button
                 type="button"

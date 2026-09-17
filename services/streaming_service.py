@@ -23,7 +23,13 @@ from typing import Any
 from fastapi.responses import StreamingResponse
 
 from agent.runtime.events import clear_sse_callback, register_sse_callback
-from agent.runtime.task_router import get_task, initialize_task_record, run_agent_task
+from agent.runtime.task_router import (
+    get_task,
+    initialize_task_record,
+    resume_agent_task,
+    run_agent_task,
+)
+from config.approval_runtime import get_pending_approval
 from agent.graph.checkpoint_history import checkpoint_before_latest_user
 from agent.graph.graph import get_checkpointer
 from config.app_config import get_settings
@@ -66,6 +72,8 @@ def build_streaming_response(
     rollback_message_content: str | None = None,
     model_id: str | None = None,
     backend_type: str | None = None,
+    approval_decision: str | None = None,
+    approval_id: str | None = None,
 ) -> StreamingResponse:
     """构造 POST SSE 流式响应。
 
@@ -102,7 +110,8 @@ def build_streaming_response(
             except Exception as exc:
                 raise RuntimeError("无法清理首轮 checkpoint，已拒绝回退") from exc
 
-    initialize_task_record(repo_url=repo_url, prompt=content, thread_id=thread_id, backend_type=backend_type)
+    if approval_decision is None:
+        initialize_task_record(repo_url=repo_url, prompt=content, thread_id=thread_id, backend_type=backend_type)
     initial_task = get_task(thread_id)
     if initial_task is None:
         from fastapi import HTTPException
@@ -112,7 +121,8 @@ def build_streaming_response(
     settings = get_settings()
     use_redis = settings.use_redis_stream
 
-    run_id = str(uuid.uuid4())
+    pending = get_pending_approval(thread_id) if approval_decision else None
+    run_id = str((pending or {}).get("runId") or uuid.uuid4())
 
     async def event_iter():
         queue: asyncio.Queue[tuple[str, dict[str, Any]]] = asyncio.Queue()
@@ -206,16 +216,26 @@ def build_streaming_response(
 
         def worker() -> None:
             try:
-                run_agent_task(
-                    repo_url=repo_url,
-                    prompt=content,
-                    thread_id=thread_id,
-                    event_sink=event_sink,
-                    run_id=run_id,
-                    checkpoint_id=checkpoint_id,
-                    model_id=model_id,
-                    backend_type=backend_type,
-                )
+                if approval_decision is None:
+                    result = run_agent_task(
+                        repo_url=repo_url,
+                        prompt=content,
+                        thread_id=thread_id,
+                        event_sink=event_sink,
+                        run_id=run_id,
+                        checkpoint_id=checkpoint_id,
+                        model_id=model_id,
+                        backend_type=backend_type,
+                    )
+                else:
+                    result = resume_agent_task(
+                        thread_id=thread_id,
+                        decision=approval_decision,
+                        approval_id=str(approval_id or ""),
+                        event_sink=event_sink,
+                    )
+                if result.get("status") == "awaiting_approval":
+                    send_event("approval_required", result.get("approval") or {})
                 latest = get_task(thread_id) or initial_task
                 send_event("thread_done", thread_meta_payload(latest))
                 send_event("done", {})
@@ -230,7 +250,10 @@ def build_streaming_response(
             finally:
                 clear_sse_callback(thread_id)
 
-        yield sse_part("thread_snapshot", thread_meta_payload(initial_task))
+        if approval_decision is None:
+            yield sse_part("thread_snapshot", thread_meta_payload(initial_task))
+        else:
+            yield sse_part("approval_resumed", {"approval_id": approval_id})
         if rollback_message_id:
             yield sse_part(
                 "rollback",
@@ -239,15 +262,16 @@ def build_streaming_response(
                     "message_content": rollback_message_content,
                 },
             )
-        yield sse_part(
-            "user_message",
-            {
-                "thread_id": thread_id,
-                "message_id": f"{thread_id}-user-{run_id}",
-                "author": "user",
-                "content": content,
-            },
-        )
+        if approval_decision is None:
+            yield sse_part(
+                "user_message",
+                {
+                    "thread_id": thread_id,
+                    "message_id": f"{thread_id}-user-{run_id}",
+                    "author": "user",
+                    "content": content,
+                },
+            )
 
         if use_redis:
             ensure_consumer_group(thread_id)

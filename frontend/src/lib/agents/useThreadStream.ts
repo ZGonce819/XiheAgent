@@ -489,6 +489,21 @@ export function handleStreamPart(
     return;
   }
 
+  if (event === "approval_required") {
+    updateThread(threadId, queryClient, (thread) => ({
+      ...thread,
+      status: "interrupted",
+      pendingApproval: data as unknown as AgentThread["pendingApproval"],
+    }));
+    invalidateThreadList(queryClient);
+    return;
+  }
+
+  if (event === "approval_resumed") {
+    updateThread(threadId, queryClient, (thread) => ({ ...thread, status: "running", pendingApproval: null }));
+    return;
+  }
+
   if (event === "rollback") {
     const messageId = typeof data.message_id === "string" ? data.message_id : "";
     if (!messageId) return;
@@ -670,6 +685,8 @@ export function handleStreamPart(
   }
 
   if (event === "done") {
+    const current = queryClient.getQueryData<AgentThread>(agentThreadKeys.detail(threadId));
+    if (current?.status === "interrupted" || current?.pendingApproval) return;
     updateThread(threadId, queryClient, (thread) =>
       normalizeThreadHistory({ ...thread, status: "finished" }),
     );

@@ -100,21 +100,14 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
       </nav>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-        <ThreadGroup
-          label="今天"
-          threads={groups.today}
+        <ProjectSection
+          threads={threads}
           activeThreadId={activeThreadId}
           onNavigate={layout.closeOnMobile}
         />
         <ThreadGroup
-          label="最近 30 天"
+          label="最近"
           threads={groups.last30}
-          activeThreadId={activeThreadId}
-          onNavigate={layout.closeOnMobile}
-        />
-        <ThreadGroup
-          label="更早"
-          threads={groups.older}
           activeThreadId={activeThreadId}
           onNavigate={layout.closeOnMobile}
         />
@@ -152,6 +145,72 @@ function ThreadGroup({
           isActive={thread.id === activeThreadId}
           onNavigate={onNavigate}
         />
+      ))}
+    </div>
+  )
+}
+
+function ProjectSection({
+  threads,
+  activeThreadId,
+  onNavigate,
+}: {
+  threads: Array<AgentThread>
+  activeThreadId?: string
+  onNavigate?: () => void
+}) {
+  // 按 repoFullName 分组
+  const projectMap = useMemo(() => {
+    const map = new Map<string, Array<AgentThread>>()
+    for (const thread of threads) {
+      const repo = thread.repoFullName || thread.repo || ""
+      if (!repo) continue
+      const displayRepo = getDisplayRepo(repo)
+      if (!map.has(displayRepo)) {
+        map.set(displayRepo, [])
+      }
+      map.get(displayRepo)!.push(thread)
+    }
+    return map
+  }, [threads])
+
+  if (projectMap.size === 0) {
+    return (
+      <div className="mb-3">
+        <div className="px-2 py-1 text-[0.625rem] font-semibold tracking-wide text-[var(--ui-text-dim)] uppercase">
+          项目
+        </div>
+        <Link
+          to="/agents"
+          onClick={onNavigate}
+          className="mx-2 flex items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-[var(--ui-border)] px-3 py-3 text-xs text-[var(--ui-text-dim)] transition-colors hover:border-[var(--ui-accent)] hover:text-[var(--ui-accent)]"
+        >
+          <PlusIcon className="size-3.5" />
+          新任务
+        </Link>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mb-3">
+      <div className="px-2 py-1 text-[0.625rem] font-semibold tracking-wide text-[var(--ui-text-dim)] uppercase">
+        项目
+      </div>
+      {Array.from(projectMap.entries()).map(([repoName, repoThreads]) => (
+        <div key={repoName} className="mb-2">
+          <div className="px-2 py-0.5 text-[0.6875rem] font-medium text-[var(--ui-text-muted)]">
+            {repoName}
+          </div>
+          {repoThreads.map((thread) => (
+            <ThreadRow
+              key={thread.id}
+              thread={thread}
+              isActive={thread.id === activeThreadId}
+              onNavigate={onNavigate}
+            />
+          ))}
+        </div>
       ))}
     </div>
   )

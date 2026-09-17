@@ -18,6 +18,11 @@ from fastapi.responses import StreamingResponse
 from agent.graph.graph import get_store
 from agent.runtime import delete_task, get_task, list_tasks
 from config.app_config import get_settings
+from config.approval_config import (
+    get_command_approval_preferences,
+    update_command_approval_preferences,
+)
+from config.approval_runtime import get_pending_approval, public_approval
 from config.automation_config import (
     create_automation,
     delete_automation,
@@ -234,6 +239,19 @@ def dashboard_profile() -> dict[str, Any]:
     }
 
 
+@dashboard_router.get("/command-approval-settings")
+def dashboard_command_approval_settings() -> dict[str, Any]:
+    return get_command_approval_preferences()
+
+
+@dashboard_router.put("/command-approval-settings")
+def dashboard_update_command_approval_settings(body: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return update_command_approval_preferences(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @dashboard_router.get("/repos")
 def dashboard_repos() -> dict[str, Any]:
     """返回可用代码仓库列表。"""
@@ -326,6 +344,39 @@ def dashboard_thread_detail(thread_id: str) -> dict[str, Any]:
     if task is None:
         raise HTTPException(status_code=404, detail="thread not found")
     return thread_payload(task, include_versions=True)
+
+
+@dashboard_router.get("/threads/{thread_id}/approval")
+def dashboard_pending_approval(thread_id: str) -> dict[str, Any] | None:
+    if get_task(thread_id) is None:
+        raise HTTPException(status_code=404, detail="thread not found")
+    return public_approval(get_pending_approval(thread_id))
+
+
+@dashboard_router.post("/threads/{thread_id}/approval")
+async def dashboard_decide_approval(
+    thread_id: str, body: dict[str, Any]
+) -> StreamingResponse:
+    task = get_task(thread_id)
+    pending = get_pending_approval(thread_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="thread not found")
+    if pending is None:
+        raise HTTPException(status_code=409, detail="当前会话没有待审批的操作")
+    decision = str(body.get("decision") or "")
+    approval_id = str(body.get("approval_id") or "")
+    if decision not in {"approve", "reject"}:
+        raise HTTPException(status_code=400, detail="无效的审批决定")
+    if approval_id != str(pending.get("id") or ""):
+        raise HTTPException(status_code=409, detail="待审批操作已变化，请刷新页面后重试")
+    return build_streaming_response(
+        thread_id=thread_id,
+        repo_url=str(task.get("repo_url") or ""),
+        content="",
+        backend_type=str(task.get("backend_type") or "local"),
+        approval_decision=decision,
+        approval_id=approval_id,
+    )
 
 
 @dashboard_router.post("/threads/stream-message")

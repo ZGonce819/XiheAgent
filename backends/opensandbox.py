@@ -31,6 +31,8 @@ from opensandbox import SandboxSync
 from opensandbox.config import ConnectionConfigSync
 from opensandbox.models import WriteEntry
 
+from backends.command_policy import evaluate_command
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.ERROR)
 
@@ -126,6 +128,11 @@ class OpenSandboxBackend(BaseSandbox):
         Returns:
             包含命令输出和退出码的结构化响应。
         """
+        policy = evaluate_command(command, "sandbox")
+        if policy.action == "deny":
+            return ExecuteResponse(
+                output=f"命令被拒绝：{policy.reason}", exit_code=126, truncated=False
+            )
         effective_timeout = timeout if timeout is not None else self._default_timeout
         logger.debug(
             "准备执行命令：%s...（超时时间=%d秒）", command[:100], effective_timeout

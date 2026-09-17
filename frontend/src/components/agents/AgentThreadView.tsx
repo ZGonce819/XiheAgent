@@ -15,6 +15,8 @@ import { useModelOptions } from "@/lib/agents/useModelOptions";
 import { useProfile } from "@/lib/profile";
 import { agentsApi } from "@/lib/agents/api";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { CommandApprovalDialog } from "@/components/agents/CommandApprovalDialog";
+import { useDecideCommandApproval } from "@/lib/agents/queries";
 
 interface AgentThreadViewProps {
   user: SessionUser;
@@ -88,6 +90,7 @@ function liveStatusFor(thread: AgentThread, hasPendingPrompt: boolean): string |
 export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   const sendMessage = useSendAgentMessage(thread.id);
   const cancelThread = useCancelAgentThread(thread.id);
+  const decideApproval = useDecideCommandApproval(thread.id);
   useAgentThreadStream(thread.id, thread.status === "running");
   const [pendingPrompts, setPendingPrompts] = useState<Array<PendingPrompt>>(() =>
     getPendingPrompts(thread.id),
@@ -290,8 +293,8 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   }, [conversationVersions, userMessages, viewedVersionIndexes, visibleMessages]);
 
   const hasMessages = visibleMessages.length > 0;
-  const hasActiveRun = thread.status === "running";
-  const isStreaming = hasActiveRun || pendingPrompts.length > 0;
+  const hasActiveRun = thread.status === "running" || thread.status === "interrupted";
+  const isStreaming = thread.status === "running" || pendingPrompts.length > 0;
   const runFailed = thread.status === "error";
   const sendError = sendMessage.error instanceof Error ? sendMessage.error.message : null;
 
@@ -427,7 +430,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
               </p>
             ) : <p className="text-[0.6875rem] text-[color:var(--ui-text-dim)]">未指定仓库</p>}
           </div>
-          <span className="shrink-0 rounded-full bg-[var(--ui-accent-bubble)] px-2.5 py-1 text-[0.6875rem] text-[color:var(--ui-text-muted)]">{thread.status === "running" ? "运行中" : thread.status === "error" ? "失败" : "已完成"}</span>
+          <span className="shrink-0 rounded-full bg-[var(--ui-accent-bubble)] px-2.5 py-1 text-[0.6875rem] text-[color:var(--ui-text-muted)]">{thread.status === "running" ? "运行中" : thread.status === "interrupted" ? "等待审批" : thread.status === "error" ? "失败" : "已完成"}</span>
         </header>
         <div className="flex min-h-0 flex-1 flex-col">
           {hasMessages ? (
@@ -475,6 +478,17 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                       <span>此对话在{backendMismatchLabel}环境中创建，当前{backendType === "sandbox" ? "沙箱" : "本地"}模式下只读。切换回{backendMismatchLabel}模式后可继续对话。</span>
                     </div>
                   )}
+                  {thread.pendingApproval ? (
+                    <CommandApprovalDialog
+                      open
+                      command={thread.pendingApproval.actions.map((action) => action.command).join("\n")}
+                      reason={thread.pendingApproval.actions.map((action) => action.description).filter(Boolean).join("；")}
+                      busy={decideApproval.isPending}
+                      error={decideApproval.error instanceof Error ? decideApproval.error.message : null}
+                      onApprove={() => decideApproval.mutate({ approvalId: thread.pendingApproval!.id, decision: "approve" })}
+                      onReject={() => decideApproval.mutate({ approvalId: thread.pendingApproval!.id, decision: "reject" })}
+                    />
+                  ) : null}
                   <AgentPromptBar
                     placeholder={isViewingCurrentVersion ? (isBackendMismatch ? "环境不匹配，不可发送" : "继续输入指令") : "历史版本不可发送"}
                     compact

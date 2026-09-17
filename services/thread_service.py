@@ -274,6 +274,14 @@ def thread_payload(
         "diffStats": None,
         "changedFiles": [],
     }
+    try:
+        from config.approval_runtime import get_pending_approval, public_approval
+
+        payload["pendingApproval"] = public_approval(
+            get_pending_approval(str(thread["thread_id"]))
+        )
+    except Exception:
+        payload["pendingApproval"] = None
     if include_versions:
         try:
             from agent.graph.graph import get_store
