@@ -323,6 +323,8 @@ xihe-agent/
 │   ├── env_config.py      # 环境变量加载
 │   ├── model_config.py    # 自定义模型配置管理
 │   ├── automation_config.py # 自动化任务配置
+│   ├── approval_config.py # 命令审批策略配置
+│   ├── approval_runtime.py # 审批运行时状态管理
 │   └── logging_config.py  # 日志配置
 │
 ├── agent/                 # Agent 核心模块
@@ -369,6 +371,8 @@ xihe-agent/
 ├── backends/              # Backend 实现
 │   ├── workspace.py       # 工作区操作
 │   ├── local_shell.py     # Shell 命令执行
+│   ├── opensandbox.py     # OpenSandbox 沙盒执行
+│   ├── command_policy.py  # 命令审批策略引擎
 │   └── permissions.py     # 权限控制
 │
 ├── tools/                 # 外部工具集成
@@ -439,11 +443,34 @@ xihe-agent/
 ├── frontend/              # 前端项目（React + Vite）
 │   ├── src/
 │   │   ├── components/    # React 组件
+│   │   │   ├── agents/    # Agent 相关组件
+│   │   │   │   ├── AgentThreadView.tsx    # 会话线程视图
+│   │   │   │   ├── AgentsHome.tsx         # Agent 首页
+│   │   │   │   ├── AgentsSidebar.tsx      # Agent 侧边栏
+│   │   │   │   ├── RepoSelector.tsx       # 仓库选择器
+│   │   │   │   ├── CommandApprovalDialog.tsx # 命令审批面板
+│   │   │   │   └── ported/              # 移植组件
+│   │   │   │       └── CloudPromptBar.tsx # 输入框组件
+│   │   │   └── ui/        # 通用 UI 组件
+│   │   │       └── select.tsx             # 下拉选择组件
 │   │   ├── lib/           # API 客户端与数据层
+│   │   │   ├── agents/    # Agent 相关 API
+│   │   │   │   ├── api.ts               # API 调用
+│   │   │   │   ├── queries.ts           # TanStack Query
+│   │   │   │   ├── types.ts             # 类型定义
+│   │   │   │   └── useThreadStream.ts   # SSE 流钩子
+│   │   │   └── api.ts     # 通用 API 客户端
 │   │   ├── routes/        # TanStack Router 路由
+│   │   │   ├── automations.tsx          # 自动化任务页面
+│   │   │   ├── skills.tsx               # 技能管理页面
+│   │   │   └── my-settings.tsx          # 个人设置页面
 │   │   └── styles/        # 样式文件
+│   │       └── agents.css               # Agent 相关样式
 │   ├── package.json       # 前端依赖
 │   └── vite.config.ts     # Vite 配置（代理到后端）
+│
+├── tests/                 # 测试文件
+│   └── test_command_policy.py # 命令策略引擎测试
 │
 └── reviewer_rules/        # 代码审查规则
     └── default_review_rules.md
