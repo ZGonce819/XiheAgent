@@ -91,8 +91,10 @@
   transform-origin: center bottom;
 }
 
-.new-thread-entry .agents-thinking-status {
-  animation: new-task-status-in 180ms 280ms ease-out both;
+.new-thread-handoff .pending-user-pop,
+.new-thread-handoff .message-enter,
+.new-thread-handoff .agents-thinking-status {
+  animation: none;
 }
 
 .pending-user-pop {
@@ -252,7 +254,6 @@
   .new-task-user-message,
   .new-task-status,
   .new-task-input,
-  .new-thread-entry .agents-thinking-status,
   .pending-user-pop {
     animation: none;
   }

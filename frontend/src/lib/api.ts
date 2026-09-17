@@ -71,7 +71,6 @@ export interface CustomModel {
   model_name: string;
   max_tokens: number;
   temperature: number;
-  thinking: boolean;
   is_default: boolean;
 }
 
@@ -82,7 +81,6 @@ export interface CustomModelInput {
   model_name: string;
   max_tokens?: number;
   temperature?: number;
-  thinking?: boolean;
   set_default?: boolean;
 }
 
@@ -95,7 +93,6 @@ export interface BuiltinModel {
   api_key_masked: string;
   max_tokens: number;
   temperature: number;
-  thinking: boolean;
   is_default: boolean;
   has_overrides: boolean;
 }
@@ -122,6 +119,7 @@ export interface Profile {
   create_prs?: boolean;
   review_draft_prs?: boolean | null;
   backendType?: string;
+  sandbox_available?: boolean;
   updated_at?: string;
 }
 

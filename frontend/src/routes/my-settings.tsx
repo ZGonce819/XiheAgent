@@ -29,7 +29,6 @@ const EMPTY_FORM: FormState = {
   model_name: "",
   max_tokens: 4096,
   temperature: 0.7,
-  thinking: false,
   is_default: false,
 }
 
@@ -197,13 +196,6 @@ function ModelForm({
           />
         </div>
         <div className="flex items-end gap-3 pb-1">
-          <AnimatedCheckbox
-            checked={Boolean(form.thinking)}
-            label="Thinking"
-            onChange={(checked) =>
-              setForm((current) => ({ ...current, thinking: checked }))
-            }
-          />
           <AnimatedCheckbox
             checked={form.is_default}
             label="默认"
@@ -376,7 +368,6 @@ function CustomModelsSection() {
       model_name: b.model_name,
       max_tokens: b.max_tokens,
       temperature: b.temperature,
-      thinking: b.thinking,
       is_default: b.is_default,
     })
   }
@@ -396,7 +387,6 @@ function CustomModelsSection() {
       model_name: m.model_name,
       max_tokens: m.max_tokens,
       temperature: m.temperature,
-      thinking: m.thinking,
       is_default: m.is_default,
     })
   }
@@ -432,7 +422,6 @@ function CustomModelsSection() {
         api_key: form.api_key || undefined,
         max_tokens: form.max_tokens,
         temperature: form.temperature,
-        thinking: form.thinking,
         is_default: form.is_default,
       })
     } else if (editing) {
@@ -731,11 +720,6 @@ function CustomModelsSection() {
               />
             </div>
             <div className="flex items-end gap-3 pb-1">
-              <AnimatedCheckbox
-                checked={Boolean(form.thinking)}
-                label="Thinking"
-                onChange={(checked) => setForm({ ...form, thinking: checked })}
-              />
               <AnimatedCheckbox
                 checked={form.is_default}
                 label="默认"

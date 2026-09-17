@@ -19,6 +19,7 @@ import type {
 } from "@/lib/agents/types";
 import type { ModelOption } from "@/lib/api";
 import type { ModelSelection } from "@/lib/agents/useModelOptions";
+import { formatModelSelection } from "@/lib/agents/useModelOptions";
 import { groupConversationMessages } from "@/lib/agents/messageGroups";
 import { cn } from "@/lib/utils";
 
@@ -465,6 +466,8 @@ function UserMessage({ message, editable = false, onEdit, models = [], selection
   const [scrolledFromBottom, setScrolledFromBottom] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(text);
+  const [editModelDropdownOpen, setEditModelDropdownOpen] = useState(false);
+  const editModelDropdownRef = useRef<HTMLDivElement>(null);
 
   const updateScrollIndicators = useCallback(() => {
     const el = textRef.current;
@@ -476,6 +479,17 @@ function UserMessage({ message, editable = false, onEdit, models = [], selection
   useLayoutEffect(() => {
     updateScrollIndicators();
   }, [text, updateScrollIndicators]);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      const target = e.target as Node;
+      if (editModelDropdownRef.current && !editModelDropdownRef.current.contains(target)) {
+        setEditModelDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const textEdgeShadows = [
     scrolledFromTop ? "inset 0 12px 10px -10px rgba(42, 63, 95, 0.95)" : "",
@@ -505,10 +519,43 @@ function UserMessage({ message, editable = false, onEdit, models = [], selection
           <div className="w-[min(78vw,720px)] rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface)] p-3 shadow-sm">
             <textarea autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} className="min-h-24 w-full resize-none bg-transparent text-[0.875rem] leading-6 text-[color:var(--ui-text)] outline-none" />
             <div className="mt-2 flex items-center justify-between gap-2">
-              <select value={selection ? selection.modelId + "::" + selection.effort : ""} onChange={(event) => { const parts = event.target.value.split("::"); if (parts[0] && parts[1]) onSelectionChange?.({ modelId: parts[0], effort: parts[1] }); }} className="max-w-[220px] rounded-md bg-transparent px-1 py-1 text-xs text-[color:var(--ui-text-muted)] outline-none" aria-label="选择模型">
-                <option value="">默认模型</option>
-                {models.flatMap((model) => model.efforts.map((effort) => <option key={model.id + "::" + effort} value={model.id + "::" + effort}>{model.label} {effort}</option>))}
-              </select>
+              <div ref={editModelDropdownRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setEditModelDropdownOpen((open) => !open)}
+                  className="flex max-w-[220px] cursor-pointer items-center gap-0.5 rounded-md px-1 py-1 text-[0.8125rem] text-[color:var(--ui-text-muted)] transition-[color,opacity] duration-150 hover:opacity-80"
+                >
+                  <span className="truncate">{formatModelSelection(models, selection)}</span>
+                  <ChevronDown className={cn("size-3.5 shrink-0 opacity-60 transition-transform duration-200 ease-out", editModelDropdownOpen && "rotate-180")} />
+                </button>
+                {editModelDropdownOpen && (
+                  <div className="absolute bottom-full left-0 z-50 mb-1 min-w-[160px] origin-bottom-left animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-1 duration-150 ease-out overflow-hidden overflow-y-auto rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface)] text-xs shadow-lg">
+                    {models.flatMap((model) =>
+                      model.efforts.map((effort) => {
+                        const combo: ModelSelection = { modelId: model.id, effort };
+                        const isSelected = !!selection && selection.modelId === model.id && selection.effort === effort;
+                        return (
+                          <button
+                            key={model.id + "::" + effort}
+                            type="button"
+                            onClick={() => {
+                              onSelectionChange?.(combo);
+                              setEditModelDropdownOpen(false);
+                            }}
+                            className={cn(
+                              "flex w-full items-center gap-2 px-3 py-1.5 text-left whitespace-nowrap transition-colors hover:bg-[var(--ui-panel-2)]",
+                              isSelected ? "text-[color:var(--ui-text)]" : "text-[color:var(--ui-text-muted)]"
+                            )}
+                          >
+                            {formatModelSelection(models, combo)}
+                            {isSelected && <span className="ml-auto text-[color:var(--ui-text-dim)]">✓</span>}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
               <div className="flex items-center gap-2">
               <button type="button" onClick={() => setEditing(false)} className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs text-[color:var(--ui-text-muted)] hover:bg-[var(--ui-panel-2)]"><X className="size-3.5" />取消</button>
               <button type="button" disabled={!draft.trim()} onClick={() => { if (draft.trim()) { onEdit?.(message, draft.trim()); setEditing(false); } }} className="inline-flex items-center gap-1 rounded-md bg-[var(--ui-accent)] px-2.5 py-1 text-xs text-white disabled:opacity-40"><ArrowUp className="size-3.5" />发送</button>

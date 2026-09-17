@@ -1,7 +1,9 @@
 import {
   ArrowUp,
   ChevronDown,
+  Cloud,
   LoaderCircle,
+  Monitor,
   Square,
   X,
 } from "lucide-react"
@@ -40,7 +42,7 @@ export interface CloudPromptBarProps {
   /** Shows a non-interactive close mark when the composer is unavailable in a read-only view. */
   readOnly?: boolean
   busy?: boolean
-  onSubmit?: (value: string, images: Array<ImageChunk>) => void
+  onSubmit?: (value: string, images: Array<ImageChunk>) => boolean | void
   /** Called to stop the running agent. When set, the send button becomes a stop button while busy and the input is empty. */
   onStop?: () => void
   stopping?: boolean
@@ -51,6 +53,10 @@ export interface CloudPromptBarProps {
   repos?: Array<{ full_name: string }>
   selectedRepo?: string | null
   onRepoChange?: (repo: string | null) => void
+  /** Current backend type: "local" or "sandbox". */
+  backendType?: string
+  /** Called when user switches between local and sandbox. */
+  onBackendTypeChange?: (backendType: string) => void
 }
 
 function fileToImageChunk(file: File): Promise<ImageChunk | null> {
@@ -95,15 +101,19 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
   repos,
   selectedRepo = null,
   onRepoChange,
+  backendType = "local",
+  onBackendTypeChange,
 }: CloudPromptBarProps) {
   const [value, setValue] = useState("")
   const [pendingImages, setPendingImages] = useState<Array<ImageChunk>>([])
   const [isDragOver, setIsDragOver] = useState(false)
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false)
   const [repoProvider, setRepoProvider] = useState<RepoProvider>("github")
+  const [backendDropdownOpen, setBackendDropdownOpen] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const dragDepthRef = useRef(0)
   const modelDropdownRef = useRef<HTMLDivElement>(null)
+  const backendDropdownRef = useRef<HTMLDivElement>(null)
 
   const dynamicPlaceholder = useMemo(
     () =>
@@ -135,9 +145,12 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
   const handleSubmit = useCallback(() => {
     const trimmed = value.trim()
     if (!canSubmit) return
-    onSubmit?.(trimmed, pendingImages)
-    setValue("")
-    setPendingImages([])
+    const result = onSubmit?.(trimmed, pendingImages)
+    // onSubmit 返回 false 时不清空输入框（如校验未通过）
+    if (result !== false) {
+      setValue("")
+      setPendingImages([])
+    }
   }, [canSubmit, onSubmit, pendingImages, value])
 
   useLayoutEffect(() => {
@@ -159,6 +172,12 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
         !modelDropdownRef.current.contains(target)
       ) {
         setModelDropdownOpen(false)
+      }
+      if (
+        backendDropdownRef.current &&
+        !backendDropdownRef.current.contains(target)
+      ) {
+        setBackendDropdownOpen(false)
       }
     }
     document.addEventListener("mousedown", handleClickOutside)
@@ -235,6 +254,59 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
             onRepoChange={onRepoChange}
             onProviderChange={setRepoProvider}
           />
+          {onBackendTypeChange && (
+            <div ref={backendDropdownRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setBackendDropdownOpen((open) => !open)}
+                className="flex items-center gap-1 rounded-md border border-[var(--ui-border)] bg-[var(--ui-panel-2)] px-2 py-1 text-[0.75rem] text-[color:var(--ui-text-muted)] transition-colors hover:border-[var(--ui-accent)] hover:text-[color:var(--ui-text)]"
+              >
+                <>
+                  {backendType === "sandbox" ? <Cloud className="size-3" /> : <Monitor className="size-3" />}
+                  <span>{backendType === "sandbox" ? "沙箱环境" : "本地环境"}</span>
+                  <ChevronDown className={cn("size-3 transition-transform duration-200", backendDropdownOpen && "rotate-180")} />
+                </>
+              </button>
+              {backendDropdownOpen && (
+                <div className="absolute left-0 top-full z-50 mt-1 min-w-[160px] origin-top-left animate-in fade-in-0 zoom-in-95 slide-in-from-top-1 duration-150 ease-out overflow-hidden rounded border border-[var(--ui-border)] bg-[var(--ui-surface)] shadow-lg">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onBackendTypeChange("local")
+                      setBackendDropdownOpen(false)
+                    }}
+                    className={cn(
+                      "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-[var(--ui-panel-2)]",
+                      backendType === "local"
+                        ? "text-[color:var(--ui-text)]"
+                        : "text-[color:var(--ui-text-muted)]"
+                    )}
+                  >
+                    <Monitor className="size-3" />
+                    本地环境
+                    {backendType === "local" && <span className="ml-auto text-[color:var(--ui-text-dim)]">✓</span>}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onBackendTypeChange("sandbox")
+                      setBackendDropdownOpen(false)
+                    }}
+                    className={cn(
+                      "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-[var(--ui-panel-2)]",
+                      backendType === "sandbox"
+                        ? "text-[color:var(--ui-text)]"
+                        : "text-[color:var(--ui-text-muted)]"
+                    )}
+                  >
+                    <Cloud className="size-3" />
+                    沙箱环境
+                    {backendType === "sandbox" && <span className="ml-auto text-[color:var(--ui-text-dim)]">✓</span>}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
       <div
@@ -314,7 +386,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
               )}
             </button>
             {modelDropdownOpen && combos.length > 0 && (
-              <div className="absolute bottom-full left-0 z-50 mb-1 max-h-72 origin-bottom-left animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-1 duration-150 ease-out overflow-hidden overflow-y-auto rounded border border-[var(--ui-border)] bg-[var(--ui-surface)] shadow-lg">
+              <div className="absolute bottom-full left-0 z-50 mb-1 max-h-72 origin-bottom-left animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-1 duration-150 ease-out overflow-hidden overflow-y-auto rounded-lg border border-[var(--ui-border)] bg-[var(--ui-surface)] shadow-lg">
                 {combos.map((combo) => {
                   const selected =
                     !!selection &&

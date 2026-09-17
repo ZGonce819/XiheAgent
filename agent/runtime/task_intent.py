@@ -138,18 +138,16 @@ def is_workspace_listing_task(prompt: str) -> bool:
 def _make_structured_intent_model():
     """创建带结构化输出约束的意图分类模型。
 
-    DeepSeek 使用 OpenAI-compatible 接口。为了兼容性，这里选择 `json_mode`：
+    使用 `function_calling` 方法，对 OpenAI 兼容的第三方代理兼容性更好：
     - prompt 中明确要求只返回 JSON；
-    - LangChain 负责把 JSON 解析为 `IntentClassification`；
+    - LangChain 通过 function calling 约束输出格式；
     - Pydantic 负责字段和枚举校验。
-
-    如果未来模型支持更严格的原生 JSON Schema，可以把 method 调整为 `json_schema`。
 
     Returns:
         绑定了 ``IntentClassification`` 结构化输出的 LangChain 模型实例。
     """
 
-    return make_intent_model().with_structured_output(IntentClassification, method="json_mode")
+    return make_intent_model().with_structured_output(IntentClassification, method="function_calling")
 
 
 def _classify_by_keyword_backup(prompt: str) -> TaskKind:

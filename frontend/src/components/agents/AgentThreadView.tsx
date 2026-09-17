@@ -95,8 +95,23 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
 
   const { models, defaultSelection } = useModelOptions();
   const profile = useProfile();
-  const currentBackendType = profile.data?.backendType ?? "local";
-  const isBackendMismatch = (thread.backendType ?? "local") !== currentBackendType;
+  const sandboxAvailable = profile.data?.sandbox_available ?? false;
+  const [backendType, setBackendType] = useState<string>(
+    thread.backendType ?? profile.data?.backendType ?? "local"
+  );
+  const [sandboxWarning, setSandboxWarning] = useState(false);
+  const [repoWarning, setRepoWarning] = useState(false);
+
+  const handleBackendTypeChange = (next: string) => {
+    if (next === "sandbox" && !sandboxAvailable) {
+      setSandboxWarning(true);
+      return;
+    }
+    setBackendType(next);
+  };
+
+  // 仅当沙箱不可用时（USE_SANDBOX=false），环境不匹配才需要提示和限制
+  const isBackendMismatch = !sandboxAvailable && (thread.backendType ?? "local") !== backendType;
   const backendMismatchLabel = (thread.backendType ?? "local") === "sandbox" ? "沙箱" : "本地";
   const threadSelection = useMemo<ModelSelection | null>(() => {
     if (!thread.model || !thread.effort) return null;
@@ -113,7 +128,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   const [editingTitle, setEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
   const updateTitle = useUpdateAgentThreadTitle(thread.id);
-  const [newThreadTransition, setNewThreadTransition] = useState(() => {
+  const [newThreadHandoff, setNewThreadHandoff] = useState(() => {
     if (typeof window === "undefined") return false;
     const key = `xihe:new-thread-transition:${thread.id}`;
     try {
@@ -155,10 +170,10 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   }, [thread.id]);
 
   useEffect(() => {
-    if (!newThreadTransition) return;
-    const timer = window.setTimeout(() => setNewThreadTransition(false), 520);
-    return () => window.clearTimeout(timer);
-  }, [newThreadTransition]);
+    if (newThreadHandoff && thread.status !== "running") {
+      setNewThreadHandoff(false);
+    }
+  }, [newThreadHandoff, thread.status]);
 
   useEffect(() => {
     if (thread.status === "running") setViewedVersionIndexes({});
@@ -279,6 +294,14 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   const isStreaming = hasActiveRun || pendingPrompts.length > 0;
   const runFailed = thread.status === "error";
   const sendError = sendMessage.error instanceof Error ? sendMessage.error.message : null;
+
+  // 后端返回沙箱未开启错误时，弹出提示
+  useEffect(() => {
+    if (sendError && /沙盒|沙箱/i.test(sendError)) {
+      setSandboxWarning(true);
+    }
+  }, [sendError]);
+
   const liveStatus = liveStatusFor(thread, pendingPrompts.length > 0);
   const latestUserMessage = useMemo(() => {
     for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
@@ -327,6 +350,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
       images: message.chunks.filter((chunk): chunk is ImageChunk => chunk.kind === "image"),
       model_id: activeSelection?.modelId ?? null,
       effort: activeSelection?.effort ?? null,
+      backend_type: backendType,
       edit_message_id: message.id,
       edit_message_content: messageText(message),
       edit_snapshot: displayMessages,
@@ -334,6 +358,10 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
     });
   };
   const handleSubmit = (content: string, images: Array<ImageChunk>) => {
+    if (!displayRepo) {
+      setRepoWarning(true);
+      return false;
+    }
     setSendTransition(true);
     window.setTimeout(() => setSendTransition(false), 1100);
     const insertAt = displayMessages.length;
@@ -344,6 +372,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
       images,
       model_id: activeSelection?.modelId ?? null,
       effort: activeSelection?.effort ?? null,
+      backend_type: backendType,
     });
   };
 
@@ -401,7 +430,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
         </header>
         <div className="flex min-h-0 flex-1 flex-col">
           {hasMessages ? (
-            <div className={`relative flex min-h-0 flex-1 flex-col overflow-hidden ${sendTransition ? "send-transition" : ""} ${newThreadTransition ? "new-thread-entry" : ""}`}>
+            <div className={`relative flex min-h-0 flex-1 flex-col overflow-hidden ${sendTransition ? "send-transition" : ""} ${newThreadHandoff ? "new-thread-handoff" : ""}`}>
               <MessageView
                 messages={visibleMessages}
                 threadId={thread.id}
@@ -416,7 +445,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                 onSelectionChange={setSelection}
                 versionNavigations={versionNavigations}
               />
-              <div className={`shrink-0 px-4 pb-4 ${newThreadTransition ? "new-task-input" : ""}`}>
+              <div className="shrink-0 px-4 pb-4">
                 <div className="mx-auto w-full min-w-0 max-w-4xl">
                   {runFailed ? (
                     <p className="mb-3 text-sm text-[color:var(--ui-danger)]">
@@ -442,7 +471,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                   )}
                   {isBackendMismatch && (
                     <div className="mb-3 flex items-center gap-3 border-l-2 border-[var(--ui-accent)] bg-[var(--ui-panel)] px-3 py-2 text-xs text-[color:var(--ui-text-muted)]">
-                      <span>此对话在{backendMismatchLabel}环境中创建，当前{currentBackendType === "sandbox" ? "沙箱" : "本地"}模式下只读。切换回{backendMismatchLabel}模式后可继续对话。</span>
+                      <span>此对话在{backendMismatchLabel}环境中创建，当前{backendType === "sandbox" ? "沙箱" : "本地"}模式下只读。切换回{backendMismatchLabel}模式后可继续对话。</span>
                     </div>
                   )}
                   <AgentPromptBar
@@ -457,6 +486,8 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                     models={models}
                     selection={activeSelection}
                     onSelectionChange={setSelection}
+                    backendType={backendType}
+                    onBackendTypeChange={handleBackendTypeChange}
                   />
                 </div>
               </div>
@@ -479,14 +510,13 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                 <AgentPromptBar
                   placeholder="发送第一条指令"
                   compact
-                  busy={hasActiveRun}
                   disabled={sendMessage.isPending}
                   onSubmit={handleSubmit}
-                  onStop={() => cancelThread.mutate()}
-                  stopping={cancelThread.isPending}
                   models={models}
                   selection={activeSelection}
                   onSelectionChange={setSelection}
+                  backendType={backendType}
+                  onBackendTypeChange={handleBackendTypeChange}
                 />
               </div>
               </div>
@@ -514,6 +544,28 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
           }}
         />
       )}
+      <ConfirmDialog
+        open={sandboxWarning}
+        title="沙箱未开启"
+        description="您未开启沙盒配置，请开启后再尝试"
+        confirmText="知道了"
+        showCancel={false}
+        onOpenChange={(open) => {
+          if (!open) setSandboxWarning(false);
+        }}
+        onConfirm={() => setSandboxWarning(false)}
+      />
+      <ConfirmDialog
+        open={repoWarning}
+        title="未选择仓库"
+        description="请先选择一个代码仓库后再发送消息"
+        confirmText="知道了"
+        showCancel={false}
+        onOpenChange={(open) => {
+          if (!open) setRepoWarning(false);
+        }}
+        onConfirm={() => setRepoWarning(false)}
+      />
     </AgentsShell>
   );
 }

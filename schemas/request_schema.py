@@ -28,6 +28,7 @@ class DashboardThreadMessageRequest(BaseModel):
     repo: str | None = Field(default=None, description="Gitee 仓库地址（完整 URL 或 owner/repo 简写）")
     model_id: str | None = Field(default=None, description="指定使用的模型 ID")
     effort: str | None = Field(default=None, description="推理努力程度")
+    backend_type: str | None = Field(default=None, description="运行环境：local 或 sandbox")
     edit_message_id: str | None = Field(default=None, description="正在编辑的最近一条用户消息 ID")
     edit_message_content: str | None = Field(default=None, description="待编辑消息的原始文本，用于校验实时消息 ID")
     edit_snapshot: list[dict[str, Any]] | None = Field(default=None, description="编辑前的页面消息快照")

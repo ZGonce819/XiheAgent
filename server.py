@@ -80,15 +80,17 @@ def graph_loaded_for_execution(config: RunnableConfig) -> bool:
     return bool(configurable.get("__is_for_execution__", False))
 
 
-def ensure_backend_for_thread(thread_id: str) -> BaseSandbox:
+def ensure_backend_for_thread(thread_id: str, backend_type: str | None = None) -> BaseSandbox:
     """获取或创建绑定到 thread 的 Backend。
 
-    根据 ``USE_SANDBOX`` 配置决定使用 OpenSandbox 远程沙盒还是 LocalShellBackend。
+    优先使用前端传入的 ``backend_type`` 决定使用沙盒还是本地 Backend，
+    未传入时回退到全局 ``USE_SANDBOX`` 配置。
     负责复用当前机器上的工作区，按 thread 维度缓存 Backend 实例，
     同一会话内可重复使用。超过缓存上限时淘汰最久未使用的实例。
 
     Args:
         thread_id: 会话唯一标识。
+        backend_type: 可选的运行环境类型，``"local"`` 或 ``"sandbox"``。
 
     Returns:
         缓存或新建的 Backend 实例。
@@ -99,8 +101,8 @@ def ensure_backend_for_thread(thread_id: str) -> BaseSandbox:
             oldest_key = next(iter(_BACKENDS))
             logger.info("Backend 缓存已满，淘汰最旧实例：%s", oldest_key)
             _BACKENDS.pop(oldest_key)
-        backend = create_backend(thread_id=thread_id)
-        logger.info("为 thread 创建 %s：%s", type(backend).__name__, thread_id)
+        backend = create_backend(thread_id=thread_id, backend_type=backend_type)
+        logger.info("为 thread 创建 %s（backend_type=%s）：%s", type(backend).__name__, backend_type, thread_id)
         _BACKENDS[thread_id] = backend
     else:
         logger.info("复用 thread 的 %s：%s", type(backend).__name__, thread_id)
@@ -313,7 +315,8 @@ def get_agent(config: RunnableConfig):
         return create_deep_agent(system_prompt="", tools=[]).with_config(config)
 
     task_kind = _task_kind_from_config(configurable)
-    backend = ensure_backend_for_thread(thread_id)
+    backend_type = configurable.get("backend_type")
+    backend = ensure_backend_for_thread(thread_id, backend_type=backend_type)
     repo_url = configurable.get("repo_url")
     langgraph_store = get_langgraph_store()
 

@@ -84,7 +84,6 @@ def create_custom_model(payload: dict[str, Any]) -> dict[str, Any]:
         "model_name": payload.get("model_name", ""),
         "max_tokens": int(payload.get("max_tokens", 4096)),
         "temperature": float(payload.get("temperature", 0.7)),
-        "thinking": bool(payload.get("thinking", False)),
         "is_default": set_default,
     }
     models.append(new_model)
@@ -97,15 +96,13 @@ def update_custom_model(model_id: str, payload: dict[str, Any]) -> dict[str, Any
     models = _load_models()
     for i, m in enumerate(models):
         if m.get("id") == model_id:
-            for key in ("name", "api_base", "api_key", "model_name", "max_tokens", "temperature", "thinking"):
+            for key in ("name", "api_base", "api_key", "model_name", "max_tokens", "temperature"):
                 if key in payload:
                     val = payload[key]
                     if key == "max_tokens":
                         val = int(val)
                     elif key == "temperature":
                         val = float(val)
-                    elif key == "thinking":
-                        val = bool(val)
                     models[i][key] = val
             # 处理设为默认：清除其他自定义模型和内置模型的默认标记
             if payload.get("set_default"):
@@ -183,7 +180,6 @@ def get_builtin_model() -> dict[str, Any]:
         "api_key_masked": _mask_key(api_key),
         "max_tokens": overrides.get("max_tokens", DEEPSEEK_V4_MAX_TOKENS),
         "temperature": overrides.get("temperature", 1.1),
-        "thinking": overrides.get("thinking", False),
         "is_default": overrides.get("is_default", False),
         "has_overrides": bool(overrides),
     }
@@ -195,13 +191,13 @@ def update_builtin_model(payload: dict[str, Any]) -> dict[str, Any]:
     空字符串的 ``api_key`` / ``api_base`` 视为清除覆盖，回退到 .env 默认值。
     """
     overrides = _load_builtin()
-    for key in ("max_tokens", "temperature", "thinking", "is_default"):
+    for key in ("max_tokens", "temperature", "is_default"):
         if key in payload:
             if key == "max_tokens":
                 overrides[key] = int(payload[key])
             elif key == "temperature":
                 overrides[key] = float(payload[key])
-            elif key in ("thinking", "is_default"):
+            elif key == "is_default":
                 overrides[key] = bool(payload[key])
     if "api_key" in payload:
         if payload["api_key"]:

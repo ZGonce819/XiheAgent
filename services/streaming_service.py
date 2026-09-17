@@ -65,6 +65,7 @@ def build_streaming_response(
     rollback_message_id: str | None = None,
     rollback_message_content: str | None = None,
     model_id: str | None = None,
+    backend_type: str | None = None,
 ) -> StreamingResponse:
     """构造 POST SSE 流式响应。
 
@@ -101,7 +102,7 @@ def build_streaming_response(
             except Exception as exc:
                 raise RuntimeError("无法清理首轮 checkpoint，已拒绝回退") from exc
 
-    initialize_task_record(repo_url=repo_url, prompt=content, thread_id=thread_id)
+    initialize_task_record(repo_url=repo_url, prompt=content, thread_id=thread_id, backend_type=backend_type)
     initial_task = get_task(thread_id)
     if initial_task is None:
         from fastapi import HTTPException
@@ -213,6 +214,7 @@ def build_streaming_response(
                     run_id=run_id,
                     checkpoint_id=checkpoint_id,
                     model_id=model_id,
+                    backend_type=backend_type,
                 )
                 latest = get_task(thread_id) or initial_task
                 send_event("thread_done", thread_meta_payload(latest))

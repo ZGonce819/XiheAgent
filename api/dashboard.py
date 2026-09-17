@@ -181,6 +181,7 @@ def dashboard_profile() -> dict[str, Any]:
         "create_prs": True,
         "review_draft_prs": None,
         "backendType": "sandbox" if get_settings().use_sandbox else "local",
+        "sandbox_available": get_settings().use_sandbox,
     }
 
 
@@ -245,8 +246,12 @@ async def dashboard_stream_new_message(body: DashboardThreadMessageRequest) -> S
         repo_url = normalize_repo_url(body.repo)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # 校验 backend_type：请求沙箱但全局未开启时拒绝
+    requested_backend = body.backend_type or ("sandbox" if get_settings().use_sandbox else "local")
+    if requested_backend == "sandbox" and not get_settings().use_sandbox:
+        raise HTTPException(status_code=400, detail="您未开启沙盒配置，请开启后再尝试")
     thread_id = str(uuid.uuid4())
-    return build_streaming_response(thread_id=thread_id, repo_url=repo_url, content=body.content, model_id=body.model_id)
+    return build_streaming_response(thread_id=thread_id, repo_url=repo_url, content=body.content, model_id=body.model_id, backend_type=requested_backend)
 
 
 @dashboard_router.post("/threads/{thread_id}/stream-message")
@@ -267,11 +272,14 @@ async def dashboard_stream_existing_message(
         HTTPException: 仓库地址解析失败时返回 400。
     """
     task = get_task(thread_id)
+    # 校验 backend_type：请求沙箱但全局未开启时拒绝
+    requested_backend = body.backend_type or ("sandbox" if get_settings().use_sandbox else "local")
+    if requested_backend == "sandbox" and not get_settings().use_sandbox:
+        raise HTTPException(status_code=400, detail="您未开启沙盒配置，请开启后再尝试")
     # 检查环境匹配：不同 backend 创建的对话不能继续
     if task is not None:
         thread_backend = task.get("backend_type") or "local"
-        current_backend = "sandbox" if get_settings().use_sandbox else "local"
-        if thread_backend != current_backend:
+        if thread_backend != requested_backend:
             env_label = "沙箱" if thread_backend == "sandbox" else "本地"
             raise HTTPException(
                 status_code=409,
@@ -305,6 +313,7 @@ async def dashboard_stream_existing_message(
             rollback_message_id=body.edit_message_id,
             rollback_message_content=body.edit_message_content,
             model_id=body.model_id,
+            backend_type=requested_backend,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

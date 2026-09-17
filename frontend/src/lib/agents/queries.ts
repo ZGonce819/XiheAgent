@@ -119,6 +119,7 @@ export function useCreateAgentThread() {
       repo_explicitly_none?: boolean
       model_id?: string | null
       effort?: string | null
+      backend_type?: string | null
     }) => {
       const response = await agentsApi.createThread(body)
       if (!response.body) return null
@@ -223,6 +224,7 @@ export interface SendAgentMessageVariables {
   images?: Array<ImageChunk>
   model_id?: string | null
   effort?: string | null
+  backend_type?: string | null
   edit_message_id?: string | null
   edit_message_content?: string | null
   edit_snapshot?: Array<Message>
@@ -250,6 +252,7 @@ export function useSendAgentMessage(threadId: string) {
         repo: cached?.repoUrl || cached?.repo || null,
         model_id: vars.model_id,
         effort: vars.effort,
+        backend_type: vars.backend_type,
         edit_message_id: vars.edit_message_id,
         edit_message_content: vars.edit_message_content,
         edit_snapshot: vars.edit_snapshot,

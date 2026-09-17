@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { FolderGit2 } from "lucide-react"
 
 import type { ModelSelection } from "@/lib/agents/useModelOptions"
@@ -8,6 +8,7 @@ import { Logo } from "@/components/agents/ported/Logo"
 import { useCreateAgentThread } from "@/lib/agents/queries"
 import { useModelOptions } from "@/lib/agents/useModelOptions"
 import { useProfile, useRepos } from "@/lib/profile"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 
 export function AgentsHome() {
   const createThread = useCreateAgentThread()
@@ -23,6 +24,21 @@ export function AgentsHome() {
 
   const reposQuery = useRepos()
   const profileQuery = useProfile()
+  const sandboxAvailable = profileQuery.data?.sandbox_available ?? false
+  const [backendType, setBackendType] = useState<string>(
+    profileQuery.data?.backendType ?? "local"
+  )
+  const [sandboxWarning, setSandboxWarning] = useState(false)
+  const [repoWarning, setRepoWarning] = useState(false)
+
+  const handleBackendTypeChange = (next: string) => {
+    if (next === "sandbox" && !sandboxAvailable) {
+      setSandboxWarning(true)
+      return
+    }
+    setBackendType(next)
+  }
+
   // undefined = untouched (fall back to the profile default); null = explicitly "no repo".
   const [repoOverride, setRepoOverride] = useState<string | null | undefined>(
     undefined
@@ -34,6 +50,13 @@ export function AgentsHome() {
 
   const hasSubmitted = submission !== null
 
+  // 后端返回沙箱未开启错误时，也弹出提示
+  useEffect(() => {
+    if (createError && /沙盒|沙箱/i.test(createError)) {
+      setSandboxWarning(true)
+    }
+  }, [createError])
+
   return (
     <div className="new-task-page-enter flex min-w-0 flex-1 flex-col overflow-y-auto">
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--ui-border)] px-5 max-md:pl-14 md:px-8">
@@ -44,7 +67,7 @@ export function AgentsHome() {
           </h1>
         </div>
         <span className="text-[0.6875rem] text-[color:var(--ui-text-dim)]">
-          本地工作区
+          {backendType === "sandbox" ? "沙箱工作区" : "本地工作区"}
         </span>
       </header>
       <main
@@ -103,6 +126,10 @@ export function AgentsHome() {
           <div className="w-full">
             <AgentPromptBar
               onSubmit={(prompt, images) => {
+                if (!repo) {
+                  setRepoWarning(true)
+                  return false
+                }
                 setSubmission({ prompt, images })
                 createThread.mutate(
                   {
@@ -112,6 +139,7 @@ export function AgentsHome() {
                     repo_explicitly_none: repoOverride === null,
                     model_id: activeSelection?.modelId ?? null,
                     effort: activeSelection?.effort ?? null,
+                    backend_type: backendType,
                   },
                   {
                     onError: () => setSubmission(null),
@@ -125,6 +153,8 @@ export function AgentsHome() {
               repos={reposQuery.data?.repositories}
               selectedRepo={repo}
               onRepoChange={setRepoOverride}
+              backendType={backendType}
+              onBackendTypeChange={handleBackendTypeChange}
             />
             {createError ? (
               <p className="mt-3 w-full border-l-2 border-[var(--ui-danger)] bg-[var(--ui-panel)] px-3 py-2 text-sm text-[color:var(--ui-danger)]">
@@ -134,6 +164,28 @@ export function AgentsHome() {
           </div>
         )}
       </main>
+      <ConfirmDialog
+        open={sandboxWarning}
+        title="沙箱未开启"
+        description="您未开启沙盒配置，请开启后再尝试"
+        confirmText="知道了"
+        showCancel={false}
+        onOpenChange={(open) => {
+          if (!open) setSandboxWarning(false)
+        }}
+        onConfirm={() => setSandboxWarning(false)}
+      />
+      <ConfirmDialog
+        open={repoWarning}
+        title="未选择仓库"
+        description="请先选择一个代码仓库后再发送消息"
+        confirmText="知道了"
+        showCancel={false}
+        onOpenChange={(open) => {
+          if (!open) setRepoWarning(false)
+        }}
+        onConfirm={() => setRepoWarning(false)}
+      />
     </div>
   )
 }

@@ -73,7 +73,6 @@ def make_main_model(model_id: str | None = None) -> BaseChatModel:
         base_url=require_env("DEEPSEEK_BASE_URL"),
         max_tokens=DEEPSEEK_V4_MAX_TOKENS,
         streaming=True,
-        extra_body={"thinking": {"type": "disabled"}},
     )
 
 

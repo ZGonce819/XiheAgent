@@ -21,29 +21,41 @@ from deepagents.backends.sandbox import BaseSandbox
 logger = logging.getLogger(__name__)
 
 
-def create_backend(*, thread_id: str | None = None) -> BaseSandbox:
-    """根据 ``USE_SANDBOX`` 配置创建对应的 Backend 实例。
+def create_backend(*, thread_id: str | None = None, backend_type: str | None = None) -> BaseSandbox:
+    """根据配置创建对应的 Backend 实例。
 
-    开启沙盒时返回 ``OpenSandboxBackend``（远程容器隔离），
+    优先使用调用方显式传入的 ``backend_type``（来自前端用户选择），
+    未传入时回退到全局 ``USE_SANDBOX`` 配置。
+
+    开启沙箱时返回 ``OpenSandboxBackend``（远程容器隔离），
     否则返回 ``LocalShellBackend``（本地受控执行层）。
 
     Args:
-        thread_id: 可选的会话 ID，沙盒模式下用于复用和注册。
+        thread_id: 可选的会话 ID，沙箱模式下用于复用和注册。
+        backend_type: 可选的运行环境类型，``"local"`` 或 ``"sandbox"``。
+            为 ``None`` 时根据全局 ``USE_SANDBOX`` 配置决定。
 
     Returns:
         符合 DeepAgents ``BaseSandbox`` 协议的 backend 实例。
     """
     from config.app_config import get_settings
 
-    if get_settings().use_sandbox:
+    # 优先使用前端传入的 backend_type，否则回退到全局配置
+    if backend_type is None:
+        use_sandbox = get_settings().use_sandbox
+    else:
+        use_sandbox = backend_type == "sandbox"
+
+    if use_sandbox:
         try:
             from backends.opensandbox import create_opensandbox_backend
 
-            logger.info("USE_SANDBOX=true，使用 OpenSandbox 远程沙盒")
+            logger.info("backend_type=sandbox，使用 OpenSandbox 远程沙盒")
             return create_opensandbox_backend(thread_id=thread_id)
         except Exception:
             logger.exception("OpenSandbox 创建失败，回退到 LocalShellBackend")
 
     from backends.local_shell import get_local_shell_backend
 
+    logger.info("backend_type=local，使用 LocalShellBackend")
     return get_local_shell_backend()

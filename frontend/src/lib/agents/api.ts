@@ -9,6 +9,7 @@ export interface ThreadCreateRequest {
   repo_explicitly_none?: boolean
   model_id?: string | null
   effort?: string | null
+  backend_type?: string | null
 }
 
 export interface ThreadMessageRequest {
@@ -17,6 +18,7 @@ export interface ThreadMessageRequest {
   repo?: string | null
   model_id?: string | null
   effort?: string | null
+  backend_type?: string | null
   edit_message_id?: string | null
   edit_message_content?: string | null
   edit_snapshot?: Array<Message>
@@ -129,6 +131,7 @@ export const agentsApi = {
         images: body.images,
         model_id: body.model_id,
         effort: body.effort,
+        backend_type: body.backend_type,
       }),
     }).then((res) => {
       if (!res.ok) throw new Error(res.statusText)

@@ -63,6 +63,7 @@ def initialize_task_record(
     prompt: str,
     thread_id: str | None = None,
     record_user_message: bool = True,
+    backend_type: str | None = None,
 ) -> str:
     """先创建 dashboard 可见的 thread 记录。
 
@@ -75,8 +76,9 @@ def initialize_task_record(
 
     thread_id = thread_id or str(uuid.uuid4())
     repo = parse_repo_url(repo_url)
-    from config.app_config import get_settings
-    backend_type = "sandbox" if get_settings().use_sandbox else "local"
+    if backend_type is None:
+        from config.app_config import get_settings
+        backend_type = "sandbox" if get_settings().use_sandbox else "local"
     get_store().upsert_thread(
         thread_id=thread_id,
         title=prompt[:80] or f"{repo.owner}/{repo.repo}",
@@ -100,6 +102,7 @@ def run_agent_task(
     run_id: str | None = None,
     checkpoint_id: str | None = None,
     model_id: str | None = None,
+    backend_type: str | None = None,
 ) -> dict[str, Any]:
     """运行一次普通 Agent 任务的总入口。
 
@@ -161,6 +164,7 @@ def run_agent_task(
                 run_id=run_id,
                 checkpoint_id=checkpoint_id,
                 model_id=model_id,
+                backend_type=backend_type,
             )
     if existing_thread and approved_plan_text is None and is_approval_prompt(prompt):
         logger.warning("用户确认实施但未找到待确认方案：thread_id=%s", thread_id)
@@ -172,7 +176,7 @@ def run_agent_task(
         task_kind = "coding"
 
     if task_kind == "coding" and approved_plan_text is None:
-        return run_plan_response_task(repo_url=repo_url, prompt=prompt, thread_id=thread_id, event_sink=event_sink, run_id=run_id, checkpoint_id=checkpoint_id, model_id=model_id)
+        return run_plan_response_task(repo_url=repo_url, prompt=prompt, thread_id=thread_id, event_sink=event_sink, run_id=run_id, checkpoint_id=checkpoint_id, model_id=model_id, backend_type=backend_type)
 
     store.clear_run_events(thread_id)
     if approved_plan_text is not None:
@@ -183,8 +187,9 @@ def run_agent_task(
     repo = parse_repo_url(repo_url)
     logger.info("仓库解析成功：owner=%s repo=%s", repo.owner, repo.repo)
     record_event(thread_id, "repo", "解析仓库", status="completed")
-    from config.app_config import get_settings
-    backend_type = "sandbox" if get_settings().use_sandbox else "local"
+    if backend_type is None:
+        from config.app_config import get_settings
+        backend_type = "sandbox" if get_settings().use_sandbox else "local"
     store.upsert_thread(
         thread_id=thread_id,
         title=coding_prompt[:80] or f"{repo.owner}/{repo.repo}",
@@ -202,7 +207,7 @@ def run_agent_task(
     store.record_run(run_id=run_id, thread_id=thread_id, status="running", base_commit=base_commit)
     logger.info("业务 Store 已记录运行：thread_id=%s run_id=%s", thread_id, run_id)
     record_event(thread_id, "agent", "构建 Agent 运行图", status="in_progress")
-    agent = build_agent_for_runtime(thread_id=thread_id, task_kind=task_kind, repo_url=repo.clone_url, model_id=model_id)
+    agent = build_agent_for_runtime(thread_id=thread_id, task_kind=task_kind, repo_url=repo.clone_url, model_id=model_id, backend_type=backend_type)
     logger.info("Agent 图已构建：thread_id=%s", thread_id)
     record_event(thread_id, "agent", "构建 Agent 运行图", status="completed")
     try:
