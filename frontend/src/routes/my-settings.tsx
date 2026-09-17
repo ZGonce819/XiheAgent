@@ -1,4 +1,4 @@
-﻿import { Navigate, createFileRoute, useNavigate } from "@tanstack/react-router"
+import { Navigate, createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { IoLogoSlack } from "react-icons/io5"
@@ -65,7 +65,7 @@ function UserMappingSection({ session }: { session: SessionUser }) {
     >
       <div className="divide-y divide-border">
         <SettingsRow
-          label="控制台账号"
+          label="当前账号"
           control={
             <span className="text-xs text-muted-foreground">
               {session.login}
@@ -219,7 +219,7 @@ function MySettingsPage() {
       <SettingsSection title="账号">
         <SettingsRow
           label="退出登录"
-          description="结束当前控制台会话。"
+          description="结束当前会话。"
           control={
             <Button
               size="sm"

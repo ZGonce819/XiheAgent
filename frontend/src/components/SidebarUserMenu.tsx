@@ -119,7 +119,7 @@ export function SidebarUserMenu({ user, showSettingsLink = false }: SidebarUserM
               className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs/relaxed hover:bg-muted"
             >
               <IoSettingsOutline className="size-3.5" />
-              控制台设置
+              设置
             </Link>
           )}
           <button

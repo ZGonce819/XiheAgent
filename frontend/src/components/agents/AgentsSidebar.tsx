@@ -1,14 +1,12 @@
 import { Link } from "@tanstack/react-router"
 import {
   CalendarBlankIcon,
-  ChartLineUpIcon,
   ChatCircleIcon,
   GitBranchIcon,
-  LightningIcon,
   PlusIcon,
   XIcon,
 } from "@phosphor-icons/react"
-import { IoLogoGithub, IoLogoSlack } from "react-icons/io5"
+import { IoLogoGithub, IoLogoSlack, IoSettingsOutline } from "react-icons/io5"
 import { SiLinear } from "react-icons/si"
 import { useState, type ComponentType, type SVGProps } from "react"
 
@@ -29,7 +27,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 type SourceIcon = ComponentType<SVGProps<SVGSVGElement>>
 
 const SOURCE_META: Record<AgentSource, { icon: SourceIcon; label: string }> = {
-  dashboard: { icon: ChatCircleIcon, label: "从控制台启动" },
+  dashboard: { icon: ChatCircleIcon, label: "从对话启动" },
   gitee: { icon: GitBranchIcon, label: "从 Gitee 触发" },
   github: { icon: IoLogoGithub, label: "从 GitHub 触发" },
   slack: { icon: IoLogoSlack, label: "从 Slack 触发" },
@@ -43,8 +41,7 @@ interface AgentsSidebarProps {
 }
 
 const NAV = [
-  { to: "/agents/automations", label: "自动任务", icon: LightningIcon },
-  { to: "/my-settings", label: "控制台", icon: ChartLineUpIcon },
+  { to: "/my-settings", label: "设置", icon: IoSettingsOutline },
 ] as const
 
 export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
