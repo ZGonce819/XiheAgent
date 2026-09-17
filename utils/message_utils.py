@@ -50,7 +50,7 @@ def extract_final_assistant_text(messages: list[dict[str, Any]]) -> str:
 
     for message in reversed(messages):
         message_type = str(message.get("type") or "").lower()
-        if message_type not in {"ai", "assistant"}:
+        if message_type not in {"ai", "assistant", "aimessage", "chatgeneration"}:
             continue
         text = message_content_to_text(message.get("content"))
         if text:

@@ -1,4 +1,5 @@
-import { CaretDownIcon, FolderIcon } from "@phosphor-icons/react"
+import { CaretDownIcon } from "@phosphor-icons/react"
+import { GitBranch } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { detectRepoProvider, normalizeRepoFullName, type RepoProvider } from "@/lib/repo"
@@ -135,7 +136,7 @@ export function RepoSelector({
           triggerClassName
         )}
       >
-        <FolderIcon className="size-3.5 shrink-0" />
+        <GitBranch className="size-3.5 shrink-0" />
         <span className="flex-1 truncate text-left">
           {selectedRepo || placeholder}
         </span>

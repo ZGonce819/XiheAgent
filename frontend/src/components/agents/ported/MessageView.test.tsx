@@ -90,6 +90,18 @@ describe("task execution and answer boundaries", () => {
     expect(screen.getByText("模型正文")).toBeTruthy();
   });
 
+  it("shows waiting for confirmation for a paused run even when all recorded tools completed", () => {
+    render(<MessageView messages={messages} isStreaming={false} runStatus="interrupted" />);
+    expect(screen.getByRole("button", { name: "等待确认后继续" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /任务已停止|任务完成/ })).toBeNull();
+  });
+
+  it("uses the actual failure state instead of guessing completion from successful tools", () => {
+    render(<MessageView messages={messages} isStreaming={false} runStatus="error" />);
+    expect(screen.getByRole("button", { name: "任务失败" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /任务完成/ })).toBeNull();
+  });
+
   it("shows a loading ring around the latest-position button while output is streaming", () => {
     const { container } = render(<MessageView messages={messages} isStreaming />);
     const scroller = container.querySelector(".h-full.overflow-y-auto") as HTMLDivElement;
@@ -212,6 +224,33 @@ describe("history and stream completion", () => {
 
   it("leaves statuses untouched without assistant stream events", () => {
     expect(normalizeThreadHistory(history([])).messages).toEqual(messages);
+  });
+
+  it("restores tool-only activity for a paused run and keeps checkpoint answer text", () => {
+    const restored = normalizeThreadHistory(history([
+      event("run:tool:a", { tool: "read" }),
+      event("run:tool:b", { tool: "search" }),
+    ]));
+    const tools = restored.messages.flatMap((message) => message.chunks)
+      .filter((chunk) => chunk.kind === "tool-execution");
+    expect(tools.map((chunk) => chunk.toolCallId)).toEqual(["run:tool:a", "run:tool:b"]);
+    expect(restored.messages.some((message) => message.chunks.some(
+      (chunk) => chunk.kind === "text" && chunk.text === "请确认目标仓库。",
+    ))).toBe(true);
+    expect(normalizeThreadHistory(restored).messages).toEqual(restored.messages);
+  });
+
+  it("keeps approval pending after thread_done and done, including its tool records", () => {
+    const client = new QueryClient();
+    const approval = { id: "approval", actions: [{ command: "test-only" }] };
+    client.setQueryData(["threads", "thread"], { ...history([]), messages: [user], status: "running" });
+    handleStreamPart("thread", { event: "approval_required", data: approval }, client);
+    handleStreamPart("thread", { event: "thread_done", data: { status: "interrupted" } }, client);
+    handleStreamPart("thread", { event: "done", data: {} }, client);
+    const paused = client.getQueryData<AgentThread>(["threads", "thread"])!;
+    expect(paused.status).toBe("interrupted");
+    expect(paused.pendingApproval).toEqual(approval);
+    client.clear();
   });
 
   it("preserves pending TODO on the real done event", () => {

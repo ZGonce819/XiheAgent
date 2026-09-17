@@ -125,6 +125,7 @@ export function useCreateAgentThread() {
       model_id?: string | null
       effort?: string | null
       backend_type?: string | null
+      project_name?: string | null
     }) => {
       const response = await agentsApi.createThread(body)
       if (!response.body) return null
@@ -177,6 +178,7 @@ export function useCreateAgentThread() {
                     model: body.model_id ?? "",
                     effort: body.effort ?? null,
                     status: "running",
+                    projectName: body.project_name ?? null,
                     createdAt: now,
                     updatedAt: now,
                     messages: [],
@@ -210,8 +212,12 @@ export function useCreateAgentThread() {
       }
 
       if (capturedThreadId) {
+        // Preserve the stream we just consumed: checkpoint history can lag
+        // behind it, especially when the graph pauses for command approval.
         const completedThread = normalizeThreadHistory(
-          await agentsApi.getThread(capturedThreadId)
+          queryClient.getQueryData<AgentThread>(
+            agentThreadKeys.detail(capturedThreadId)
+          ) ?? await agentsApi.getThread(capturedThreadId)
         )
         await agentsApi.saveViewSnapshot(
           capturedThreadId,
@@ -243,6 +249,7 @@ export interface SendAgentMessageVariables {
   model_id?: string | null
   effort?: string | null
   backend_type?: string | null
+  project_name?: string | null
   edit_message_id?: string | null
   edit_message_content?: string | null
   edit_snapshot?: Array<Message>
@@ -278,6 +285,7 @@ export function useSendAgentMessage(threadId: string) {
         model_id: vars.model_id,
         effort: vars.effort,
         backend_type: vars.backend_type,
+        project_name: vars.project_name ?? cached?.projectName ?? null,
         edit_message_id: vars.edit_message_id,
         edit_message_content: vars.edit_message_content,
         edit_snapshot: vars.edit_snapshot,
@@ -325,6 +333,17 @@ export function useDecideCommandApproval(threadId: string) {
   const queryClient = useQueryClient()
 
   return useMutation({
+    onMutate: async () => {
+      const key = agentThreadKeys.detail(threadId)
+      const previousThread = queryClient.getQueryData<AgentThread>(key)
+      queryClient.setQueryData<AgentThread>(key, (thread) =>
+        thread
+          ? { ...thread, status: "running", pendingApproval: null }
+          : thread
+      )
+      await queryClient.cancelQueries({ queryKey: key })
+      return { previousThread }
+    },
     mutationFn: async ({
       approvalId,
       decision,
@@ -332,10 +351,6 @@ export function useDecideCommandApproval(threadId: string) {
       approvalId: string
       decision: "approve" | "reject"
     }) => {
-      queryClient.setQueryData<AgentThread>(
-        agentThreadKeys.detail(threadId),
-        (thread) => (thread ? { ...thread, status: "running" } : thread)
-      )
       const response = await agentsApi.decideApproval(
         threadId,
         approvalId,
@@ -343,10 +358,20 @@ export function useDecideCommandApproval(threadId: string) {
       )
       await processStreamResponse(response, queryClient)
       const refreshed = normalizeThreadHistory(
-        await agentsApi.getThread(threadId)
+        queryClient.getQueryData<AgentThread>(agentThreadKeys.detail(threadId))
+          ?? await agentsApi.getThread(threadId)
       )
+      await agentsApi.saveViewSnapshot(threadId, refreshed.messages)
       queryClient.setQueryData(agentThreadKeys.detail(threadId), refreshed)
       return refreshed
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previousThread) {
+        queryClient.setQueryData(
+          agentThreadKeys.detail(threadId),
+          context.previousThread
+        )
+      }
     },
     onSettled: () => invalidateThreadList(queryClient),
   })

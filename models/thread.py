@@ -38,6 +38,7 @@ class Thread:
     branch_name: str | None = None
     pr_url: str | None = None
     latest_run_status: str = "pending"
+    project_name: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -63,6 +64,7 @@ class Thread:
             branch_name=row.get("branch_name"),
             pr_url=row.get("pr_url"),
             latest_run_status=row.get("latest_run_status", "pending"),
+            project_name=row.get("project_name"),
             created_at=_to_iso(row.get("created_at")),
             updated_at=_to_iso(row.get("updated_at")),
         )
@@ -84,6 +86,7 @@ class Thread:
             "branch_name": self.branch_name,
             "pr_url": self.pr_url,
             "latest_run_status": self.latest_run_status,
+            "project_name": self.project_name,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }

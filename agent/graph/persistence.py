@@ -17,10 +17,10 @@ import logging
 from typing import Any
 
 import psycopg
-from langgraph.checkpoint.redis import RedisSaver
 from langgraph.store.postgres import PostgresStore
 import redis as _redis
 
+from agent.graph.redis_checkpointer import ReliableRedisSaver
 from config.app_config import Settings, get_settings
 from database.postgres import build_pg_dsn
 from database.redis import build_redis_url
@@ -86,7 +86,7 @@ def make_checkpointer(settings: Settings | None = None) -> Any:
         settings = get_settings()
     url = build_redis_url(settings)
     logger.info("创建 Redis checkpointer：%s:%s/%s", settings.redis_host, settings.redis_port, settings.redis_checkpoint_db)
-    saver = RedisSaver(url)
+    saver = ReliableRedisSaver(url)
     saver.setup()
     return saver
 

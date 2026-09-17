@@ -11,6 +11,7 @@ import { ShellCommand } from "./ShellCommand";
 import { ReplyCard } from "./ReplyCard";
 import { TodoList } from "./TodoList";
 import type {
+  AgentStatus,
   Chunk,
   Message,
   ToolExecutionChunk,
@@ -324,6 +325,7 @@ interface MessageViewProps extends ApprovalCallbacks {
   messages: Message[];
   threadId?: string;
   isStreaming: boolean;
+  runStatus?: AgentStatus;
   project?: Project | null;
   contentWidthClass?: string;
   /** Horizontal padding on centered content (scroll track stays edge-to-edge). */
@@ -613,6 +615,7 @@ function AgentMessageActions({ message, versionNavigation }: { message: Message;
 function ToolActivityGroup({
   message,
   isStreaming,
+  runStatus,
   runElapsedMs,
   showTodos = true,
   hasModelContent = false,
@@ -621,6 +624,7 @@ function ToolActivityGroup({
 }: {
   message: Message;
   isStreaming?: boolean;
+  runStatus?: AgentStatus;
   runElapsedMs?: number;
   showTodos?: boolean;
   hasModelContent?: boolean;
@@ -648,11 +652,17 @@ function ToolActivityGroup({
   const duration = elapsedMs > 0 ? formatElapsed(elapsedMs) : (isStreaming ? "" : "1s");
   const statusText = running
     ? "正在运行"
-    : errorCount > 0
-      ? `任务失败 · ${errorCount} 项失败`
-      : ((tools.length === 0 && hasModelContent) || (tools.length > 0 && completedCount === tools.length))
-        ? `任务完成 · 耗时 ${duration || "0s"}`
-        : "任务已停止";
+    : runStatus === "interrupted"
+      ? "等待确认后继续"
+      : runStatus === "error"
+        ? "任务失败"
+        : runStatus === "finished"
+          ? `任务完成 · 耗时 ${duration || "0s"}`
+          : errorCount > 0
+            ? `任务失败 · ${errorCount} 项失败`
+            : ((tools.length === 0 && hasModelContent) || (tools.length > 0 && completedCount === tools.length))
+              ? `任务完成 · 耗时 ${duration || "0s"}`
+              : "任务已停止";
 
   return (
     <div className="my-3 overflow-hidden border-b border-[var(--ui-border)]" data-task-execution>
@@ -696,6 +706,7 @@ function ToolActivityGroup({
 function AgentMessage({
   message,
   isStreaming,
+  runStatus,
   runElapsedMs,
   projectPath,
   versionNavigation,
@@ -703,6 +714,7 @@ function AgentMessage({
 }: {
   message: Message;
   isStreaming?: boolean;
+  runStatus?: AgentStatus;
   runElapsedMs?: number;
   projectPath?: string;
   versionNavigation?: VersionNavigation;
@@ -793,6 +805,7 @@ function AgentMessage({
         <ToolActivityGroup
           message={panelActivity}
           isStreaming={isStreaming}
+          runStatus={runStatus}
           runElapsedMs={runElapsedMs}
           showTodos={!isStreaming}
           hasModelContent={!hasTools && activity.chunks.some((chunk) => chunk.kind !== "todo")}
@@ -935,6 +948,7 @@ function AgentMessage({
 const MessageBubble = memo(function MessageBubble({
   message,
   isStreaming,
+  runStatus,
   runElapsedMs,
   projectPath,
   editable,
@@ -947,6 +961,7 @@ const MessageBubble = memo(function MessageBubble({
 }: {
   message: Message;
   isStreaming?: boolean;
+  runStatus?: AgentStatus;
   runElapsedMs?: number;
   projectPath?: string;
   editable?: boolean;
@@ -963,6 +978,7 @@ const MessageBubble = memo(function MessageBubble({
     <AgentMessage
       message={message}
       isStreaming={isStreaming}
+      runStatus={runStatus}
       runElapsedMs={runElapsedMs}
       projectPath={projectPath}
       versionNavigation={versionNavigation}
@@ -1033,6 +1049,7 @@ export const MessageView = memo(function MessageView({
   messages,
   threadId,
   isStreaming,
+  runStatus,
   project,
   contentWidthClass = "max-w-[42rem]",
   contentPaddingClass = "px-6",
@@ -1327,6 +1344,7 @@ export const MessageView = memo(function MessageView({
                   key={message.id}
                   message={message}
                   isStreaming={isStreaming && index > currentTurnStart}
+                  runStatus={index > currentTurnStart ? runStatus : undefined}
                   runElapsedMs={
                     index > currentTurnStart && (isStreaming || message.executionNarration)
                       ? (streamElapsedMs || completedConversationElapsedMs)

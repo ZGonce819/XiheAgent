@@ -147,7 +147,10 @@ def _make_structured_intent_model():
         绑定了 ``IntentClassification`` 结构化输出的 LangChain 模型实例。
     """
 
-    return make_intent_model().with_structured_output(IntentClassification, method="function_calling")
+    # DeepSeek Thinking 模式不支持带 tool_choice 的 function_calling。
+    # json_mode 同样能约束分类结果为 JSON，但不会触发 tool_choice，兼容
+    # Thinking 模式以及 OpenAI-compatible 网关。
+    return make_intent_model().with_structured_output(IntentClassification, method="json_mode")
 
 
 def _classify_by_keyword_backup(prompt: str) -> TaskKind:

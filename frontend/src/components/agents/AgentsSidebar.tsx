@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router"
 import {
   CalendarBlankIcon,
   ChatCircleIcon,
+  CaretDownIcon,
   GitBranchIcon,
   PlusIcon,
   WrenchIcon,
@@ -19,7 +20,6 @@ import {
   SidebarFrame,
   useSidebarLayout,
 } from "@/components/sidebar-layout"
-import { groupThreads } from "@/lib/agents/api"
 import { useAgentThreads, useDeleteAgentThread } from "@/lib/agents/queries"
 import { cn } from "@/lib/utils"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
@@ -48,8 +48,40 @@ const NAV = [
 export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
   const threadsQuery = useAgentThreads()
   const threads = threadsQuery.data ?? []
-  const groups = groupThreads(threads)
   const layout = useSidebarLayout()
+
+  // 按项目名分组，无项目的对话直接显示在顶层
+  const { projectGroups, ungroupedThreads } = useMemo(() => {
+    const sorted = [...threads].sort((a, b) => b.updatedAt - a.updatedAt)
+    const projectMap = new Map<string, Array<AgentThread>>()
+    const ungrouped: Array<AgentThread> = []
+
+    for (const thread of sorted) {
+      const projectName = thread.projectName?.trim()
+      if (projectName) {
+        if (!projectMap.has(projectName)) {
+          projectMap.set(projectName, [])
+        }
+        projectMap.get(projectName)!.push(thread)
+      } else {
+        ungrouped.push(thread)
+      }
+    }
+
+    // 按最近活跃时间排序项目合集（每个合集内第一条对话的 updatedAt 最新）
+    const sortedProjects = Array.from(projectMap.entries()).sort((a, b) => {
+      const aLatest = a[1][0]?.updatedAt ?? 0
+      const bLatest = b[1][0]?.updatedAt ?? 0
+      return bLatest - aLatest
+    })
+
+    return {
+      projectGroups: sortedProjects,
+      ungroupedThreads: ungrouped,
+    }
+  }, [threads])
+
+  const hasAnyContent = projectGroups.length > 0 || ungroupedThreads.length > 0
 
   return (
     <SidebarFrame
@@ -100,17 +132,50 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
       </nav>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-        <ProjectSection
-          threads={threads}
-          activeThreadId={activeThreadId}
-          onNavigate={layout.closeOnMobile}
-        />
-        <ThreadGroup
-          label="最近"
-          threads={groups.last30}
-          activeThreadId={activeThreadId}
-          onNavigate={layout.closeOnMobile}
-        />
+        {/* 最近对话 */}
+        {ungroupedThreads.length > 0 && (
+          <div className="px-2 py-1 text-[0.625rem] font-semibold tracking-wide text-[var(--ui-text-dim)] uppercase">
+            最近
+          </div>
+        )}
+        {ungroupedThreads.map((thread) => (
+          <ThreadRow
+            key={thread.id}
+            thread={thread}
+            isActive={thread.id === activeThreadId}
+            onNavigate={layout.closeOnMobile}
+          />
+        ))}
+
+        {/* 项目合集 */}
+        {projectGroups.length > 0 && (
+          <div className="px-2 py-1 text-[0.625rem] font-semibold tracking-wide text-[var(--ui-text-dim)] uppercase">
+            项目
+          </div>
+        )}
+        {projectGroups.map(([projectName, projectThreads]) => (
+          <ProjectGroup
+            key={projectName}
+            projectName={projectName}
+            threads={projectThreads}
+            activeThreadId={activeThreadId}
+            onNavigate={layout.closeOnMobile}
+          />
+        ))}
+
+        {/* 空状态 */}
+        {!hasAnyContent && (
+          <div className="mb-3">
+            <Link
+              to="/agents"
+              onClick={layout.closeOnMobile}
+              className="mx-2 flex items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-[var(--ui-border)] px-3 py-3 text-xs text-[var(--ui-text-dim)] transition-colors hover:border-[var(--ui-accent)] hover:text-[var(--ui-accent)]"
+            >
+              <PlusIcon className="size-3.5" />
+              新任务
+            </Link>
+          </div>
+        )}
       </div>
 
       <div className="p-2">
@@ -120,25 +185,29 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
   )
 }
 
-function ThreadGroup({
-  label,
+const MAX_VISIBLE_PER_PROJECT = 5
+
+function ProjectGroup({
+  projectName,
   threads,
   activeThreadId,
   onNavigate,
 }: {
-  label: string
+  projectName: string
   threads: Array<AgentThread>
   activeThreadId?: string
   onNavigate?: () => void
 }) {
-  if (threads.length === 0) return null
+  const [expanded, setExpanded] = useState(false)
+  const hasMore = threads.length > MAX_VISIBLE_PER_PROJECT
+  const visibleThreads = expanded || !hasMore ? threads : threads.slice(0, MAX_VISIBLE_PER_PROJECT)
 
   return (
     <div className="mb-3">
       <div className="px-2 py-1 text-[0.625rem] font-semibold tracking-wide text-[var(--ui-text-dim)] uppercase">
-        {label}
+        {projectName}
       </div>
-      {threads.map((thread) => (
+      {visibleThreads.map((thread) => (
         <ThreadRow
           key={thread.id}
           thread={thread}
@@ -146,72 +215,21 @@ function ThreadGroup({
           onNavigate={onNavigate}
         />
       ))}
-    </div>
-  )
-}
-
-function ProjectSection({
-  threads,
-  activeThreadId,
-  onNavigate,
-}: {
-  threads: Array<AgentThread>
-  activeThreadId?: string
-  onNavigate?: () => void
-}) {
-  // 按 repoFullName 分组
-  const projectMap = useMemo(() => {
-    const map = new Map<string, Array<AgentThread>>()
-    for (const thread of threads) {
-      const repo = thread.repoFullName || thread.repo || ""
-      if (!repo) continue
-      const displayRepo = getDisplayRepo(repo)
-      if (!map.has(displayRepo)) {
-        map.set(displayRepo, [])
-      }
-      map.get(displayRepo)!.push(thread)
-    }
-    return map
-  }, [threads])
-
-  if (projectMap.size === 0) {
-    return (
-      <div className="mb-3">
-        <div className="px-2 py-1 text-[0.625rem] font-semibold tracking-wide text-[var(--ui-text-dim)] uppercase">
-          项目
-        </div>
-        <Link
-          to="/agents"
-          onClick={onNavigate}
-          className="mx-2 flex items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-[var(--ui-border)] px-3 py-3 text-xs text-[var(--ui-text-dim)] transition-colors hover:border-[var(--ui-accent)] hover:text-[var(--ui-accent)]"
+      {hasMore && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="mx-2 mt-0.5 flex w-[calc(100%-1rem)] items-center justify-center gap-1 rounded-md px-2 py-1 text-[0.6875rem] text-[var(--ui-text-dim)] transition-colors hover:bg-[var(--ui-sidebar-hover)] hover:text-[var(--ui-text-muted)]"
         >
-          <PlusIcon className="size-3.5" />
-          新任务
-        </Link>
-      </div>
-    )
-  }
-
-  return (
-    <div className="mb-3">
-      <div className="px-2 py-1 text-[0.625rem] font-semibold tracking-wide text-[var(--ui-text-dim)] uppercase">
-        项目
-      </div>
-      {Array.from(projectMap.entries()).map(([repoName, repoThreads]) => (
-        <div key={repoName} className="mb-2">
-          <div className="px-2 py-0.5 text-[0.6875rem] font-medium text-[var(--ui-text-muted)]">
-            {repoName}
-          </div>
-          {repoThreads.map((thread) => (
-            <ThreadRow
-              key={thread.id}
-              thread={thread}
-              isActive={thread.id === activeThreadId}
-              onNavigate={onNavigate}
-            />
-          ))}
-        </div>
-      ))}
+          <CaretDownIcon
+            className={cn(
+              "size-3 transition-transform duration-200",
+              expanded && "rotate-180"
+            )}
+          />
+          {expanded ? "收起" : `查看更多 (${threads.length - MAX_VISIBLE_PER_PROJECT})`}
+        </button>
+      )}
     </div>
   )
 }

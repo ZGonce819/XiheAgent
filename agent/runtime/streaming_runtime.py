@@ -558,6 +558,14 @@ def _message_dict(message: Any) -> dict[str, Any]:
 
     if isinstance(message, BaseMessage):
         return {"type": message.type, "content": message.content}
+    if isinstance(message, dict):
+        # 部分 LangGraph/兼容模型返回已经序列化的消息字典。
+        # 保留 type/role/content，避免后续正文提取把整个 dict 当成字符串。
+        return {
+            "type": message.get("type") or message.get("role") or "",
+            "role": message.get("role"),
+            "content": message.get("content") or message.get("text") or "",
+        }
     return {"type": type(message).__name__, "content": str(message)}
 
 
@@ -690,7 +698,7 @@ def _consume_raw_event_stream(
     run_id: str,
     task_kind: str | None = None,
     event_sink: StreamEventSink | None = None,
-) -> tuple[int, int]:
+) -> tuple[int, int, bool]:
     """按官网 raw protocol event 消费 DeepAgents 输出。
 
     这个函数解决"技术方案正文只能最终一次性展示"的问题：
@@ -718,6 +726,7 @@ def _consume_raw_event_stream(
     assistant_message_index = 0
     current_assistant_index = 0
     current_assistant_text = ""
+    saw_assistant_text = False
     last_flushed_length = 0
     write_todo_args_by_call: dict[str, str] = {}
     write_todo_last_payload_by_call: dict[str, str] = {}
@@ -765,6 +774,7 @@ def _consume_raw_event_stream(
                 current_assistant_text = ""
                 last_flushed_length = 0
             current_assistant_text += delta
+            saw_assistant_text = True
             if _should_flush_stream_text(
                 accumulated_text=current_assistant_text,
                 last_flushed_length=last_flushed_length,
@@ -866,7 +876,7 @@ def _consume_raw_event_stream(
             current_assistant_text,
             event_sink=event_sink,
         )
-    return tool_call_index if saw_write_todos else 0, subagent_index
+    return tool_call_index if saw_write_todos else 0, subagent_index, saw_assistant_text
 
 
 def run_agent_with_event_stream(
@@ -923,7 +933,7 @@ def run_agent_with_event_stream(
     # raw protocol events 是当前版本里唯一能拿到 token/chunk 的通道。
     # 这里同时解析 text-delta 和 write_todos 的 tool_call_chunk，保证正文和任务计划都能流式更新。
     try:
-        tool_call_index, subagent_index = _consume_raw_event_stream(
+        tool_call_index, subagent_index, saw_assistant_text = _consume_raw_event_stream(
             stream=stream,
             thread_id=thread_id,
             run_id=run_id,
@@ -942,19 +952,42 @@ def run_agent_with_event_stream(
         record_event(thread_id, "model", "调用大模型", kind="other", status="error", detail=str(exc))
         raise
 
-    snapshot = agent.get_state(run_config)
-    interrupts = list(getattr(snapshot, "interrupts", ()) or ())
-    output = getattr(snapshot, "values", None) or stream.output
+    # The exhausted stream describes this run, including approval interrupts.
+    # A checkpoint read can omit pending writes or select the parent checkpoint
+    # during an edited turn, so it must not override the live result.
+    output = stream.output
+    interrupts = list(_safe_attr(stream, "interrupts", ()) or ())
+    if output is None:
+        snapshot = agent.get_state(run_config)
+        output = getattr(snapshot, "values", None)
+        if not interrupts:
+            interrupts = list(getattr(snapshot, "interrupts", ()) or ())
     if interrupts:
-        approval = getattr(interrupts[0], "value", None)
+        approval = _safe_field(interrupts[0], "value")
         record_event(thread_id, "model", "等待人工审批", kind="other", status="pending")
         return {
             "messages": _messages_from_output(output),
             "raw_output": output,
             "interrupted": True,
-            "interrupt_id": getattr(interrupts[0], "id", ""),
+            "interrupt_id": _safe_field(interrupts[0], "id", ""),
             "approval": approval if isinstance(approval, dict) else {},
         }
+    final_messages = _messages_from_output(output)
+    # 某些 DeepSeek/LangGraph 版本只在最终 output 中提供 assistant 文本，
+    # 不发送 messages/content-block-delta 事件。把最终回复补写进统一事件流，
+    # 这样刷新页面和 SSE 实时页面都能看到正文。
+    if not interrupts and not saw_assistant_text:
+        from utils.message_utils import extract_final_assistant_text
+
+        final_text = extract_final_assistant_text(final_messages)
+        if final_text:
+            _record_assistant_stream_message(
+                thread_id,
+                run_id,
+                1,
+                final_text,
+                event_sink=event_sink,
+            )
     record_event(thread_id, "model", "调用大模型", kind="other", status="completed")
     logger.info(
         "官方事件流消费完成：thread_id=%s tool_calls=%s subagents=%s",
@@ -962,4 +995,4 @@ def run_agent_with_event_stream(
         tool_call_index,
         subagent_index,
     )
-    return {"messages": _messages_from_output(output), "raw_output": output}
+    return {"messages": final_messages, "raw_output": output}

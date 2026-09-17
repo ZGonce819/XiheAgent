@@ -148,13 +148,20 @@ def visible_checkpoint_messages(checkpoint: dict[str, Any] | None) -> list[dict[
     seen_hashes: set[str] = set()
 
     for index, message in enumerate(raw_messages):
-        msg_type = str(getattr(message, "type", "") or type(message).__name__).lower()
+        if isinstance(message, dict):
+            msg_type = str(message.get("type") or message.get("role") or "").lower()
+            raw_content = message.get("content") or message.get("text") or ""
+            message_id_value = message.get("id")
+        else:
+            msg_type = str(getattr(message, "type", "") or type(message).__name__).lower()
+            raw_content = getattr(message, "content", "")
+            message_id_value = getattr(message, "id", "")
 
         # 跳过工具消息和系统消息，前端不需要展示这些。
         if msg_type in {"tool", "system"}:
             continue
 
-        text = message_content_to_text(getattr(message, "content", ""))
+        text = message_content_to_text(raw_content)
         if msg_type in {"human", "user"}:
             text = _extract_visible_user_input(text)
         if not text:
@@ -169,7 +176,7 @@ def visible_checkpoint_messages(checkpoint: dict[str, Any] | None) -> list[dict[
                 continue
             seen_hashes.add(content_hash)
 
-        message_id = str(getattr(message, "id", "") or stable_history_message_id(text, index))
+        message_id = str(message_id_value or stable_history_message_id(text, index))
         result.append({
             "id": message_id,
             "role": role,

@@ -194,6 +194,7 @@ export interface AgentThread {
   source?: AgentSource
   status: AgentStatus
   backendType?: string
+  projectName?: string | null
   createdAt: number
   updatedAt: number
   messages: Array<Message>

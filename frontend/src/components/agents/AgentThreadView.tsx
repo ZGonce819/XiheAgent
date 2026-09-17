@@ -354,6 +354,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
       model_id: activeSelection?.modelId ?? null,
       effort: activeSelection?.effort ?? null,
       backend_type: backendType,
+      project_name: thread.projectName ?? null,
       edit_message_id: message.id,
       edit_message_content: messageText(message),
       edit_snapshot: displayMessages,
@@ -376,6 +377,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
       model_id: activeSelection?.modelId ?? null,
       effort: activeSelection?.effort ?? null,
       backend_type: backendType,
+      project_name: thread.projectName ?? null,
     });
   };
 
@@ -439,6 +441,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                 messages={visibleMessages}
                 threadId={thread.id}
                 isStreaming={isViewingCurrentVersion && isStreaming}
+                runStatus={isViewingCurrentVersion ? thread.status : undefined}
                 contentWidthClass="max-w-4xl"
                 completedElapsedMs={completedElapsedMs}
                 liveStatus={liveStatus}
@@ -483,7 +486,6 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                       open
                       command={thread.pendingApproval.actions.map((action) => action.command).join("\n")}
                       reason={thread.pendingApproval.actions.map((action) => action.description).filter(Boolean).join("；")}
-                      busy={decideApproval.isPending}
                       error={decideApproval.error instanceof Error ? decideApproval.error.message : null}
                       onApprove={() => decideApproval.mutate({ approvalId: thread.pendingApproval!.id, decision: "approve" })}
                       onReject={() => decideApproval.mutate({ approvalId: thread.pendingApproval!.id, decision: "reject" })}

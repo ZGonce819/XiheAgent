@@ -49,6 +49,7 @@ def run_plan_response_task(
     checkpoint_id: str | None = None,
     model_id: str | None = None,
     backend_type: str | None = None,
+    project_name: str | None = None,
 ) -> dict[str, Any]:
     """为编码需求生成技术方案，并把方案作为普通回答直接展示。
 
@@ -106,6 +107,7 @@ def run_plan_response_task(
         repo_name=repo.repo,
         latest_run_status="running",
         backend_type=backend_type,
+        project_name=project_name,
     )
     run_id = run_id or str(uuid.uuid4())
     store.record_run(run_id=run_id, thread_id=thread_id, status="running")

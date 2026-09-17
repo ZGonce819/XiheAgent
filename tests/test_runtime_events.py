@@ -5,7 +5,9 @@ from typing import Any
 
 from agent.runtime import events
 from agent.runtime.streaming_runtime import _text_delta_from_event
+from agent.runtime.streaming_runtime import _message_dict
 from services.thread_service import _messages_from_run_events
+from agent.graph.checkpoint_history import visible_checkpoint_messages
 
 
 class _EventStore:
@@ -93,3 +95,21 @@ def test_text_delta_supports_nested_block_delta() -> None:
     }
 
     assert _text_delta_from_event(event) == "继续输出正文"
+
+
+def test_checkpoint_history_keeps_serialized_short_assistant_reply() -> None:
+    messages = visible_checkpoint_messages({
+        "channel_values": {
+            "messages": [
+                {"type": "human", "content": "你好"},
+                {"type": "ai", "content": "你好！"},
+            ]
+        }
+    })
+    assert [item["content"] for item in messages] == ["你好", "你好！"]
+
+
+def test_message_dict_preserves_serialized_model_message() -> None:
+    assert _message_dict({"type": "ai", "content": "你好！"}) == {
+        "type": "ai", "role": None, "content": "你好！"
+    }

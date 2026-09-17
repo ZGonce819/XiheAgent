@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Fragment,
   useEffect,
+  useMemo,
   useState,
   type Dispatch,
   type SetStateAction,
@@ -35,7 +36,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { api } from "@/lib/api"
 import { useSession } from "@/lib/session"
-import { cn } from "@/lib/utils"
+import { cn, validatePath } from "@/lib/utils"
 
 export const Route = createFileRoute("/my-settings")({
   component: MySettingsPage,
@@ -965,18 +966,15 @@ function WorkspaceSection() {
   const [editing, setEditing] = useState(false)
   const [draftPath, setDraftPath] = useState("")
   const [picking, setPicking] = useState(false)
-  const [cDriveError, setCDriveError] = useState("")
 
   // 项目目录 / 技能目录编辑状态
   const [editingProjects, setEditingProjects] = useState(false)
   const [draftProjects, setDraftProjects] = useState("")
   const [pickingProjects, setPickingProjects] = useState(false)
-  const [cDriveErrorProjects, setCDriveErrorProjects] = useState("")
 
   const [editingSkills, setEditingSkills] = useState(false)
   const [draftSkills, setDraftSkills] = useState("")
   const [pickingSkills, setPickingSkills] = useState(false)
-  const [cDriveErrorSkills, setCDriveErrorSkills] = useState("")
 
   const update = useMutation({
     mutationFn: (body: {
@@ -992,22 +990,28 @@ function WorkspaceSection() {
     },
   })
 
-  const isCDrive = (p: string) => /^[cC]:[/\\]/.test(p)
+  // 实时路径验证（禁止 C 盘）
+  const pathValidation = useMemo(
+    () => (draftPath.trim() ? validatePath(draftPath, { forbiddenDrives: ["C"] }) : { valid: true, error: "", platform: "unknown" as const }),
+    [draftPath]
+  )
+  const projectsValidation = useMemo(
+    () => (draftProjects.trim() ? validatePath(draftProjects, { forbiddenDrives: ["C"] }) : { valid: true, error: "", platform: "unknown" as const }),
+    [draftProjects]
+  )
+  const skillsValidation = useMemo(
+    () => (draftSkills.trim() ? validatePath(draftSkills, { forbiddenDrives: ["C"] }) : { valid: true, error: "", platform: "unknown" as const }),
+    [draftSkills]
+  )
 
   const handlePickFolder = async (
     setDraft: (v: string) => void,
     setPickingState: (v: boolean) => void,
-    setCDriveErr: (v: string) => void,
-    errMsg: string
   ) => {
     setPickingState(true)
-    setCDriveErr("")
     try {
       const result = await api.pickFolder()
       if (result.path) {
-        if (isCDrive(result.path)) {
-          setCDriveErr(errMsg)
-        }
         setDraft(result.path)
       }
     } catch {
@@ -1078,28 +1082,18 @@ function WorkspaceSection() {
               <div className="flex items-center gap-2">
                 <Input
                   value={draftPath}
-                  onChange={(e) => {
-                    setDraftPath(e.target.value)
-                    setCDriveError("")
-                  }}
-                  placeholder="例如：E:\ai_workspace"
+                  onChange={(e) => setDraftPath(e.target.value)}
+                  placeholder="例如：E:\ai_workspace 或 /home/user/ai_workspace"
                   autoFocus
                   className={cn(
-                    cDriveError && "border-destructive focus-visible:ring-destructive/30"
+                    draftPath.trim() && !pathValidation.valid && "border-destructive focus-visible:ring-destructive/30"
                   )}
                 />
                 <Button
                   variant="outline"
                   size="sm"
                   disabled={picking}
-                  onClick={() =>
-                    handlePickFolder(
-                      setDraftPath,
-                      setPicking,
-                      setCDriveError,
-                      "不支持将 C 盘设为工作目录，请选择其他磁盘"
-                    )
-                  }
+                  onClick={() => handlePickFolder(setDraftPath, setPicking)}
                   className={cn(
                     "workspace-browse-btn h-9 shrink-0 gap-1.5 px-3",
                     picking && "workspace-browse-btn--picking"
@@ -1116,9 +1110,9 @@ function WorkspaceSection() {
                   {picking ? "选择中…" : "浏览"}
                 </Button>
               </div>
-              {cDriveError && (
+              {draftPath.trim() && !pathValidation.valid && (
                 <p className="workspace-cdrive-error animate-in text-xs text-destructive fade-in-0 slide-in-from-top-1 duration-150">
-                  {cDriveError}
+                  {pathValidation.error}
                 </p>
               )}
             </div>
@@ -1128,7 +1122,7 @@ function WorkspaceSection() {
                 disabled={
                   update.isPending ||
                   !draftPath.trim() ||
-                  isCDrive(draftPath.trim())
+                  !pathValidation.valid
                 }
                 onClick={() =>
                   update.mutate({ workspace_root: draftPath.trim() })
@@ -1183,29 +1177,19 @@ function WorkspaceSection() {
                 <div className="flex items-center gap-1.5">
                   <Input
                     value={draftProjects}
-                    onChange={(e) => {
-                      setDraftProjects(e.target.value)
-                      setCDriveErrorProjects("")
-                    }}
-                    placeholder="例如：E:\ai_workspace\projects"
+                    onChange={(e) => setDraftProjects(e.target.value)}
+                    placeholder="例如：E:\ai_workspace\projects 或 /home/user/projects"
                     autoFocus
                     className={cn(
                       "h-7 text-xs",
-                      cDriveErrorProjects && "border-destructive focus-visible:ring-destructive/30"
+                      draftProjects.trim() && !projectsValidation.valid && "border-destructive focus-visible:ring-destructive/30"
                     )}
                   />
                   <Button
                     variant="outline"
                     size="sm"
                     disabled={pickingProjects}
-                    onClick={() =>
-                      handlePickFolder(
-                        setDraftProjects,
-                        setPickingProjects,
-                        setCDriveErrorProjects,
-                        "不支持将 C 盘设为项目目录"
-                      )
-                    }
+                    onClick={() => handlePickFolder(setDraftProjects, setPickingProjects)}
                     className={cn(
                       "workspace-browse-btn h-7 shrink-0 gap-1 px-2 text-xs",
                       pickingProjects && "workspace-browse-btn--picking"
@@ -1221,9 +1205,9 @@ function WorkspaceSection() {
                     />
                   </Button>
                 </div>
-                {cDriveErrorProjects && (
+                {draftProjects.trim() && !projectsValidation.valid && (
                   <p className="workspace-cdrive-error animate-in text-[0.6875rem] text-destructive fade-in-0 duration-150">
-                    {cDriveErrorProjects}
+                    {projectsValidation.error}
                   </p>
                 )}
                 <div className="flex items-center gap-1.5">
@@ -1233,7 +1217,7 @@ function WorkspaceSection() {
                     disabled={
                       update.isPending ||
                       !draftProjects.trim() ||
-                      isCDrive(draftProjects.trim())
+                      !projectsValidation.valid
                     }
                     onClick={() =>
                       update.mutate({ projects_dir: draftProjects.trim() })
@@ -1288,29 +1272,19 @@ function WorkspaceSection() {
                 <div className="flex items-center gap-1.5">
                   <Input
                     value={draftSkills}
-                    onChange={(e) => {
-                      setDraftSkills(e.target.value)
-                      setCDriveErrorSkills("")
-                    }}
-                    placeholder="例如：E:\ai_workspace\skills"
+                    onChange={(e) => setDraftSkills(e.target.value)}
+                    placeholder="例如：E:\ai_workspace\skills 或 /home/user/skills"
                     autoFocus
                     className={cn(
                       "h-7 text-xs",
-                      cDriveErrorSkills && "border-destructive focus-visible:ring-destructive/30"
+                      draftSkills.trim() && !skillsValidation.valid && "border-destructive focus-visible:ring-destructive/30"
                     )}
                   />
                   <Button
                     variant="outline"
                     size="sm"
                     disabled={pickingSkills}
-                    onClick={() =>
-                      handlePickFolder(
-                        setDraftSkills,
-                        setPickingSkills,
-                        setCDriveErrorSkills,
-                        "不支持将 C 盘设为技能目录"
-                      )
-                    }
+                    onClick={() => handlePickFolder(setDraftSkills, setPickingSkills)}
                     className={cn(
                       "workspace-browse-btn h-7 shrink-0 gap-1 px-2 text-xs",
                       pickingSkills && "workspace-browse-btn--picking"
@@ -1326,9 +1300,9 @@ function WorkspaceSection() {
                     />
                   </Button>
                 </div>
-                {cDriveErrorSkills && (
+                {draftSkills.trim() && !skillsValidation.valid && (
                   <p className="workspace-cdrive-error animate-in text-[0.6875rem] text-destructive fade-in-0 duration-150">
-                    {cDriveErrorSkills}
+                    {skillsValidation.error}
                   </p>
                 )}
                 <div className="flex items-center gap-1.5">
@@ -1338,7 +1312,7 @@ function WorkspaceSection() {
                     disabled={
                       update.isPending ||
                       !draftSkills.trim() ||
-                      isCDrive(draftSkills.trim())
+                      !skillsValidation.valid
                     }
                     onClick={() =>
                       update.mutate({ skills_dir: draftSkills.trim() })

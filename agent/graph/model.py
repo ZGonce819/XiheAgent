@@ -113,5 +113,5 @@ def make_intent_model(model_id: str | None = None) -> BaseChatModel:
         temperature=0.0,
         api_key=require_env("DEEPSEEK_API_KEY"),
         base_url=require_env("DEEPSEEK_BASE_URL"),
-        max_tokens=INTENT_MODEL_MAX_TOKENS,
+        max_tokens=INTENT_MODEL_MAX_TOKENS
     )

@@ -403,7 +403,7 @@ async def dashboard_stream_new_message(body: DashboardThreadMessageRequest) -> S
     if requested_backend == "sandbox" and not get_settings().use_sandbox:
         raise HTTPException(status_code=400, detail="您未开启沙盒配置，请开启后再尝试")
     thread_id = str(uuid.uuid4())
-    return build_streaming_response(thread_id=thread_id, repo_url=repo_url, content=body.content, model_id=body.model_id, backend_type=requested_backend)
+    return build_streaming_response(thread_id=thread_id, repo_url=repo_url, content=body.content, model_id=body.model_id, backend_type=requested_backend, project_name=body.project_name)
 
 
 @dashboard_router.post("/threads/{thread_id}/stream-message")
@@ -466,6 +466,7 @@ async def dashboard_stream_existing_message(
             rollback_message_content=body.edit_message_content,
             model_id=body.model_id,
             backend_type=requested_backend,
+            project_name=body.project_name,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -651,3 +652,27 @@ def dashboard_pick_folder() -> dict[str, Any]:
         raise HTTPException(status_code=504, detail="文件夹选择超时")
 
     return result
+
+
+@dashboard_router.get("/workspace/projects")
+def dashboard_list_projects() -> dict[str, Any]:
+    """列出项目目录下的所有子目录作为项目。
+
+    Returns:
+        dict: 包含 ``projects`` 列表，每项有 ``name`` 和 ``path`` 字段。
+    """
+    settings = get_settings()
+    projects_dir = settings.projects_dir
+
+    if not projects_dir.exists():
+        return {"projects": [], "projects_dir": str(projects_dir)}
+
+    items: list[dict[str, str]] = []
+    for child in sorted(projects_dir.iterdir(), key=lambda p: p.name.lower()):
+        if child.is_dir() and not child.name.startswith("."):
+            items.append({
+                "name": child.name,
+                "path": str(child),
+            })
+
+    return {"projects": items, "projects_dir": str(projects_dir)}

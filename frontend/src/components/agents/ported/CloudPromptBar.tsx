@@ -24,6 +24,7 @@ import type { ImageChunk } from "@/lib/agents/types"
 import type { ModelSelection } from "@/lib/agents/useModelOptions"
 import type { RepoProvider } from "@/lib/repo"
 import { RepoSelector } from "@/components/agents/RepoSelector"
+import { ProjectSelector } from "@/components/agents/ProjectSelector"
 import { formatModelSelection } from "@/lib/agents/useModelOptions"
 import { cn } from "@/lib/utils"
 
@@ -59,6 +60,10 @@ export interface CloudPromptBarProps {
   backendType?: string
   /** Called when user switches between local and sandbox. */
   onBackendTypeChange?: (backendType: string) => void
+  /** Currently selected project name. */
+  selectedProject?: string | null
+  /** Called when user selects a different project. */
+  onProjectChange?: (project: string | null) => void
 }
 
 function fileToImageChunk(file: File): Promise<ImageChunk | null> {
@@ -105,6 +110,8 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
   onRepoChange,
   backendType = "local",
   onBackendTypeChange,
+  selectedProject,
+  onProjectChange,
 }: CloudPromptBarProps) {
   const navigate = useNavigate()
   const [value, setValue] = useState("")
@@ -258,7 +265,8 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
             onProviderChange={setRepoProvider}
           />
           {onBackendTypeChange && (
-            <div ref={backendDropdownRef} className="relative">
+            <>
+              <div ref={backendDropdownRef} className="relative">
               <button
                 type="button"
                 onClick={() => setBackendDropdownOpen((open) => !open)}
@@ -309,6 +317,12 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
                 </div>
               )}
             </div>
+              <ProjectSelector
+                selectedProject={selectedProject}
+                onProjectChange={onProjectChange}
+                backendType={backendType}
+              />
+            </>
           )}
         </div>
       )}

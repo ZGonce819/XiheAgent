@@ -42,6 +42,7 @@ from utils.redis_utils import (
     read_events,
 )
 from utils.thread_utils import user_visible_stream_text
+from utils.message_utils import extract_final_assistant_text
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,7 @@ def build_streaming_response(
     backend_type: str | None = None,
     approval_decision: str | None = None,
     approval_id: str | None = None,
+    project_name: str | None = None,
 ) -> StreamingResponse:
     """构造 POST SSE 流式响应。
 
@@ -111,7 +113,7 @@ def build_streaming_response(
                 raise RuntimeError("无法清理首轮 checkpoint，已拒绝回退") from exc
 
     if approval_decision is None:
-        initialize_task_record(repo_url=repo_url, prompt=content, thread_id=thread_id, backend_type=backend_type)
+        initialize_task_record(repo_url=repo_url, prompt=content, thread_id=thread_id, backend_type=backend_type, project_name=project_name)
     initial_task = get_task(thread_id)
     if initial_task is None:
         from fastapi import HTTPException
@@ -129,6 +131,7 @@ def build_streaming_response(
         loop = asyncio.get_running_loop()
         tool_group_index = 0
         active_tool_group_id: str | None = None
+        streamed_text = False
 
         def send_event(event: str, data: dict[str, Any]) -> None:
             """统一事件发送：Redis Stream 模式走 Redis，否则走 asyncio.Queue。"""
@@ -140,7 +143,7 @@ def build_streaming_response(
                 loop.call_soon_threadsafe(queue.put_nowait, (event, payload))
 
         def event_sink(event: str, data: dict[str, Any]) -> None:
-            nonlocal active_tool_group_id
+            nonlocal active_tool_group_id, streamed_text
             payload = dict(data)
             if event == "text_delta":
                 payload["content"] = user_visible_stream_text(
@@ -148,6 +151,7 @@ def build_streaming_response(
                 )
                 if not payload["content"].strip():
                     return
+                streamed_text = True
             if event in {"text_delta", "todo_delta"}:
                 active_tool_group_id = None
             send_event(event, payload)
@@ -233,6 +237,28 @@ def build_streaming_response(
                         decision=approval_decision,
                         approval_id=str(approval_id or ""),
                         event_sink=event_sink,
+                    )
+                # 某些 LangGraph/模型版本会正常返回最终消息，但不发出可解析的
+                # content-block-delta。此时前端没有正文和工具记录，会误显示“任务已停止”。
+                # 用最终 checkpoint 输出补发一次正文，且仅在流式正文完全缺失时执行，避免重复。
+                final_text = extract_final_assistant_text(result.get("messages", []))
+                if not streamed_text and final_text:
+                    event_sink(
+                            "message_start",
+                            {
+                                "message_id": f"{thread_id}-live-assistant-{run_id}-fallback",
+                                "author": "agent",
+                                "run_id": run_id,
+                            },
+                    )
+                    event_sink(
+                            "text_delta",
+                            {
+                                "message_id": f"{thread_id}-live-assistant-{run_id}-fallback",
+                                "run_id": run_id,
+                                "content": final_text,
+                                "mode": "replace",
+                            },
                     )
                 if result.get("status") == "awaiting_approval":
                     send_event("approval_required", result.get("approval") or {})

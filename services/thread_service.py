@@ -265,6 +265,7 @@ def thread_payload(
         "source": "dashboard",
         "status": status_for_frontend(thread.get("latest_run_status")),
         "backendType": thread.get("backend_type") or "local",
+        "projectName": thread.get("project_name"),
         "createdAt": iso_to_millis(thread.get("created_at")),
         "updatedAt": iso_to_millis(thread.get("updated_at")),
         "messages": message_payload(thread),

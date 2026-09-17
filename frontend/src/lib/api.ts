@@ -117,6 +117,16 @@ export interface WorkspaceInfo {
   skills_dir: string
 }
 
+export interface ProjectItem {
+  name: string
+  path: string
+}
+
+export interface ProjectList {
+  projects: Array<ProjectItem>
+  projects_dir: string
+}
+
 export interface CommandApprovalSettings {
   local: Record<string, ApprovalAction>
   sandbox: Record<string, ApprovalAction>
@@ -408,6 +418,7 @@ export const api = {
       body: JSON.stringify(body),
     }),
   pickFolder: () => request<{ path: string | null }>("/workspace/pick-folder"),
+  listProjects: () => request<ProjectList>("/workspace/projects"),
 }
 
 export function loginUrl(redirectTo?: string): string {

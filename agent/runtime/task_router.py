@@ -70,6 +70,7 @@ def initialize_task_record(
     thread_id: str | None = None,
     record_user_message: bool = True,
     backend_type: str | None = None,
+    project_name: str | None = None,
 ) -> str:
     """先创建 dashboard 可见的 thread 记录。
 
@@ -94,6 +95,7 @@ def initialize_task_record(
         repo_name=repo.repo,
         latest_run_status="running",
         backend_type=backend_type,
+        project_name=project_name,
     )
     record_event(thread_id, "created", "任务已创建", status="completed")
     return thread_id
@@ -171,6 +173,7 @@ def run_agent_task(
                 checkpoint_id=checkpoint_id,
                 model_id=model_id,
                 backend_type=backend_type,
+                project_name=existing_thread.get("project_name"),
             )
     if existing_thread and approved_plan_text is None and is_approval_prompt(prompt):
         logger.warning("用户确认实施但未找到待确认方案：thread_id=%s", thread_id)
@@ -182,7 +185,7 @@ def run_agent_task(
         task_kind = "coding"
 
     if task_kind == "coding" and approved_plan_text is None:
-        return run_plan_response_task(repo_url=repo_url, prompt=prompt, thread_id=thread_id, event_sink=event_sink, run_id=run_id, checkpoint_id=checkpoint_id, model_id=model_id, backend_type=backend_type)
+        return run_plan_response_task(repo_url=repo_url, prompt=prompt, thread_id=thread_id, event_sink=event_sink, run_id=run_id, checkpoint_id=checkpoint_id, model_id=model_id, backend_type=backend_type, project_name=existing_thread.get("project_name") if existing_thread else None)
 
     store.clear_run_events(thread_id)
     if approved_plan_text is not None:
@@ -205,6 +208,7 @@ def run_agent_task(
         repo_name=repo.repo,
         latest_run_status="running",
         backend_type=backend_type,
+        project_name=existing_thread.get("project_name") if existing_thread else None,
     )
     run_id = run_id or str(uuid.uuid4())
     # 延迟导入，避免 services 包的兼容导出在 runtime 初始化期间形成循环依赖。

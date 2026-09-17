@@ -332,6 +332,7 @@ xihe-agent/
 │   │   ├── graph.py       # Agent 图构建
 │   │   ├── model.py       # 语言模型管理
 │   │   ├── persistence.py # Checkpoint 持久化（Redis/PostgreSQL）
+│   │   ├── redis_checkpointer.py # Redis Checkpointer 实现
 │   │   ├── state.py       # Agent 状态定义
 │   │   └── checkpoint_history.py  # 历史消息查询
 │   │
@@ -448,9 +449,11 @@ xihe-agent/
 │   │   │   │   ├── AgentsHome.tsx         # Agent 首页
 │   │   │   │   ├── AgentsSidebar.tsx      # Agent 侧边栏
 │   │   │   │   ├── RepoSelector.tsx       # 仓库选择器
+│   │   │   │   ├── ProjectSelector.tsx    # 项目选择器
 │   │   │   │   ├── CommandApprovalDialog.tsx # 命令审批面板
 │   │   │   │   └── ported/              # 移植组件
-│   │   │   │       └── CloudPromptBar.tsx # 输入框组件
+│   │   │   │       ├── CloudPromptBar.tsx # 输入框组件
+│   │   │   │       └── MessageView.tsx    # 消息渲染组件
 │   │   │   └── ui/        # 通用 UI 组件
 │   │   │       └── select.tsx             # 下拉选择组件
 │   │   ├── lib/           # API 客户端与数据层
@@ -459,7 +462,8 @@ xihe-agent/
 │   │   │   │   ├── queries.ts           # TanStack Query
 │   │   │   │   ├── types.ts             # 类型定义
 │   │   │   │   └── useThreadStream.ts   # SSE 流钩子
-│   │   │   └── api.ts     # 通用 API 客户端
+│   │   │   ├── api.ts     # 通用 API 客户端
+│   │   │   └── utils.ts   # 前端工具函数
 │   │   ├── routes/        # TanStack Router 路由
 │   │   │   ├── automations.tsx          # 自动化任务页面
 │   │   │   ├── skills.tsx               # 技能管理页面
@@ -470,7 +474,9 @@ xihe-agent/
 │   └── vite.config.ts     # Vite 配置（代理到后端）
 │
 ├── tests/                 # 测试文件
-│   └── test_command_policy.py # 命令策略引擎测试
+│   ├── test_command_policy.py # 命令策略引擎测试
+│   ├── test_stream_approvals.py # 流式审批测试
+│   └── test_runtime_events.py # 运行时事件测试
 │
 └── reviewer_rules/        # 代码审查规则
     └── default_review_rules.md

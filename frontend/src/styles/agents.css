@@ -280,14 +280,6 @@
   transform-origin: center top;
 }
 
-.command-approval-busy {
-  border-color: color-mix(in oklab, var(--ui-accent) 36%, var(--ui-border));
-  transition:
-    border-color 160ms ease-out,
-    box-shadow 160ms ease-out;
-  box-shadow: 0 10px 26px color-mix(in oklab, var(--ui-accent) 9%, transparent);
-}
-
 .approval-save-check {
   animation: approval-save-check 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }

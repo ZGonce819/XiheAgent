@@ -2,7 +2,6 @@ import { useState } from "react"
 import {
   AlertTriangle,
   ChevronDown,
-  LoaderCircle,
   Sparkle,
   Terminal,
 } from "lucide-react"
@@ -14,7 +13,6 @@ interface CommandApprovalDialogProps {
   open: boolean
   command: string
   reason: string
-  busy?: boolean
   error?: string | null
   onOpenChange?: (open: boolean) => void
   onApprove: () => void
@@ -25,7 +23,6 @@ export function CommandApprovalDialog({
   open,
   command,
   reason,
-  busy = false,
   error,
   onApprove,
   onReject,
@@ -38,10 +35,7 @@ export function CommandApprovalDialog({
   return (
     <section
       aria-labelledby="command-approval-title"
-      className={cn(
-        "command-approval-panel mb-3 overflow-hidden rounded-lg border border-[var(--ui-border)] bg-[var(--ui-panel)] shadow-[0_8px_24px_rgba(0,0,0,0.08)]",
-        busy && "command-approval-busy"
-      )}
+      className="command-approval-panel mb-3 overflow-hidden rounded-lg border border-[var(--ui-border)] bg-[var(--ui-panel)] shadow-[0_8px_24px_rgba(0,0,0,0.08)]"
     >
       <div className="flex items-start gap-3 px-4 pt-4 pb-3 sm:px-5 sm:pt-5">
         <AlertTriangle
@@ -125,7 +119,6 @@ export function CommandApprovalDialog({
           size="sm"
           className="justify-start text-[color:var(--ui-text-muted)]"
           onClick={() => setExplaining((value) => !value)}
-          disabled={busy}
         >
           <Sparkle className="size-3.5" aria-hidden />
           {explaining ? "收起解释" : "解释"}
@@ -136,7 +129,6 @@ export function CommandApprovalDialog({
             variant="outline"
             size="sm"
             onClick={onReject}
-            disabled={busy}
           >
             拒绝
           </Button>
@@ -144,13 +136,9 @@ export function CommandApprovalDialog({
             type="button"
             size="sm"
             onClick={onApprove}
-            disabled={busy}
             className="bg-[var(--ui-accent)] text-white hover:opacity-90"
           >
-            {busy ? (
-              <LoaderCircle className="agents-spinner size-3.5" aria-hidden />
-            ) : null}
-            {busy ? "正在处理" : "允许一次"}
+            允许一次
           </Button>
         </div>
       </div>

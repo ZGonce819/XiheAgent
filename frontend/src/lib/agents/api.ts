@@ -1,4 +1,10 @@
-import type { AgentSchedule, AgentThread, ImageChunk, Message, PendingCommandApproval } from "./types"
+import type {
+  AgentSchedule,
+  AgentThread,
+  ImageChunk,
+  Message,
+  PendingCommandApproval,
+} from "./types"
 
 export type { AgentSchedule, AgentThread, Message }
 
@@ -10,6 +16,7 @@ export interface ThreadCreateRequest {
   model_id?: string | null
   effort?: string | null
   backend_type?: string | null
+  project_name?: string | null
 }
 
 export interface ThreadMessageRequest {
@@ -19,6 +26,7 @@ export interface ThreadMessageRequest {
   model_id?: string | null
   effort?: string | null
   backend_type?: string | null
+  project_name?: string | null
   edit_message_id?: string | null
   edit_message_content?: string | null
   edit_snapshot?: Array<Message>
@@ -88,7 +96,10 @@ async function agentsRequest<T>(
   return (await res.json()) as T
 }
 
-async function agentsStreamRequest(path: string, init: RequestInit): Promise<Response> {
+async function agentsStreamRequest(
+  path: string,
+  init: RequestInit
+): Promise<Response> {
   const response = await fetch(`${API_BASE}/dashboard/api${path}`, {
     ...init,
     credentials: "include",
@@ -98,7 +109,12 @@ async function agentsStreamRequest(path: string, init: RequestInit): Promise<Res
     let message = response.statusText
     try {
       const body = await response.json()
-      if (body?.detail) message = String(body.detail)
+      if (body?.detail) {
+        message =
+          typeof body.detail === "string"
+            ? body.detail
+            : JSON.stringify(body.detail)
+      }
     } catch {
       // Keep the HTTP status text when the response is not JSON.
     }
@@ -130,15 +146,24 @@ export const agentsApi = {
   getThread: (threadId: string) =>
     agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}`),
   saveViewSnapshot: (threadId: string, messages: Array<Message>) =>
-    agentsRequest<void>(`/threads/${encodeURIComponent(threadId)}/view-snapshot`, {
-      method: "PUT",
-      body: JSON.stringify({ messages }),
-    }),
+    agentsRequest<void>(
+      `/threads/${encodeURIComponent(threadId)}/view-snapshot`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ messages }),
+      }
+    ),
   previewEdit: (threadId: string, messageId: string, originalContent: string) =>
-    agentsRequest<EditPreview>(`/threads/${encodeURIComponent(threadId)}/edit-preview`, {
-      method: "POST",
-      body: JSON.stringify({ message_id: messageId, original_content: originalContent }),
-    }),
+    agentsRequest<EditPreview>(
+      `/threads/${encodeURIComponent(threadId)}/edit-preview`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          message_id: messageId,
+          original_content: originalContent,
+        }),
+      }
+    ),
   createThread: (body: ThreadCreateRequest) =>
     fetch(`${API_BASE}/dashboard/api/threads/stream-message`, {
       method: "POST",
@@ -151,19 +176,49 @@ export const agentsApi = {
         model_id: body.model_id,
         effort: body.effort,
         backend_type: body.backend_type,
+        project_name: body.project_name,
       }),
-    }).then((res) => {
-      if (!res.ok) throw new Error(res.statusText)
+    }).then(async (res) => {
+      if (!res.ok) {
+        let message = res.statusText
+        try {
+          const body = await res.json()
+          if (body?.detail)
+            message =
+              typeof body.detail === "string"
+                ? body.detail
+                : JSON.stringify(body.detail)
+        } catch {
+          /* keep status text */
+        }
+        throw new Error(message)
+      }
       return res
     }),
   sendMessage: (threadId: string, body: ThreadMessageRequest) =>
-    fetch(`${API_BASE}/dashboard/api/threads/${encodeURIComponent(threadId)}/stream-message`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).then((res) => {
-      if (!res.ok) throw new Error(res.statusText)
+    fetch(
+      `${API_BASE}/dashboard/api/threads/${encodeURIComponent(threadId)}/stream-message`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }
+    ).then(async (res) => {
+      if (!res.ok) {
+        let message = res.statusText
+        try {
+          const body = await res.json()
+          if (body?.detail)
+            message =
+              typeof body.detail === "string"
+                ? body.detail
+                : JSON.stringify(body.detail)
+        } catch {
+          /* keep status text */
+        }
+        throw new Error(message)
+      }
       return res
     }),
   cancelThread: (threadId: string) =>
@@ -178,13 +233,22 @@ export const agentsApi = {
       method: "DELETE",
     }),
   updateThreadTitle: (threadId: string, title: string) =>
-    agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}/title`, {
-      method: "PATCH",
-      body: JSON.stringify({ title }),
-    }),
+    agentsRequest<AgentThread>(
+      `/threads/${encodeURIComponent(threadId)}/title`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ title }),
+      }
+    ),
   getPendingApproval: (threadId: string) =>
-    agentsRequest<PendingCommandApproval | null>(`/threads/${encodeURIComponent(threadId)}/approval`),
-  decideApproval: (threadId: string, approvalId: string, decision: "approve" | "reject") =>
+    agentsRequest<PendingCommandApproval | null>(
+      `/threads/${encodeURIComponent(threadId)}/approval`
+    ),
+  decideApproval: (
+    threadId: string,
+    approvalId: string,
+    decision: "approve" | "reject"
+  ) =>
     agentsStreamRequest(`/threads/${encodeURIComponent(threadId)}/approval`, {
       method: "POST",
       body: JSON.stringify({ approval_id: approvalId, decision }),

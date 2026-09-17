@@ -29,6 +29,7 @@ export function AgentsHome() {
   )
   const [sandboxWarning, setSandboxWarning] = useState(false)
   const [repoWarning, setRepoWarning] = useState(false)
+  const [selectedProject, setSelectedProject] = useState<string | null>(null)
 
   const handleBackendTypeChange = (next: string) => {
     if (next === "sandbox" && !sandboxAvailable) {
@@ -139,6 +140,7 @@ export function AgentsHome() {
                     model_id: activeSelection?.modelId ?? null,
                     effort: activeSelection?.effort ?? null,
                     backend_type: backendType,
+                    project_name: selectedProject,
                   },
                   {
                     onError: () => setSubmission(null),
@@ -154,6 +156,8 @@ export function AgentsHome() {
               onRepoChange={setRepoOverride}
               backendType={backendType}
               onBackendTypeChange={handleBackendTypeChange}
+              selectedProject={selectedProject}
+              onProjectChange={setSelectedProject}
             />
             {createError ? (
               <p className="mt-3 w-full border-l-2 border-[var(--ui-danger)] bg-[var(--ui-panel)] px-3 py-2 text-sm text-[color:var(--ui-danger)]">
