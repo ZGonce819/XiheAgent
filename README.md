@@ -15,6 +15,8 @@
 - 🎯 **意图识别路由** - 自动区分编码任务、方案生成、同步操作等不同流程
 - 🎛️ **自定义模型配置** - 支持通过 API 配置自定义模型（API Key/Base URL/模型名），可在对话中切换
 - 🔒 **会话环境隔离** - 自动追踪会话创建环境（local/sandbox），防止跨环境继续对话
+- ⏰ **自动化任务编排** - 支持定时任务和周期性自动化工作流
+- 🧩 **技能系统** - 内置可复用技能（代码审查、仓库引导等），支持技能安装与扩展
 - 🖥️ **现代化前端** - React + Vite + TanStack Router，响应式设计，支持深色模式
 
 ## 技术栈
@@ -320,6 +322,7 @@ xihe-agent/
 │   ├── app_config.py      # Settings 单例配置
 │   ├── env_config.py      # 环境变量加载
 │   ├── model_config.py    # 自定义模型配置管理
+│   ├── automation_config.py # 自动化任务配置
 │   └── logging_config.py  # 日志配置
 │
 ├── agent/                 # Agent 核心模块
@@ -353,6 +356,11 @@ xihe-agent/
 │       ├── events.py           # 事件记录
 │       ├── repo_mapping.py     # 仓库目录映射
 │       └── _helpers.py         # 内部辅助函数
+│
+├── agent/skills/          # 内置技能定义
+│   ├── code-review/       # 代码审查技能
+│   ├── repo-bootstrap-analysis/ # 仓库引导分析技能
+│   └── ai-coding-implementation/ # AI 编码实现技能
 │
 ├── api/                   # HTTP 接口层
 │   ├── routes.py          # 基础路由（/health）
@@ -421,6 +429,7 @@ xihe-agent/
 │   ├── thread_service.py  # Thread DTO 组装 + 状态映射
 │   ├── streaming_service.py # SSE 流式编排（asyncio.Queue / Redis Stream 双模式）
 │   ├── redis_stream.py      # Redis Stream 事件总线（USE_REDIS_STREAM=true 启用）
+│   ├── skill_installer.py   # 技能安装器
 │   └── __init__.py        # 服务导出
 │
 ├── scripts/               # CLI 脚本
@@ -487,6 +496,40 @@ xihe-agent/
 
 当前端检测到会话环境与当前模式不匹配时，会显示只读提示并禁用输入，防止跨环境继续对话导致的问题。
 
+### 自动化任务 (`config/automation_config.py`)
+
+自动化任务系统支持定时和周期性工作流：
+
+- **定时任务**：在指定时间执行一次性任务
+- **周期任务**：按 cron 表达式周期性执行
+- **任务配置**：包含触发条件、执行动作、通知方式等
+
+自动化配置存储在 `data/automations.json`，通过 Dashboard API 管理。
+
+### 技能系统 (`agent/skills/`)
+
+技能是可复用的 Agent 能力模块，每个技能包含：
+
+- `SKILL.md`: 技能描述和使用说明
+- 可选的工具集和提示词模板
+
+内置技能：
+- **code-review**: 代码审查，自动检测代码质量问题
+- **repo-bootstrap-analysis**: 仓库引导分析，帮助理解项目结构
+- **ai-coding-implementation**: AI 编码实现，辅助代码生成
+
+技能安装器 (`services/skill_installer.py`) 支持从外部源安装新技能。
+
+### 命令审批与安全边界
+
+XiheAgent 对 `execute` 工具采用统一的三段式策略：`ALLOW` 直接执行，`REQUIRE_APPROVAL` 通过 LangGraph 原生 interrupt 暂停，`DENY` 直接拒绝。暂停点由现有 Redis Checkpoint 保存，用户点击“允许一次”或“拒绝”后，服务端用 `Command(resume={"decisions": [...]})` 恢复同一个会话；同步的 `execute()` 不等待人工输入，也不需要额外的 Redis 队列。
+
+本地工作区默认更保守：测试可自动运行，构建、依赖安装、项目脚本、文件修改、Git 写操作和网络访问默认询问。OpenSandbox 只在隔离容器内自动放行可恢复的构建、脚本、依赖和只读网络操作；删除、远端写入、凭据、提权和沙箱逃逸仍受保护。
+
+个人设置可以按语义类别选择“自动允许”或“每次询问”。服务端会过滤未知类别，且设置无法覆盖高危规则，包括工作区外写入、受保护密钥、强制推送、破坏性重置、提权、系统/磁盘配置、凭据注入和沙箱逃逸。
+
+人工审批面板以内联方式显示在会话输入框上方，展示命令详情以及“解释”“拒绝”“允许一次”，不会使用遮挡会话内容的居中弹窗。
+
 ## API 接口
 
 ### 基础接口
@@ -506,6 +549,10 @@ POST /dashboard/api/threads/stream-message         # 创建新会话
 POST /dashboard/api/threads/{id}/stream-message    # 追加对话轮次
 DELETE /dashboard/api/threads/{id}                 # 删除会话
 PATCH /dashboard/api/threads/{id}/title            # 修改会话标题
+GET  /dashboard/api/command-approval-settings      # 获取命令审批设置
+PUT  /dashboard/api/command-approval-settings      # 保存普通命令类别设置
+GET  /dashboard/api/threads/{id}/approval          # 获取待审批操作
+POST /dashboard/api/threads/{id}/approval          # 审批并恢复运行（SSE）
 ```
 
 ### 自定义模型管理
@@ -517,6 +564,24 @@ PUT    /dashboard/api/custom-models/{id}         # 更新自定义模型
 DELETE /dashboard/api/custom-models/{id}         # 删除自定义模型
 GET    /dashboard/api/builtin-model              # 获取内置模型配置
 PUT    /dashboard/api/builtin-model              # 更新内置模型配置
+```
+
+### 自动化任务管理
+
+```
+GET    /dashboard/api/automations                # 获取自动化任务列表
+POST   /dashboard/api/automations                # 创建自动化任务
+PUT    /dashboard/api/automations/{id}           # 更新自动化任务
+DELETE /dashboard/api/automations/{id}           # 删除自动化任务
+POST   /dashboard/api/automations/{id}/run       # 立即执行自动化任务
+```
+
+### 技能管理
+
+```
+GET    /dashboard/api/skills                     # 获取已安装技能列表
+POST   /dashboard/api/skills/install             # 安装新技能
+DELETE /dashboard/api/skills/{name}              # 卸载技能
 ```
 
 ## 环境变量
