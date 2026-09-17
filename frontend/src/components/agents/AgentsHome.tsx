@@ -2,6 +2,7 @@ import { useState } from "react"
 import { FolderGit2 } from "lucide-react"
 
 import type { ModelSelection } from "@/lib/agents/useModelOptions"
+import type { ImageChunk } from "@/lib/agents/types"
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar"
 import { SlackConnectDialog } from "@/components/agents/SlackConnectDialog"
 import { Logo } from "@/components/agents/ported/Logo"
@@ -15,6 +16,10 @@ export function AgentsHome() {
     createThread.error instanceof Error ? createThread.error.message : null
   const { models, defaultSelection } = useModelOptions()
   const [selection, setSelection] = useState<ModelSelection | null>(null)
+  const [submission, setSubmission] = useState<{
+    prompt: string
+    images: Array<ImageChunk>
+  } | null>(null)
   const activeSelection = selection ?? defaultSelection
 
   const reposQuery = useRepos()
@@ -28,6 +33,8 @@ export function AgentsHome() {
       ? (profileQuery.data?.default_repo ?? null)
       : repoOverride
 
+  const hasSubmitted = submission !== null
+
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
       <SlackConnectDialog />
@@ -38,16 +45,56 @@ export function AgentsHome() {
         </div>
         <span className="text-[0.6875rem] text-[color:var(--ui-text-dim)]">本地工作区</span>
       </header>
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-5 pt-[18vh] pb-12 md:px-8 max-md:pt-28">
-        <div className="mb-5 flex items-end justify-between gap-4 border-b border-[var(--ui-border)] pb-3">
+      <main className={`mx-auto flex w-full flex-1 flex-col px-5 pb-4 md:px-8 ${hasSubmitted ? "new-task-conversation max-w-4xl" : "max-w-3xl pt-[18vh] pb-12 max-md:pt-28"}`}>
+        {!hasSubmitted && <div className="mb-5 flex items-end justify-between gap-4 border-b border-[var(--ui-border)] pb-3">
           <div>
             <Logo className="h-auto" />
             <p className="mt-1 text-xs text-[color:var(--ui-text-dim)]">本地代码任务</p>
           </div>
-        </div>
-        <div className="w-full">
+        </div>}
+        {hasSubmitted ? (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="min-h-0 flex-1 overflow-y-auto py-6">
+              <div className="new-task-user-message ml-auto flex w-full flex-col items-end">
+                {submission.images.length > 0 ? (
+                  <div className="mb-2 flex flex-wrap justify-end gap-2">
+                    {submission.images.map((image, index) => (
+                      <img
+                        key={`${image.fileName ?? "image"}-${index}`}
+                        src={`data:${image.mimeType};base64,${image.base64}`}
+                        alt={image.fileName || "已发送的图片"}
+                        className="max-h-48 max-w-48 rounded-md border border-[var(--ui-border)]"
+                      />
+                    ))}
+                  </div>
+                ) : null}
+                {submission.prompt ? (
+                  <div className="w-fit max-w-[min(74%,52rem)] rounded-xl bg-[var(--ui-accent-bubble)] px-4 py-3 text-[0.9375rem] leading-7 text-[color:var(--ui-text)]">
+                    {submission.prompt}
+                  </div>
+                ) : null}
+              </div>
+              <div className="new-task-status mt-16 border-b border-[var(--ui-border)] pb-2 text-xs text-[color:var(--ui-text-muted)]">
+                正在启动智能体运行...
+              </div>
+            </div>
+            <div className="new-task-input shrink-0 pt-4">
+              <AgentPromptBar
+                placeholder="继续输入指令"
+                compact
+                busy
+                disabled
+                onSubmit={() => undefined}
+                models={models}
+                selection={activeSelection}
+                onSelectionChange={setSelection}
+              />
+            </div>
+          </div>
+        ) : <div className="w-full">
           <AgentPromptBar
-            onSubmit={(prompt, images) =>
+            onSubmit={(prompt, images) => {
+              setSubmission({ prompt, images })
               createThread.mutate({
                 prompt,
                 images,
@@ -55,8 +102,10 @@ export function AgentsHome() {
                 repo_explicitly_none: repoOverride === null,
                 model_id: activeSelection?.modelId ?? null,
                 effort: activeSelection?.effort ?? null,
+              }, {
+                onError: () => setSubmission(null),
               })
-            }
+            }}
             disabled={createThread.isPending}
             models={models}
             selection={activeSelection}
@@ -70,7 +119,7 @@ export function AgentsHome() {
               {createError}
             </p>
           ) : null}
-        </div>
+        </div>}
       </main>
     </div>
   )

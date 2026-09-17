@@ -199,7 +199,7 @@ opensandbox-server -h
 
 如果返回 `{"status":"healthy"}`，说明沙盒服务正常运行。
 
-#### 6. 拉取沙盒镜像（可选）
+#### 6. 拉取沙盒镜像
 
 ```bash
 docker pull sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:v1.0.2
@@ -211,13 +211,10 @@ docker pull sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-int
 ```ini
 # 启用 OpenSandbox 沙盒模式
 USE_SANDBOX=true
-SANDBOX_HOST=192.168.1.100  # OpenSandbox Server 的 IP
-SANDBOX_PORT=8080
-```
-
-然后安装沙盒依赖：
-```bash
-pip install -e ".[sandbox]"
+SANDBOX_HOST=http://192.168.1.100:8080  # OpenSandbox Server 完整地址（含协议和端口）
+SANDBOX_API_KEY=your-secret-api-key  # 与 server 端 api_key 配置一致
+SANDBOX_IDLE_TIMEOUT_DAYS=3          # 沙箱空闲超过此天数自动清理
+SANDBOX_MAX_PER_THREAD=3             # 每个线程最多保留的沙箱数量
 ```
 
 **注意：** 如果不启用沙盒，XiheAgent 会自动降级使用 `LocalShellBackend`（本地 Shell 执行），适合开发和个人使用场景。
@@ -271,8 +268,10 @@ REDIS_STREAM_DB=1
 
 # OpenSandbox 沙盒配置（可选，仅企业多租户场景需要）
 USE_SANDBOX=false  # 设为 true 启用沙盒模式
-SANDBOX_HOST=192.168.1.100  # OpenSandbox Server IP
-SANDBOX_PORT=8080
+SANDBOX_HOST=http://192.168.1.100:8080  # OpenSandbox Server 完整地址
+SANDBOX_API_KEY=your-secret-api-key      # 与 server 端 api_key 配置一致
+SANDBOX_IDLE_TIMEOUT_DAYS=3              # 沙箱空闲超过此天数自动清理
+SANDBOX_MAX_PER_THREAD=3                 # 每个线程最多保留的沙箱数量
 ```
 
 ### 启动后端服务
@@ -507,8 +506,10 @@ DELETE /dashboard/api/threads/{id}                 # 删除会话
 | `PG_PASSWORD` | PostgreSQL 密码 | *必填* |
 | `PG_DATABASE` | PostgreSQL 数据库名（LangGraph Store） | `xihe-agent` |
 | `USE_SANDBOX` | 是否启用 OpenSandbox 沙盒模式 | `false` |
-| `SANDBOX_HOST` | OpenSandbox Server IP（仅沙盒模式需要） | *无* |
-| `SANDBOX_PORT` | OpenSandbox Server 端口（仅沙盒模式需要） | `8080` |
+| `SANDBOX_HOST` | OpenSandbox Server 完整地址（含协议和端口，如 `http://127.0.0.1:8080`） | *无* |
+| `SANDBOX_API_KEY` | OpenSandbox Server API Key（与 server 端 `api_key` 配置一致） | *无* |
+| `SANDBOX_IDLE_TIMEOUT_DAYS` | 沙箱空闲超过此天数自动清理 | `3` |
+| `SANDBOX_MAX_PER_THREAD` | 每个线程最多保留的沙箱数量 | `3` |
 
 ## 开发命令
 

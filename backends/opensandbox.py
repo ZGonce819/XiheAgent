@@ -93,6 +93,24 @@ class OpenSandboxBackend(BaseSandbox):
         logger.debug("获取沙盒 ID: %s", sandbox_id)
         return sandbox_id
 
+    @property
+    def sandbox_id(self) -> str:
+        """返回底层 OpenSandbox 沙盒的 ID，供注册表记录使用。"""
+        return self._sandbox.id
+
+    def destroy(self) -> None:
+        """终止远程沙盒并释放本地资源。
+
+        调用后此 backend 实例不可再使用。
+        失败时仅记录警告，不抛出异常，以免阻断上层清理流程。
+        """
+        sandbox_id = self._sandbox.id
+        try:
+            self._sandbox.destroy()
+            logger.info("已销毁沙盒：%s", sandbox_id)
+        except Exception:
+            logger.warning("销毁沙盒失败：%s", sandbox_id, exc_info=True)
+
     def execute(
         self,
         command: str,
@@ -341,8 +359,10 @@ def get_connection_config(
         ConnectionConfigSync 实例。
     """
     host = domain or os.environ.get("SANDBOX_HOST", "http://192.168.23.3:8080")
+    api_key = os.environ.get("SANDBOX_API_KEY")
     return ConnectionConfigSync(
         domain=host,
+        api_key=api_key,
         use_server_proxy=use_server_proxy,
         request_timeout=timedelta(seconds=timeout_seconds),
         transport=httpx.HTTPTransport(limits=httpx.Limits(max_connections=max_connections)),
@@ -351,19 +371,26 @@ def get_connection_config(
 
 def get_or_create_sandbox(
     config: ConnectionConfigSync,
+    *,
+    thread_id: str | None = None,
     sandbox_id: str | None = None,
     image: str | None = None,
 ) -> SandboxSync:
     """获取或创建沙箱。
 
+    当提供 ``thread_id`` 时，先查注册表尝试复用存活的沙箱；
+    复用失败或无记录时创建新沙箱并注册。
+
     Args:
         config: ConnectionConfigSync 配置。
-        sandbox_id: 可选，要连接的现有沙箱ID。
-        image: 可选，创建新沙箱时使用的镜像。
+        thread_id: 可选的会话 ID，用于沙箱复用和注册。
+        sandbox_id: 可选的，直接连接的现有沙箱 ID（优先级高于 thread_id 查找）。
+        image: 可选的，创建新沙箱时使用的镜像。
 
     Returns:
         SandboxSync 实例。
     """
+    # 直接指定 sandbox_id 时跳过注册表查找
     if sandbox_id:
         print(f"[INFO] 正在连接到现有沙箱: {sandbox_id}")
         try:
@@ -372,6 +399,12 @@ def get_or_create_sandbox(
             return sandbox
         except Exception as e:
             print(f"[WARNING] 连接沙箱失败: {e}，将创建新沙箱")
+
+    # 通过注册表尝试复用 thread 的存活沙箱
+    if thread_id:
+        reused = _try_reuse_sandbox(config, thread_id)
+        if reused is not None:
+            return reused
 
     if not image:
         image = DEFAULT_SANDBOX_IMAGE
@@ -386,7 +419,85 @@ def get_or_create_sandbox(
         connection_config=config,
     )
     print(f"[INFO] 成功创建新沙箱，ID: {sandbox.id}")
+
+    # 注册新沙箱到数据库
+    if thread_id:
+        _register_sandbox(thread_id, sandbox.id)
+
     return sandbox
+
+
+def _try_reuse_sandbox(
+    config: ConnectionConfigSync,
+    thread_id: str,
+) -> SandboxSync | None:
+    """尝试从注册表复用 thread 的存活沙箱。
+
+    Args:
+        config: 连接配置。
+        thread_id: 会话 ID。
+
+    Returns:
+        复用的 SandboxSync 实例；无法复用时返回 ``None``。
+    """
+    try:
+        from store.sandbox_repo import SandboxRepo
+
+        repo = SandboxRepo()
+        record = repo.get_active_sandbox(thread_id)
+        if record is None:
+            logger.debug("注册表无 active 沙箱：thread_id=%s", thread_id)
+            return None
+
+        old_sandbox_id = record["sandbox_id"]
+        logger.info("尝试复用沙箱：%s（thread_id=%s）", old_sandbox_id, thread_id)
+
+        sandbox = SandboxSync.connect(old_sandbox_id, connection_config=config)
+        if sandbox.is_healthy():
+            repo.update_last_used(old_sandbox_id)
+            logger.info("沙箱复用成功：%s（thread_id=%s）", old_sandbox_id, thread_id)
+            return sandbox
+
+        # 沙箱已死亡，标记为 killed
+        logger.info("沙箱已过期，标记为 killed：%s", old_sandbox_id)
+        repo.mark_killed(old_sandbox_id)
+
+    except Exception:
+        logger.warning("复用沙箱失败，将创建新沙箱", exc_info=True)
+        try:
+            repo.mark_killed(old_sandbox_id)
+        except Exception:
+            pass
+
+    return None
+
+
+def _register_sandbox(thread_id: str, sandbox_id: str) -> None:
+    """注册新沙箱并执行清理策略。
+
+    Args:
+        thread_id: 会话 ID。
+        sandbox_id: 新创建的沙箱 ID。
+    """
+    try:
+        from config.app_config import get_settings
+        from store.sandbox_repo import SandboxRepo
+
+        settings = get_settings()
+        repo = SandboxRepo()
+        repo.register(sandbox_id, thread_id)
+
+        # 执行清理策略
+        idle_removed = repo.cleanup_idle(settings.sandbox_idle_timeout_days)
+        if idle_removed:
+            logger.info("空闲沙箱清理：%d 条", idle_removed)
+
+        per_thread_removed = repo.cleanup_per_thread(settings.sandbox_max_per_thread)
+        if per_thread_removed:
+            logger.info("超限沙箱清理：%d 条", per_thread_removed)
+
+    except Exception:
+        logger.warning("沙箱注册或清理失败（不影响沙箱使用）", exc_info=True)
 
 
 def list_running_sandboxes(config: ConnectionConfigSync) -> list:
@@ -429,18 +540,23 @@ def list_running_sandboxes(config: ConnectionConfigSync) -> list:
 
 
 def create_opensandbox_backend(
+    *,
+    thread_id: str | None = None,
     sandbox_id: str | None = None,
     image: str | None = None,
 ) -> OpenSandboxBackend:
     """DeepAgents 工厂函数：创建 OpenSandbox backend 实例。
 
     Args:
-        sandbox_id: 可选，要连接的现有沙箱ID。
-        image: 可选，创建新沙箱时使用的镜像。
+        thread_id: 可选的会话 ID，用于沙箱复用和注册。
+        sandbox_id: 可选的，直接连接的现有沙箱 ID。
+        image: 可选的，创建新沙箱时使用的镜像。
 
     Returns:
         OpenSandboxBackend 实例。
     """
     config = get_connection_config()
-    sandbox = get_or_create_sandbox(config, sandbox_id=sandbox_id, image=image)
+    sandbox = get_or_create_sandbox(
+        config, thread_id=thread_id, sandbox_id=sandbox_id, image=image
+    )
     return OpenSandboxBackend(sandbox=sandbox)

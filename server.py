@@ -99,7 +99,7 @@ def ensure_backend_for_thread(thread_id: str) -> BaseSandbox:
             oldest_key = next(iter(_BACKENDS))
             logger.info("Backend 缓存已满，淘汰最旧实例：%s", oldest_key)
             _BACKENDS.pop(oldest_key)
-        backend = create_backend()
+        backend = create_backend(thread_id=thread_id)
         logger.info("为 thread 创建 %s：%s", type(backend).__name__, thread_id)
         _BACKENDS[thread_id] = backend
     else:

@@ -82,6 +82,12 @@ class Settings:
         self.use_sandbox: bool = get_env("USE_SANDBOX", "false").lower() == "true"
         self.sandbox_host: str = get_env("SANDBOX_HOST")
         self.sandbox_port: int = _safe_int(get_env("SANDBOX_PORT", "8080"), 8080)
+        self.sandbox_idle_timeout_days: int = _safe_int(
+            get_env("SANDBOX_IDLE_TIMEOUT_DAYS", "3"), 3
+        )
+        self.sandbox_max_per_thread: int = _safe_int(
+            get_env("SANDBOX_MAX_PER_THREAD", "3"), 3
+        )
 
         # ── 外部服务密钥 ──────────────────────────────────────
         self.deepseek_api_key: str = get_env("DEEPSEEK_API_KEY")

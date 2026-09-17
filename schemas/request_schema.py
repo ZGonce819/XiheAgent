@@ -43,6 +43,10 @@ class DashboardViewSnapshotRequest(BaseModel):
     messages: list[dict[str, Any]] = Field(description="当前页面完整消息视图")
 
 
+class DashboardThreadTitleUpdateRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=500, description="新的会话标题")
+
+
 class TaskCreateRequest(BaseModel):
     """通用任务创建请求体。
 

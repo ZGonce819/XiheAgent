@@ -37,6 +37,8 @@ export interface CloudPromptBarProps {
   placeholder?: string
   compact?: boolean
   disabled?: boolean
+  /** Shows a non-interactive close mark when the composer is unavailable in a read-only view. */
+  readOnly?: boolean
   busy?: boolean
   onSubmit?: (value: string, images: Array<ImageChunk>) => void
   /** Called to stop the running agent. When set, the send button becomes a stop button while busy and the input is empty. */
@@ -82,6 +84,7 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
   placeholder = "",
   compact = false,
   disabled = false,
+  readOnly = false,
   busy = false,
   onSubmit,
   onStop,
@@ -369,7 +372,9 @@ export const CloudPromptBar = memo(function CloudPromptBarComponent({
               title="发送"
               className="ml-auto flex size-[32px] shrink-0 items-center justify-center rounded-full bg-[var(--ui-accent)] text-white shadow-sm transition-[opacity,transform,box-shadow] duration-200 hover:shadow-md hover:opacity-90 active:scale-95 disabled:cursor-default disabled:opacity-40"
             >
-              {disabled ? (
+              {readOnly ? (
+                <X className="size-3.5" strokeWidth={2.5} />
+              ) : disabled ? (
                 <LoaderCircle className="agents-spinner size-3.5" />
               ) : (
                 <ArrowUp className="size-3.5" strokeWidth={2.5} />

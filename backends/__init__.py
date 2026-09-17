@@ -21,11 +21,14 @@ from deepagents.backends.sandbox import BaseSandbox
 logger = logging.getLogger(__name__)
 
 
-def create_backend() -> BaseSandbox:
+def create_backend(*, thread_id: str | None = None) -> BaseSandbox:
     """根据 ``USE_SANDBOX`` 配置创建对应的 Backend 实例。
 
     开启沙盒时返回 ``OpenSandboxBackend``（远程容器隔离），
     否则返回 ``LocalShellBackend``（本地受控执行层）。
+
+    Args:
+        thread_id: 可选的会话 ID，沙盒模式下用于复用和注册。
 
     Returns:
         符合 DeepAgents ``BaseSandbox`` 协议的 backend 实例。
@@ -37,7 +40,7 @@ def create_backend() -> BaseSandbox:
             from backends.opensandbox import create_opensandbox_backend
 
             logger.info("USE_SANDBOX=true，使用 OpenSandbox 远程沙盒")
-            return create_opensandbox_backend()
+            return create_opensandbox_backend(thread_id=thread_id)
         except Exception:
             logger.exception("OpenSandbox 创建失败，回退到 LocalShellBackend")
 

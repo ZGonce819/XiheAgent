@@ -154,6 +154,22 @@ class ThreadRepo(ConnectionManager):
             (status, pr_url, branch_name, utc_now(), thread_id),
         )
 
+    def update_thread_title(self, thread_id: str, title: str) -> bool:
+        """更新 thread 标题。
+
+        Args:
+            thread_id: 会话唯一标识。
+            title: 新标题。
+
+        Returns:
+            成功更新时返回 ``True``；记录不存在时返回 ``False``。
+        """
+        affected = self.execute(
+            "UPDATE threads SET title = %s, updated_at = %s WHERE thread_id = %s",
+            (title, utc_now(), thread_id),
+        )
+        return affected > 0
+
     def delete_thread(self, thread_id: str) -> bool:
         """删除 thread 主记录（级联清理由 LocalMySQLStore 协调）。
 

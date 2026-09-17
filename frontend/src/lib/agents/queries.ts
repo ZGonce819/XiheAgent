@@ -127,6 +127,7 @@ export function useCreateAgentThread() {
       const decoder = new TextDecoder()
       let buffer = ""
       let capturedThreadId: string | null = null
+      let enteredThread = false
 
       while (true) {
         const { done, value } = await reader.read()
@@ -148,6 +149,43 @@ export function useCreateAgentThread() {
               if (!capturedThreadId && typeof candidate === "string" && candidate) {
                 capturedThreadId = candidate
                 addPendingPrompt(capturedThreadId, body.prompt, 0, body.images)
+                const now = Date.now()
+                const repo = body.repo ?? ""
+                queryClient.setQueryData<AgentThread>(
+                  agentThreadKeys.detail(capturedThreadId),
+                  {
+                    id: capturedThreadId,
+                    title: body.prompt || "新任务",
+                    repo,
+                    repoFullName: repo,
+                    repoUrl: repo,
+                    platform: "",
+                    platformDisplay: "",
+                    branch: "",
+                    model: body.model_id ?? "",
+                    effort: body.effort ?? null,
+                    status: "running",
+                    createdAt: now,
+                    updatedAt: now,
+                    messages: [],
+                    runEvents: [],
+                  },
+                )
+                if (typeof window !== "undefined") {
+                  try {
+                    window.sessionStorage.setItem(
+                      `xihe:new-thread-transition:${capturedThreadId}`,
+                      "1",
+                    )
+                  } catch {
+                    // The transition still works on the temporary screen when storage is unavailable.
+                  }
+                }
+                enteredThread = true
+                navigate({
+                  to: "/agents/$threadId",
+                  params: { threadId: capturedThreadId },
+                })
               }
               if (capturedThreadId) handleStreamPart(capturedThreadId, parsed, queryClient)
             }
@@ -167,7 +205,9 @@ export function useCreateAgentThread() {
           agentThreadKeys.detail(capturedThreadId),
           completedThread,
         )
-        navigate({ to: "/agents/$threadId", params: { threadId: capturedThreadId } })
+        if (!enteredThread) {
+          navigate({ to: "/agents/$threadId", params: { threadId: capturedThreadId } })
+        }
       }
       return capturedThreadId
     },
@@ -266,6 +306,18 @@ export function useDeleteAgentThread() {
       if (path.includes(`/agents/${threadId}`)) {
         navigate({ to: "/agents" })
       }
+    },
+  })
+}
+
+export function useUpdateAgentThreadTitle(threadId: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (title: string) => agentsApi.updateThreadTitle(threadId, title),
+    onSuccess: (thread) => {
+      queryClient.setQueryData(agentThreadKeys.detail(threadId), thread)
+      invalidateThreadList(queryClient)
     },
   })
 }

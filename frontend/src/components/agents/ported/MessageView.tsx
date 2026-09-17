@@ -329,6 +329,8 @@ interface MessageViewProps extends ApprovalCallbacks {
   contentPaddingClass?: string;
   /** Extra scroll padding so content can scroll under a bottom overlay (e.g. floating prompt). */
   bottomInset?: number;
+  /** Persisted duration for a completed run, recovered from run event timestamps. */
+  completedElapsedMs?: number;
   /** When "external", parent renders the scroll button (e.g. above a floating prompt). */
   scrollButtonSlot?: "internal" | "external";
   onShowScrollToBottomChange?: (show: boolean) => void;
@@ -367,7 +369,7 @@ const BUSY_TEXTS: { present: string; past: string }[] = [
 ];
 
 function formatElapsed(ms: number): string {
-  const secs = Math.round(ms / 1000);
+  const secs = ms > 0 ? Math.max(1, Math.round(ms / 1000)) : 0;
   return secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`;
 }
 
@@ -483,7 +485,7 @@ function UserMessage({ message, editable = false, onEdit, models = [], selection
     .join(", ");
 
   return (
-    <div className="group message-enter my-5 flex w-full justify-end">
+    <div className={`group my-5 flex w-full justify-end ${message.id.startsWith("pending-user-") ? "pending-user-pop" : "message-enter"}`}>
       <div className="flex w-full min-w-0 flex-col items-end">
         {images.length > 0 && (
           <div className="flex gap-2 mb-2 flex-wrap justify-end">
@@ -525,10 +527,10 @@ function UserMessage({ message, editable = false, onEdit, models = [], selection
             </div>
           </div>
         )}
-        <div className="mt-1.5 flex items-center justify-end gap-2 pr-1 text-[0.6875rem] text-[color:var(--ui-text-dim)] opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
-          <time dateTime={message.timestamp}>{formatMessageTimestamp(message.timestamp)}</time>
-          <button type="button" onClick={() => void navigator.clipboard?.writeText(text)} aria-label="复制消息" title="复制" className="rounded-md p-1.5 hover:bg-[var(--ui-panel-2)]"><Copy className="size-4" /></button>
-          {editable && <button type="button" onClick={() => { setDraft(text); setEditing(true); }} aria-label="编辑并重新发送" title="编辑并重新发送" className="rounded-md p-1.5 hover:bg-[var(--ui-panel-2)]"><Pencil className="size-4" /></button>}
+        <div className="mt-1.5 flex items-center justify-end gap-1 pr-1 text-[0.6875rem] text-[color:var(--ui-text-dim)] opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
+          <time dateTime={message.timestamp} className="px-1">{formatMessageTimestamp(message.timestamp)}</time>
+          <button type="button" onClick={() => void navigator.clipboard?.writeText(text)} aria-label="复制消息" title="复制" className="inline-flex size-6 items-center justify-center rounded-md hover:bg-[var(--ui-panel-2)]"><Copy className="size-3.5" /></button>
+          {editable && <button type="button" onClick={() => { setDraft(text); setEditing(true); }} aria-label="编辑并重新发送" title="编辑并重新发送" className="inline-flex size-6 items-center justify-center rounded-md hover:bg-[var(--ui-panel-2)]"><Pencil className="size-3.5" /></button>}
         </div>
       </div>
     </div>
@@ -543,10 +545,7 @@ function AgentMessageActions({ message, versionNavigation }: { message: Message;
   if (!body.trim()) return null;
 
   return (
-    <div className="mt-1 flex min-h-7 items-center gap-1.5 text-[0.6875rem] text-[color:var(--ui-text-dim)] opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-      <time dateTime={message.timestamp} className="px-1">
-        {formatMessageTimestamp(message.timestamp)}
-      </time>
+    <div className="mt-1 flex min-h-7 items-center gap-1 text-[0.6875rem] text-[color:var(--ui-text-dim)] opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
       <button
         type="button"
         onClick={() => void navigator.clipboard?.writeText(body)}
@@ -556,6 +555,9 @@ function AgentMessageActions({ message, versionNavigation }: { message: Message;
       >
         <Copy className="size-3.5" />
       </button>
+      <time dateTime={message.timestamp} className="px-1">
+        {formatMessageTimestamp(message.timestamp)}
+      </time>
       <VersionNavigationControls navigation={versionNavigation} />
     </div>
   );
@@ -596,7 +598,7 @@ function ToolActivityGroup({
     (tool) => tool.status === "pending" || tool.status === "in_progress",
   );
   const summary = activeTool?.title || "执行任务";
-  const duration = elapsedMs > 0 ? formatElapsed(elapsedMs) : "";
+  const duration = elapsedMs > 0 ? formatElapsed(elapsedMs) : (isStreaming ? "" : "1s");
   const statusText = running
     ? "正在运行"
     : errorCount > 0
@@ -610,7 +612,7 @@ function ToolActivityGroup({
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
-        className="group flex min-h-9 w-full items-center justify-between gap-3 px-0 py-1 text-left transition-[color,background-color] duration-150 hover:text-[color:var(--ui-text)]"
+        className="flex min-h-9 w-full items-center justify-between gap-3 px-0 py-1 text-left transition-[color,background-color] duration-150 hover:text-[color:var(--ui-text)]"
         aria-expanded={expanded}
       >
         <span className="min-w-0 truncate text-[0.8125rem] text-[color:var(--ui-text-muted)]">
@@ -627,6 +629,9 @@ function ToolActivityGroup({
 
       {expanded && (
         <div role="region" aria-label="任务执行详情" className="max-h-64 animate-in fade-in-0 slide-in-from-top-1 duration-150 ease-out overflow-y-auto px-0 pb-2 pt-1">
+          {tools.length === 0 ? (
+            <p className="py-1 text-xs text-[color:var(--ui-text-dim)]">本次任务无工具调用</p>
+          ) : null}
           {message.chunks.map((chunk, index) => {
             if (chunk.kind === "todo" && !showTodos) return null;
             return (
@@ -719,11 +724,23 @@ function AgentMessage({
   if (hasToolActivity) {
     const hasTools = activity.chunks.some((chunk) => chunk.kind === "tool-execution");
     const panelActivity = hasTools
-      ? activity
+      ? {
+          ...activity,
+          chunks: activity.chunks.filter((chunk) =>
+            chunk.kind === "tool-execution"
+            || (chunk.kind === "todo" && !isStreaming)
+            || (chunk.kind === "text" && (!isStreaming || !activity.chunks.some((item) => item.kind === "todo"))),
+          ),
+        }
       : { ...activity, chunks: activity.chunks.filter((chunk) => chunk.kind === "todo") };
-    const remainingChunks = isStreaming
-      ? activity.chunks.filter((chunk) => chunk.kind !== "tool-execution")
-      : activity.chunks.filter((chunk) => !hasTools && chunk.kind !== "todo");
+    const remainingChunks = hasTools
+      ? (isStreaming && activity.chunks.some((chunk) => chunk.kind === "todo")
+          ? activity.chunks.filter((chunk) => chunk.kind === "text" || chunk.kind === "todo")
+          : [])
+      : activity.chunks.filter((chunk) => chunk.kind !== "tool-execution" && chunk.kind !== "todo");
+    const answerMessage = remainingChunks.length > 0
+      ? { ...message, chunks: remainingChunks }
+      : null;
     return (
       <div className="group message-enter my-2 min-w-0 space-y-2">
         <ToolActivityGroup
@@ -743,7 +760,9 @@ function AgentMessage({
             {...callbacks}
           />
         ))}
-        <AgentMessageActions message={message} versionNavigation={versionNavigation} />
+        {answerMessage ? (
+          <AgentMessageActions message={answerMessage} versionNavigation={versionNavigation} />
+        ) : null}
       </div>
     );
   }
@@ -946,7 +965,7 @@ function ThinkingSpinner({
 
   if (done) {
     return (
-      <div className="my-2 flex items-center gap-2">
+      <div className="agents-thinking-status my-2 flex items-center gap-2">
         <CheckCircle2 className="size-3.5 text-[color:var(--ui-success)]" />
         <span className="text-xs text-[color:var(--ui-text-dim)]">{done.past}，耗时 {done.elapsed}</span>
       </div>
@@ -954,7 +973,7 @@ function ThinkingSpinner({
   }
 
   return (
-    <div className="my-2 flex items-center gap-2">
+    <div className="agents-thinking-status my-2 flex items-center gap-2">
       <LoaderCircle className="agents-spinner size-3.5 text-[color:var(--ui-accent)]" />
       <span className="text-xs text-[color:var(--ui-text-muted)]">{liveStatus || BUSY_TEXTS[textIdx].present}</span>
     </div>
@@ -971,6 +990,7 @@ export const MessageView = memo(function MessageView({
   contentWidthClass = "max-w-[42rem]",
   contentPaddingClass = "px-6",
   bottomInset = 0,
+  completedElapsedMs = 0,
   scrollButtonSlot = "internal",
   onShowScrollToBottomChange,
   scrollControlRef,
@@ -1173,6 +1193,16 @@ export const MessageView = memo(function MessageView({
   }, [scheduleScrollToBottom, syncScrollButtonVisibility]);
 
   const visibleMessages = useMemo(() => groupConversationMessages(messages), [messages]);
+  const completedConversationElapsedMs = useMemo(() => {
+    if (completedElapsedMs > 0) return completedElapsedMs;
+    if (isStreaming) return 0;
+    const user = [...visibleMessages].reverse().find((message) => message.author === "user");
+    const agent = [...visibleMessages].reverse().find((message) => message.author === "agent");
+    if (!user || !agent) return 0;
+    const start = Date.parse(user.timestamp);
+    const end = Date.parse(agent.timestamp);
+    return Number.isFinite(start) && Number.isFinite(end) && end > start ? end - start : 0;
+  }, [completedElapsedMs, isStreaming, visibleMessages]);
   const currentTurnStart = visibleMessages.findLastIndex((message) => message.author === "user");
   const latestAgentMessageId = useMemo(
     () =>
@@ -1252,7 +1282,7 @@ export const MessageView = memo(function MessageView({
                   isStreaming={isStreaming && index > currentTurnStart}
                   runElapsedMs={
                     index > currentTurnStart && (isStreaming || message.executionNarration)
-                      ? streamElapsedMs
+                      ? (streamElapsedMs || completedConversationElapsedMs)
                       : undefined
                   }
                   projectPath={project?.path}
@@ -1268,7 +1298,7 @@ export const MessageView = memo(function MessageView({
                   versionNavigation={versionNavigations?.[message.id] ?? (message.id === versionAnchorId ? versionNavigation : undefined)}
                 />
           ))}
-          <ThinkingSpinner isStreaming={isStreaming} liveStatus={liveStatus} runElapsedMs={streamElapsedMs} />
+          <ThinkingSpinner isStreaming={isStreaming} liveStatus={liveStatus} runElapsedMs={streamElapsedMs || completedConversationElapsedMs} />
         </div>
       </div>
 

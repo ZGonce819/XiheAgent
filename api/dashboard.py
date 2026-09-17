@@ -20,7 +20,7 @@ from agent.runtime import (
 from agent.graph.graph import get_store
 from config.app_config import get_settings
 from config.env_config import get_env
-from schemas.request_schema import DashboardEditPreviewRequest, DashboardThreadMessageRequest, DashboardViewSnapshotRequest
+from schemas.request_schema import DashboardEditPreviewRequest, DashboardThreadMessageRequest, DashboardThreadTitleUpdateRequest, DashboardViewSnapshotRequest
 from services.thread_service import conversation_snapshot, fetch_visible_messages
 from services.repo_rollback import rollback_run
 from services.streaming_service import build_streaming_response
@@ -256,6 +256,17 @@ def dashboard_save_view_snapshot(thread_id: str, body: DashboardViewSnapshotRequ
         raise HTTPException(status_code=404, detail="thread not found")
     get_store().save_conversation_view(thread_id, body.messages)
     return None
+
+
+@dashboard_router.patch("/threads/{thread_id}/title")
+def dashboard_update_thread_title(thread_id: str, body: DashboardThreadTitleUpdateRequest) -> dict[str, Any]:
+    task = get_task(thread_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="thread not found")
+    updated = get_store().update_thread_title(thread_id, body.title)
+    if not updated:
+        raise HTTPException(status_code=404, detail="thread not found")
+    return thread_payload(get_task(thread_id))
 
 
 @dashboard_router.delete("/threads/{thread_id}", status_code=204)

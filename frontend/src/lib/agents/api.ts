@@ -155,6 +155,11 @@ export const agentsApi = {
     agentsRequest<void>(`/threads/${encodeURIComponent(threadId)}`, {
       method: "DELETE",
     }),
+  updateThreadTitle: (threadId: string, title: string) =>
+    agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}/title`, {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    }),
   streamUrl: (threadId: string) =>
     `${API_BASE}/dashboard/api/threads/${encodeURIComponent(threadId)}/stream`,
 }

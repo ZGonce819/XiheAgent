@@ -13,6 +13,7 @@ from store.conversation_version_repo import ConversationVersionRepo
 from store.finding_repo import FindingRepo
 from store.mapping_repo import MappingRepo
 from store.run_repo import RunRepo
+from store.sandbox_repo import SandboxRepo
 from store.thread_repo import ThreadRepo
 
 
@@ -31,6 +32,7 @@ class LocalMySQLStore:
         self.finding_repo = FindingRepo()
         self.mapping_repo = MappingRepo()
         self.conversation_version_repo = ConversationVersionRepo()
+        self.sandbox_repo = SandboxRepo()
         self._init_schema()
 
     def _init_schema(self) -> None:
@@ -41,6 +43,7 @@ class LocalMySQLStore:
         self.finding_repo.ensure_table()
         self.mapping_repo.ensure_table()
         self.conversation_version_repo.ensure_table()
+        self.sandbox_repo.ensure_table()
 
     def close(self) -> None:
         """关闭所有 Repo 的数据库连接，释放连接池资源。"""
@@ -50,6 +53,7 @@ class LocalMySQLStore:
         self.finding_repo.close()
         self.mapping_repo.close()
         self.conversation_version_repo.close()
+        self.sandbox_repo.close()
 
     # ── Thread 操作 ──────────────────────────────────────────────────────────
 
@@ -133,6 +137,18 @@ class LocalMySQLStore:
             thread_id, status, pr_url=pr_url, branch_name=branch_name
         )
 
+    def update_thread_title(self, thread_id: str, title: str) -> bool:
+        """更新 thread 标题。
+
+        Args:
+            thread_id: 会话唯一标识。
+            title: 新标题。
+
+        Returns:
+            成功更新时返回 ``True``；记录不存在时返回 ``False``。
+        """
+        return self.thread_repo.update_thread_title(thread_id, title)
+
     def delete_thread(self, thread_id: str) -> bool:
         """删除一个 Dashboard 会话及其所有业务附属记录。
 
@@ -157,6 +173,7 @@ class LocalMySQLStore:
             ("events", self.event_repo.clear_run_events),
             ("runs", self.run_repo.delete_runs_by_thread),
             ("conversation versions", self.conversation_version_repo.delete_versions),
+            ("sandbox registry", self.sandbox_repo.delete_by_thread),
         ]:
             try:
                 cleanup_fn(thread_id)

@@ -24,6 +24,7 @@ from store.event_repo import RunEventRepo
 from store.run_repo import RunRepo
 from store.thread_repo import ThreadRepo
 from store.conversation_version_repo import ConversationVersionRepo
+from store.sandbox_repo import SandboxRepo
 
 __all__ = [
     "ConnectionManager",
@@ -34,5 +35,6 @@ __all__ = [
     "RunRepo",
     "ThreadRepo",
     "ConversationVersionRepo",
+    "SandboxRepo",
     "utc_now",
 ]

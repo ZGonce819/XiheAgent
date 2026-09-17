@@ -7,7 +7,7 @@ import type { ModelSelection } from "@/lib/agents/useModelOptions";
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar";
 import { AgentsShell } from "@/components/agents/AgentsSidebar";
 import { MessageView } from "@/components/agents/ported";
-import { useCancelAgentThread, useSendAgentMessage } from "@/lib/agents/queries";
+import { useCancelAgentThread, useSendAgentMessage, useUpdateAgentThreadTitle } from "@/lib/agents/queries";
 import { addPendingPrompt, dropPendingPrompts, getPendingPrompts } from "@/lib/agents/pendingPrompts";
 import { useAgentThreadStream } from "@/lib/agents/useThreadStream";
 import { normalizeThreadHistory } from "@/lib/agents/useThreadStream";
@@ -105,7 +105,40 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   const [pageDialog, setPageDialog] = useState<PageDialog | null>(null);
   const [viewedVersionIndexes, setViewedVersionIndexes] = useState<Record<string, number>>({});
   const [sendTransition, setSendTransition] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [draftTitle, setDraftTitle] = useState("");
+  const updateTitle = useUpdateAgentThreadTitle(thread.id);
+  const [newThreadTransition, setNewThreadTransition] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const key = `xihe:new-thread-transition:${thread.id}`;
+    try {
+      const shouldAnimate = window.sessionStorage.getItem(key) === "1";
+      window.sessionStorage.removeItem(key);
+      return shouldAnimate;
+    } catch {
+      return false;
+    }
+  });
   const activeSelection = selection ?? threadSelection ?? defaultSelection;
+  const displayRepo = (() => {
+    const value = thread.repoFullName || thread.repo || "";
+    if (!/^https?:\/\//i.test(value)) return value;
+    try {
+      const parts = new URL(value).pathname.split("/").filter(Boolean);
+      return parts.length >= 2 ? `${parts[0]}/${parts[1]}` : value;
+    } catch {
+      return value;
+    }
+  })();
+  const completedElapsedMs = useMemo(() => {
+    if (thread.status === "running") return 0;
+    const events = thread.runEvents ?? [];
+    const starts = events.map((event) => Date.parse(event.created_at)).filter(Number.isFinite);
+    const ends = events.map((event) => Date.parse(event.updated_at || event.created_at)).filter(Number.isFinite);
+    if (starts.length === 0 || ends.length === 0) return 0;
+    const elapsed = Math.max(...ends) - Math.min(...starts);
+    return elapsed > 0 ? elapsed : 0;
+  }, [thread.runEvents, thread.status]);
 
   const showDialog = (dialog: Omit<PageDialog, "resolve">) =>
     new Promise<boolean>((resolve) => {
@@ -115,6 +148,12 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   useEffect(() => {
     setViewedVersionIndexes({});
   }, [thread.id]);
+
+  useEffect(() => {
+    if (!newThreadTransition) return;
+    const timer = window.setTimeout(() => setNewThreadTransition(false), 520);
+    return () => window.clearTimeout(timer);
+  }, [newThreadTransition]);
 
   useEffect(() => {
     if (thread.status === "running") setViewedVersionIndexes({});
@@ -307,12 +346,49 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
     <AgentsShell user={user} activeThreadId={thread.id}>
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--ui-border)] px-6 max-md:pl-14">
-          <div className="min-w-0">
-            <h1 className="truncate text-[0.9375rem] font-semibold text-[var(--ui-text)]">{thread.title || "新任务"}</h1>
-            {thread.repo ? (
-              <p className="flex items-center gap-1.5 truncate text-[0.6875rem] text-[color:var(--ui-text-muted)]">
+          <div className="min-w-0 flex-1">
+            {editingTitle ? (
+              <input
+                value={draftTitle}
+                onChange={(e) => setDraftTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    const trimmed = draftTitle.trim();
+                    if (trimmed && trimmed !== (thread.title || "新任务")) {
+                      updateTitle.mutate(trimmed);
+                    }
+                    setEditingTitle(false);
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    setEditingTitle(false);
+                  }
+                }}
+                onBlur={() => {
+                  const trimmed = draftTitle.trim();
+                  if (trimmed && trimmed !== (thread.title || "新任务")) {
+                    updateTitle.mutate(trimmed);
+                  }
+                  setEditingTitle(false);
+                }}
+                className="relative z-10 block h-8 w-full min-w-0 truncate rounded bg-[var(--ui-bg)] px-1 text-[0.9375rem] font-semibold leading-7 text-[var(--ui-text)] outline-none ring-1 ring-[var(--ui-accent)]"
+                autoFocus
+              />
+            ) : (
+              <h1
+                className="truncate text-[0.9375rem] font-semibold text-[var(--ui-text)] cursor-default select-none"
+                onDoubleClick={() => {
+                  setDraftTitle(thread.title || "新任务");
+                  setEditingTitle(true);
+                }}
+              >
+                {thread.title || "新任务"}
+              </h1>
+            )}
+            {displayRepo ? (
+              <p className="relative z-0 mt-0.5 flex items-center gap-1.5 truncate text-[0.6875rem] text-[color:var(--ui-text-muted)]">
                 {thread.platformDisplay ? <span className="shrink-0 rounded bg-[var(--ui-panel-2)] px-1 py-px text-[0.625rem] font-medium">{thread.platformDisplay}</span> : null}
-                <span className="truncate">{thread.repo}</span>
+                <span className="truncate">{displayRepo}</span>
               </p>
             ) : <p className="text-[0.6875rem] text-[color:var(--ui-text-dim)]">未指定仓库</p>}
           </div>
@@ -320,17 +396,13 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
         </header>
         <div className="flex min-h-0 flex-1 flex-col">
           {hasMessages ? (
-            <div className={`relative flex min-h-0 flex-1 flex-col overflow-hidden ${sendTransition ? "send-transition" : ""}`}>
-              {sendTransition && (
-                <div className="pointer-events-none absolute inset-x-0 top-2 z-20 flex justify-center">
-                  <span className="send-transition-pill">正在发送指令…</span>
-                </div>
-              )}
+            <div className={`relative flex min-h-0 flex-1 flex-col overflow-hidden ${sendTransition ? "send-transition" : ""} ${newThreadTransition ? "new-thread-entry" : ""}`}>
               <MessageView
                 messages={visibleMessages}
                 threadId={thread.id}
                 isStreaming={isViewingCurrentVersion && isStreaming}
                 contentWidthClass="max-w-4xl"
+                completedElapsedMs={completedElapsedMs}
                 liveStatus={liveStatus}
                 editableMessageId={isViewingCurrentVersion && !hasActiveRun ? latestUserMessage?.id : null}
                 onEditMessage={handleEditMessage}
@@ -339,7 +411,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                 onSelectionChange={setSelection}
                 versionNavigations={versionNavigations}
               />
-              <div className="shrink-0 px-4 pb-4">
+              <div className={`shrink-0 px-4 pb-4 ${newThreadTransition ? "new-task-input" : ""}`}>
                 <div className="mx-auto w-full min-w-0 max-w-4xl">
                   {runFailed ? (
                     <p className="mb-3 text-sm text-[color:var(--ui-danger)]">
@@ -368,6 +440,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                     compact
                     busy={hasActiveRun}
                     disabled={sendMessage.isPending || !isViewingCurrentVersion}
+                    readOnly={!isViewingCurrentVersion}
                     onSubmit={handleSubmit}
                     onStop={() => cancelThread.mutate()}
                     stopping={cancelThread.isPending}

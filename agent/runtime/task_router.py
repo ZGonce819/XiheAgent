@@ -302,7 +302,11 @@ def delete_task(thread_id: str) -> bool:
 
     Store 负责删除业务索引和运行记录；checkpointer 负责删除 LangGraph thread state。
     两者都清理后，页面历史和 Agent 上下文才会真正消失。
+    沙盒模式下远程沙箱也会一并销毁。
     """
+
+    # 先销毁远程沙箱（在删除业务记录前执行，避免丢失沙箱引用）
+    _destroy_thread_sandbox(thread_id)
 
     deleted = get_store().delete_thread(thread_id)
     if not deleted:
@@ -316,3 +320,36 @@ def delete_task(thread_id: str) -> bool:
         else:
             logger.exception("删除 checkpoint 失败：thread_id=%s", thread_id)
     return True
+
+
+def _destroy_thread_sandbox(thread_id: str) -> None:
+    """销毁线程关联的远程沙箱。
+
+    先尝试从内存缓存中销毁 backend 实例，再清理注册表中的残留记录。
+    任何环节失败均不阻断删除流程。
+    """
+    try:
+        from config.app_config import get_settings
+
+        if not get_settings().use_sandbox:
+            return
+
+        # 从 server.py 的内存缓存中销毁 backend
+        from server import _BACKENDS
+        from backends.opensandbox import OpenSandboxBackend
+
+        backend = _BACKENDS.pop(thread_id, None)
+        if isinstance(backend, OpenSandboxBackend):
+            logger.info("删除线程时销毁沙箱：thread_id=%s sandbox_id=%s", thread_id, backend.sandbox_id)
+            backend.destroy()
+
+        # 清理注册表中的残留记录
+        from store.sandbox_repo import SandboxRepo
+
+        repo = SandboxRepo()
+        removed = repo.delete_by_thread(thread_id)
+        if removed:
+            logger.info("已清理沙箱注册表：%d 条（thread_id=%s）", removed, thread_id)
+
+    except Exception:
+        logger.warning("销毁线程沙箱失败：thread_id=%s", thread_id, exc_info=True)
