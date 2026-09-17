@@ -13,6 +13,8 @@
 - 📊 **多平台 SCM 集成** - 支持 Gitee / GitHub / Codeup，自动检测平台并路由到对应工具
 - 🧠 **长期记忆系统** - 工作区级和仓库级记忆，支持跨会话知识积累
 - 🎯 **意图识别路由** - 自动区分编码任务、方案生成、同步操作等不同流程
+- 🎛️ **自定义模型配置** - 支持通过 API 配置自定义模型（API Key/Base URL/模型名），可在对话中切换
+- 🔒 **会话环境隔离** - 自动追踪会话创建环境（local/sandbox），防止跨环境继续对话
 - 🖥️ **现代化前端** - React + Vite + TanStack Router，响应式设计，支持深色模式
 
 ## 技术栈
@@ -23,7 +25,7 @@
 |------|----------|
 | Web 框架 | FastAPI + Uvicorn |
 | Agent 框架 | LangGraph + DeepAgents v3 |
-| 语言模型 | DeepSeek API (deepseek-v4-pro) |
+| 语言模型 | OpenAI 兼容接口（支持自定义模型配置） |
 | 业务数据存储 | MySQL (pymysql) - Thread/Run/Finding 等 |
 | 长期记忆存储 | PostgreSQL (psycopg) - LangGraph Store |
 | Checkpoint 存储 | Redis (langgraph-checkpoint-redis) |
@@ -235,7 +237,7 @@ copy .env.example .env
 
 关键配置项：
 ```ini
-# DeepSeek API
+# DeepSeek API（使用自定义模型时可选）
 DEEPSEEK_API_KEY=your-api-key-here
 
 # SCM 平台 Token（按需配置使用的平台）
@@ -317,6 +319,7 @@ xihe-agent/
 ├── config/                # 配置管理
 │   ├── app_config.py      # Settings 单例配置
 │   ├── env_config.py      # 环境变量加载
+│   ├── model_config.py    # 自定义模型配置管理
 │   └── logging_config.py  # 日志配置
 │
 ├── agent/                 # Agent 核心模块
@@ -389,6 +392,7 @@ xihe-agent/
 │   ├── plan_repo.py       # thread_plans 表
 │   ├── finding_repo.py    # review_findings 表
 │   ├── setting_repo.py    # settings 表（键值存储）
+│   ├── sandbox_repo.py    # sandbox_registry 表（线程-沙盒映射）
 │   ├── mapping_repo.py    # repo_workspace_mappings 表
 │   ├── mysql_store.py     # LocalMySQLStore Facade（组合所有 Repo）
 │   └── __init__.py        # Store 导出
@@ -459,6 +463,30 @@ xihe-agent/
 
 中间件在 Agent 运行前后执行，负责上下文注入、消息清洗、工具异常捕获、运行限制等横切关注点。
 
+### 自定义模型配置 (`config/model_config.py`)
+
+系统支持通过 API 配置自定义模型，优先级如下：
+
+1. **对话级指定**：用户在对话中选择的自定义模型
+2. **默认自定义模型**：通过 API 设置为默认的自定义模型
+3. **内置模型覆盖**：通过 API 修改的内置模型配置
+4. **环境变量回退**：`.env` 中的 `DEEPSEEK_API_KEY` 等配置
+
+自定义模型配置存储在 `data/custom_models.json`，包含：
+- `name`: 显示名称
+- `model_name`: 模型标识符（如 `deepseek-v4-pro`）
+- `api_key`: API 密钥
+- `api_base`: API 基础地址
+- `is_default`: 是否为默认模型
+
+### 会话环境隔离
+
+系统自动追踪每个会话的创建环境（`backend_type` 字段）：
+- `local`: 本地 Shell 执行环境
+- `sandbox`: OpenSandbox 沙盒环境
+
+当前端检测到会话环境与当前模式不匹配时，会显示只读提示并禁用输入，防止跨环境继续对话导致的问题。
+
 ## API 接口
 
 ### 基础接口
@@ -477,13 +505,25 @@ GET  /dashboard/api/threads/{id} # 会话详情
 POST /dashboard/api/threads/stream-message         # 创建新会话
 POST /dashboard/api/threads/{id}/stream-message    # 追加对话轮次
 DELETE /dashboard/api/threads/{id}                 # 删除会话
+PATCH /dashboard/api/threads/{id}/title            # 修改会话标题
+```
+
+### 自定义模型管理
+
+```
+GET    /dashboard/api/custom-models              # 获取自定义模型列表
+POST   /dashboard/api/custom-models              # 创建自定义模型
+PUT    /dashboard/api/custom-models/{id}         # 更新自定义模型
+DELETE /dashboard/api/custom-models/{id}         # 删除自定义模型
+GET    /dashboard/api/builtin-model              # 获取内置模型配置
+PUT    /dashboard/api/builtin-model              # 更新内置模型配置
 ```
 
 ## 环境变量
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `DEEPSEEK_API_KEY` | DeepSeek API 密钥 | *必填* |
+| `DEEPSEEK_API_KEY` | DeepSeek API 密钥（使用自定义模型时可选） | *可选* |
 | `GITEE_TOKEN` | Gitee 访问令牌 | *按需* |
 | `GITHUB_TOKEN` | GitHub 访问令牌 | *按需* |
 | `CODEUP_TOKEN` | Codeup 访问令牌 | *按需* |
