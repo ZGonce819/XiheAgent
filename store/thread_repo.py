@@ -35,10 +35,21 @@ class ThreadRepo(ConnectionManager):
                 branch_name VARCHAR(128),
                 pr_url VARCHAR(500),
                 latest_run_status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                backend_type VARCHAR(16) NOT NULL DEFAULT 'local',
                 created_at VARCHAR(32) NOT NULL,
                 updated_at VARCHAR(32) NOT NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """)
+        # 兼容已有表：补充新增列
+        for ddl in (
+            "ALTER TABLE runs ADD COLUMN base_commit VARCHAR(64) NULL",
+            "ALTER TABLE runs ADD COLUMN head_commit VARCHAR(64) NULL",
+            "ALTER TABLE threads ADD COLUMN backend_type VARCHAR(16) NOT NULL DEFAULT 'local'",
+        ):
+            try:
+                self.execute(ddl)
+            except Exception:
+                pass
 
     def upsert_thread(
         self,
@@ -52,6 +63,7 @@ class ThreadRepo(ConnectionManager):
         pr_url: str | None = None,
         user_prompt: str | None = None,
         latest_run_status: str = "pending",
+        backend_type: str | None = None,
     ) -> None:
         """创建或更新一条 thread 记录。
 
@@ -67,6 +79,8 @@ class ThreadRepo(ConnectionManager):
             pr_url: Pull Request 地址。
             user_prompt: 用户原始输入。
             latest_run_status: 最近一次运行状态，默认 ``pending``。
+            backend_type: 执行环境类型（``"local"`` 或 ``"sandbox"``），
+                默认 ``None`` 表示不更新此字段。
 
         Returns:
             无返回值。
@@ -74,13 +88,15 @@ class ThreadRepo(ConnectionManager):
         existing = self.get_thread(thread_id)
         now = utc_now()
         created_at = existing["created_at"] if existing else now
+        # 新建时使用传入值或默认 local；更新时保留原值（除非显式传入）
+        effective_backend = backend_type or (existing.get("backend_type") if existing else None) or "local"
 
         self.execute(
             """
             INSERT INTO threads
                 (thread_id, title, user_prompt, repo_url, repo_owner, repo_name,
-                 branch_name, pr_url, latest_run_status, created_at, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 branch_name, pr_url, latest_run_status, backend_type, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
                 user_prompt = COALESCE(VALUES(user_prompt), user_prompt),
                 repo_url = COALESCE(VALUES(repo_url), repo_url),
@@ -89,11 +105,12 @@ class ThreadRepo(ConnectionManager):
                 branch_name = COALESCE(VALUES(branch_name), branch_name),
                 pr_url = COALESCE(VALUES(pr_url), pr_url),
                 latest_run_status = VALUES(latest_run_status),
+                backend_type = VALUES(backend_type),
                 updated_at = VALUES(updated_at)
             """,
             (
                 thread_id, title, user_prompt, repo_url, repo_owner, repo_name,
-                branch_name, pr_url, latest_run_status, created_at, now,
+                branch_name, pr_url, latest_run_status, effective_backend, created_at, now,
             ),
         )
 

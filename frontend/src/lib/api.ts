@@ -84,6 +84,7 @@ export interface Profile {
   auto_fix_ci?: boolean;
   create_prs?: boolean;
   review_draft_prs?: boolean | null;
+  backendType?: string;
   updated_at?: string;
 }
 

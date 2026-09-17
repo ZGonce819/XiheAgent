@@ -193,6 +193,7 @@ export interface AgentThread {
   effort?: string | null
   source?: AgentSource
   status: AgentStatus
+  backendType?: string
   createdAt: number
   updatedAt: number
   messages: Array<Message>

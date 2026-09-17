@@ -12,6 +12,7 @@ import { addPendingPrompt, dropPendingPrompts, getPendingPrompts } from "@/lib/a
 import { useAgentThreadStream } from "@/lib/agents/useThreadStream";
 import { normalizeThreadHistory } from "@/lib/agents/useThreadStream";
 import { useModelOptions } from "@/lib/agents/useModelOptions";
+import { useProfile } from "@/lib/profile";
 import { agentsApi } from "@/lib/agents/api";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
@@ -93,6 +94,10 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   );
 
   const { models, defaultSelection } = useModelOptions();
+  const profile = useProfile();
+  const currentBackendType = profile.data?.backendType ?? "local";
+  const isBackendMismatch = (thread.backendType ?? "local") !== currentBackendType;
+  const backendMismatchLabel = (thread.backendType ?? "local") === "sandbox" ? "沙箱" : "本地";
   const threadSelection = useMemo<ModelSelection | null>(() => {
     if (!thread.model || !thread.effort) return null;
     const supported = models.some(
@@ -404,7 +409,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                 contentWidthClass="max-w-4xl"
                 completedElapsedMs={completedElapsedMs}
                 liveStatus={liveStatus}
-                editableMessageId={isViewingCurrentVersion && !hasActiveRun ? latestUserMessage?.id : null}
+                editableMessageId={isViewingCurrentVersion && !hasActiveRun && !isBackendMismatch ? latestUserMessage?.id : null}
                 onEditMessage={handleEditMessage}
                 models={models}
                 selection={activeSelection}
@@ -435,12 +440,17 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                       </button>
                     </div>
                   )}
+                  {isBackendMismatch && (
+                    <div className="mb-3 flex items-center gap-3 border-l-2 border-[var(--ui-accent)] bg-[var(--ui-panel)] px-3 py-2 text-xs text-[color:var(--ui-text-muted)]">
+                      <span>此对话在{backendMismatchLabel}环境中创建，当前{currentBackendType === "sandbox" ? "沙箱" : "本地"}模式下只读。切换回{backendMismatchLabel}模式后可继续对话。</span>
+                    </div>
+                  )}
                   <AgentPromptBar
-                    placeholder={isViewingCurrentVersion ? "继续输入指令" : "历史版本不可发送"}
+                    placeholder={isViewingCurrentVersion ? (isBackendMismatch ? "环境不匹配，不可发送" : "继续输入指令") : "历史版本不可发送"}
                     compact
                     busy={hasActiveRun}
-                    disabled={sendMessage.isPending || !isViewingCurrentVersion}
-                    readOnly={!isViewingCurrentVersion}
+                    disabled={sendMessage.isPending || !isViewingCurrentVersion || isBackendMismatch}
+                    readOnly={!isViewingCurrentVersion || isBackendMismatch}
                     onSubmit={handleSubmit}
                     onStop={() => cancelThread.mutate()}
                     stopping={cancelThread.isPending}

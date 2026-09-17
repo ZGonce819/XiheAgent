@@ -109,6 +109,7 @@ def dashboard_profile() -> dict[str, Any]:
         "auto_fix_ci": False,
         "create_prs": True,
         "review_draft_prs": None,
+        "backendType": "sandbox" if get_settings().use_sandbox else "local",
     }
 
 
@@ -195,6 +196,16 @@ async def dashboard_stream_existing_message(
         HTTPException: 仓库地址解析失败时返回 400。
     """
     task = get_task(thread_id)
+    # 检查环境匹配：不同 backend 创建的对话不能继续
+    if task is not None:
+        thread_backend = task.get("backend_type") or "local"
+        current_backend = "sandbox" if get_settings().use_sandbox else "local"
+        if thread_backend != current_backend:
+            env_label = "沙箱" if thread_backend == "sandbox" else "本地"
+            raise HTTPException(
+                status_code=409,
+                detail=f"此对话在{env_label}环境中创建，请切换到{env_label}模式后继续",
+            )
     try:
         repo_url = normalize_repo_url(body.repo, fallback=(task or {}).get("repo_url"))
     except ValueError as exc:

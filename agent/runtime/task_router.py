@@ -75,6 +75,8 @@ def initialize_task_record(
 
     thread_id = thread_id or str(uuid.uuid4())
     repo = parse_repo_url(repo_url)
+    from config.app_config import get_settings
+    backend_type = "sandbox" if get_settings().use_sandbox else "local"
     get_store().upsert_thread(
         thread_id=thread_id,
         title=prompt[:80] or f"{repo.owner}/{repo.repo}",
@@ -83,6 +85,7 @@ def initialize_task_record(
         repo_owner=repo.owner,
         repo_name=repo.repo,
         latest_run_status="running",
+        backend_type=backend_type,
     )
     record_event(thread_id, "created", "任务已创建", status="completed")
     return thread_id
@@ -178,6 +181,8 @@ def run_agent_task(
     repo = parse_repo_url(repo_url)
     logger.info("仓库解析成功：owner=%s repo=%s", repo.owner, repo.repo)
     record_event(thread_id, "repo", "解析仓库", status="completed")
+    from config.app_config import get_settings
+    backend_type = "sandbox" if get_settings().use_sandbox else "local"
     store.upsert_thread(
         thread_id=thread_id,
         title=coding_prompt[:80] or f"{repo.owner}/{repo.repo}",
@@ -186,6 +191,7 @@ def run_agent_task(
         repo_owner=repo.owner,
         repo_name=repo.repo,
         latest_run_status="running",
+        backend_type=backend_type,
     )
     run_id = run_id or str(uuid.uuid4())
     # 延迟导入，避免 services 包的兼容导出在 runtime 初始化期间形成循环依赖。

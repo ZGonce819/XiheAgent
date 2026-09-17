@@ -69,6 +69,7 @@ class LocalMySQLStore:
         pr_url: str | None = None,
         user_prompt: str | None = None,
         latest_run_status: str = "pending",
+        backend_type: str | None = None,
     ) -> None:
         """创建或更新一条 thread 记录。
 
@@ -82,6 +83,7 @@ class LocalMySQLStore:
             pr_url: Pull Request 地址。
             user_prompt: 用户原始输入。
             latest_run_status: 最近一次运行状态，默认 ``"pending"``。
+            backend_type: 执行环境类型（``"local"`` 或 ``"sandbox"``）。
         """
         self.thread_repo.upsert_thread(
             thread_id=thread_id,
@@ -93,6 +95,7 @@ class LocalMySQLStore:
             pr_url=pr_url,
             user_prompt=user_prompt,
             latest_run_status=latest_run_status,
+            backend_type=backend_type,
         )
 
     def get_thread(self, thread_id: str) -> dict[str, Any] | None:
