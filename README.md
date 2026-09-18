@@ -657,6 +657,63 @@ E:/my_project/Xihe/.xihe-agent/skills/           ← local（项目文件夹已�
 
 > ⚠️ 技能改动**下一次构建智能体时**才会生效（`SkillsMiddleware` 在建图时读取技能目录），当前会话内无法立即加载。沙箱会话下一次构建时会重新同步技能到容器，因此上传完技能后发下一条消息即可看到。
 
+#### 技能检索开关
+
+技能目录（每个技能的 `name` + `description` + 路径）会被拼进**每一次模型调用**的 system prompt，且主 Agent 与两个子 Agent 各注入一份。技能变多以后这笔成本线性上涨，因此个人设置里提供了可选的检索开关。
+
+| 模式 | 行为 |
+|------|------|
+| `off`（默认） | 始终注入全部技能，与未引入检索时逐字一致 |
+| `auto` | 技能数**超过** `auto_threshold`（默认 60）时才检索 |
+| `on` | 每次都按当前任务检索 |
+
+开启后，系统用最后一条用户消息作为查询，按 BM25-lite 词法打分（中文按二元组切分，与 `pg_trgm` 思路一致，不需要分词器与向量库）挑出 `top_k`（默认 20）个技能注入。
+
+**参与打分的文本，和最终写进提示词的文本，不是同一份**：
+
+| | 内容 | 去向 |
+|---|---|---|
+| 写进提示词 | `name` + `description` + `path` | 每个技能两行 |
+| 参与打分 | 上面这些 + `metadata` 全部键值 | 只用于打分，**不写进提示词** |
+| 技能正文 | `SKILL.md` 的 body | 既不参与打分也不写进提示词，模型命中后用 `read_file` 按需读取 |
+
+打分时看得比写进去的多，是为了让命中更准：`metadata` 里可以放 `keywords` / `when_to_use` 这类额外提示，`path` 里的作用域信息（如 `.project-set/Xihe`）会让「提到项目名」自然抬高该项目专属技能。但写进提示词的永远只有那两行摘要 —— 技能正文自始至终不进入提示词，这是控制成本的关键，也是 DeepAgents 渐进披露（progressive disclosure）的原有约定。
+
+因此写技能时：**「做什么 + 什么时候用 + 关键词」都要写进 `description`**（技能规范要求 description 同时描述用途与触发条件，上限 1024 字符），更细的提示可以放进 `metadata`。
+
+三条安全性质：
+
+- **常驻技能不受额度约束**：`prompt.py` 按名字引用了 `repo-bootstrap-analysis`、`ai-coding-implementation`、`code-review`，它们始终出现在提示词里，并优先占用 `top_k` 名额；
+- **fail-open（宁可多列几个）**：查询为空、无任何命中、`top_k` 非法或检索过程抛异常时，一律回退为列出全部技能；
+- **不切断读取通道**：检索只筛选写进提示词的技能列表，模型仍可通过 `list_skills` 与 `read_file` 触达未列出的技能。
+
+改动在**下一条消息**生效，无需重启：中间件挂在 `wrap_model_call → modify_request`（每次模型调用都执行一次），而不是把结果写进会被 checkpoint 持久化的 `skills_metadata`。
+
+实现上有一个关键点：DeepAgents 在 `deepagents/graph.py` 内部硬编码构造 `SkillsMiddleware`，没有对外注入点，但它合并调用方 `middleware=` 的规则是**按 `.name` 原位替换**（`.name` 默认取类名）。因此 `agent/middleware/skill_retrieval.py` 里的类**刻意与内置实现同名**，靠这一机制顶替它，既不用 monkeypatch 第三方包，也不用重写技能加载逻辑。若把类名改掉，合并会退化成「新增一个中间件」，`create_agent` 会因同名冲突直接报错 —— 失败是响亮的，不会静默失效。
+
+#### 实测收益
+
+`eval/skill_retrieval/` 是这套开关的端到端评估：造 150 条真实落盘的技能，走生产同一条链路（`LocalShellBackend` → DeepAgents 加载器 → 中间件渲染），量模型真正收到的提示词。
+
+```bash
+.venv/Scripts/python.exe -m eval.skill_retrieval --label baseline
+```
+
+150 条技能、25 条查询、`top_k=20` 下的实测结果：
+
+| 指标 | `off`（默认） | `on` | 变化 |
+|---|---|---|---|
+| 技能段字符数 | 20334 | 5041 | **-75.2%** |
+| 平均列出技能数 | 150 | 25.2 | -124.8 |
+| 整条提示词 token（含基础提示词） | 15050 | 9074 | -39.7% |
+| 门槛样本命中率 | 100%（基线） | 100%（20/20） | — |
+
+`top_k` 收紧到 5 时命中率仍是 100% —— 注意此时 3 个名额已被常驻技能占掉，留给排序的只有 2 个，也就是说相关技能稳定排在前列。
+
+**没测的**：模型是否真的选对技能并完成任务（需要真实 LLM 运行）。评估只量提示词的形状。另有一个已知边界：领域外查询（如「帮我写一首关于秋天的诗」）在中文二元组分词下切不出与技能目录重合的词元，按 fail-open 设计列出全部技能，这类查询省不下长度。
+
+评估自带负向对照（`--negative-control`）：把打分换成「不看查询、按目录取前 N 条」，命中率应掉到 20% —— 如果还能通过，说明评估本身失效。一个恒过的评估比没有评估更糟。
+
 ### 命令审批与安全边界
 
 XiheAgent 对 `execute` 工具采用统一的三段式策略：`ALLOW` 直接执行，`REQUIRE_APPROVAL` 通过 LangGraph 原生 interrupt 暂停，`DENY` 直接拒绝。暂停点由现有 Redis Checkpoint 保存，用户点击“允许一次”或“拒绝”后，服务端用 `Command(resume={"decisions": [...]})` 恢复同一个会话；同步的 `execute()` 不等待人工输入，也不需要额外的 Redis 队列。
@@ -742,6 +799,15 @@ POST   /dashboard/api/skills/upload              # 上传技能（.md 或 .zip�
 > 旧参数值 `project` 会自动折叠为 `local`，保持向后兼容。
 
 `GET /dashboard/api/skills` 返回的 `scopes` 始终包含三项（未指定项目时后两项标 `available: false`），`writableScopes` 则按当前项目实际可写性动态给出。
+
+### 技能检索设置
+
+```
+GET    /dashboard/api/skill-retrieval-settings   # 读取检索开关（含模式选项与取值区间）
+PUT    /dashboard/api/skill-retrieval-settings   # 更新检索开关（mode/top_k/auto_threshold，均可缺省）
+```
+
+配置持久化在 `<data_dir>/skill_retrieval.json`，未配置或文件损坏时回退为 `mode=off`。越界或非法的入参返回 400，不做静默夹取。语义见「技能系统 → 技能检索开关」。
 
 ### 工作目录管理
 

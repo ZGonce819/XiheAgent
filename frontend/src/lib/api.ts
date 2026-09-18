@@ -135,6 +135,16 @@ export interface CommandApprovalSettings {
   lockedRules: Array<{ label: string; action: "approval" | "deny" }>
 }
 
+export type SkillRetrievalMode = "off" | "auto" | "on"
+
+export interface SkillRetrievalSettings {
+  mode: SkillRetrievalMode
+  top_k: number
+  auto_threshold: number
+  modes: Array<{ id: SkillRetrievalMode; label: string; description: string }>
+  limits: Record<"top_k" | "auto_threshold", { min: number; max: number; default: number }>
+}
+
 export interface OptionsPayload {
   models: Array<ModelOption>
   default_agent_model: string
@@ -513,6 +523,15 @@ export const api = {
     body: Pick<CommandApprovalSettings, "local" | "sandbox">
   ) =>
     request<CommandApprovalSettings>("/command-approval-settings", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  getSkillRetrievalSettings: () =>
+    request<SkillRetrievalSettings>("/skill-retrieval-settings"),
+  saveSkillRetrievalSettings: (
+    body: Partial<Pick<SkillRetrievalSettings, "mode" | "top_k" | "auto_threshold">>
+  ) =>
+    request<SkillRetrievalSettings>("/skill-retrieval-settings", {
       method: "PUT",
       body: JSON.stringify(body),
     }),

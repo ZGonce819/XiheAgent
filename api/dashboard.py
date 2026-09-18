@@ -43,6 +43,10 @@ from config.model_config import (
     update_builtin_model,
     update_custom_model,
 )
+from config.skill_retrieval_config import (
+    get_skill_retrieval_preferences,
+    update_skill_retrieval_preferences,
+)
 from schemas.request_schema import (
     DashboardEditPreviewRequest,
     DashboardProjectBindFolderRequest,
@@ -261,6 +265,21 @@ def dashboard_command_approval_settings() -> dict[str, Any]:
 def dashboard_update_command_approval_settings(body: dict[str, Any]) -> dict[str, Any]:
     try:
         return update_command_approval_preferences(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@dashboard_router.get("/skill-retrieval-settings")
+def dashboard_skill_retrieval_settings() -> dict[str, Any]:
+    """返回技能检索（RAG）开关的当前配置。"""
+    return get_skill_retrieval_preferences()
+
+
+@dashboard_router.put("/skill-retrieval-settings")
+def dashboard_update_skill_retrieval_settings(body: dict[str, Any]) -> dict[str, Any]:
+    """更新技能检索开关。改动在下一条消息处理时生效，无需重启服务。"""
+    try:
+        return update_skill_retrieval_preferences(body)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

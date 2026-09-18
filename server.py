@@ -32,6 +32,7 @@ from agent.middleware import (
     ContextInjectionMiddleware,
     MessageSanitizeMiddleware,
     SanitizeToolInputsMiddleware,
+    SkillRetrievalMiddleware,
     ToolErrorMiddleware,
     ToolTrackingMiddleware,
 )
@@ -225,7 +226,11 @@ def _resolve_skill_sources(thread_id: str, backend_type: str | None) -> list[str
     return sources or []
 
 
-def _general_purpose_subagent(model: BaseChatModel, skill_sources: list[str]) -> SubAgent:
+def _general_purpose_subagent(
+    model: BaseChatModel,
+    skill_sources: list[str],
+    skill_middleware: SkillRetrievalMiddleware,
+) -> SubAgent:
     """构建通用分析子 Agent。
 
     子 Agent 只负责阅读、分析、总结和给主 Agent 提供建议，
@@ -234,6 +239,9 @@ def _general_purpose_subagent(model: BaseChatModel, skill_sources: list[str]) ->
     Args:
         model: 子 Agent 使用的语言模型实例。
         skill_sources: 要挂载的技能源虚拟路径列表，与主 Agent 保持一致。
+        skill_middleware: 技能检索中间件实例。DeepAgents 会在子 Agent 的默认
+            栈里构造一份内置 ``SkillsMiddleware``，同名实例会**原位替换**它，
+            因此三个 Agent 的技能注入口径才能保持一致。
 
     Returns:
         配置完成的通用子 Agent 字典，包含名称、描述、系统提示词、
@@ -245,10 +253,15 @@ def _general_purpose_subagent(model: BaseChatModel, skill_sources: list[str]) ->
         "system_prompt": GENERAL_PURPOSE_SUBAGENT["system_prompt"],
         "model": model,
         "skills": skill_sources,
+        "middleware": [skill_middleware],
     }
 
 
-def _code_reviewer_subagent(model: BaseChatModel, skill_sources: list[str]) -> SubAgent:
+def _code_reviewer_subagent(
+    model: BaseChatModel,
+    skill_sources: list[str],
+    skill_middleware: SkillRetrievalMiddleware,
+) -> SubAgent:
     """构建只读代码审查子 Agent。
 
     职责：读取规则、读取 SCM PR/MR 上下文、分析 diff、记录结构化 finding，
@@ -257,6 +270,7 @@ def _code_reviewer_subagent(model: BaseChatModel, skill_sources: list[str]) -> S
     Args:
         model: 子 Agent 使用的语言模型实例。
         skill_sources: 要挂载的技能源虚拟路径列表，与主 Agent 保持一致。
+        skill_middleware: 技能检索中间件实例，同名替换内置实现。
 
     Returns:
         配置完成的代码审查子 Agent 字典，包含名称、描述、系统提示词、
@@ -300,6 +314,7 @@ def _code_reviewer_subagent(model: BaseChatModel, skill_sources: list[str]) -> S
             list_review_findings,
         ],
         "skills": skill_sources,
+        "middleware": [skill_middleware],
     }
 
 
@@ -450,6 +465,13 @@ def get_agent(config: RunnableConfig):
     subagent_model = make_main_model(configurable.get("model_id"))
 
     skill_sources = _resolve_skill_sources(thread_id, backend_type)
+    # 技能检索中间件：类名与 DeepAgents 内置实现相同，靠「按名称原位替换」顶替它。
+    # backend 与 sources 必须与 create_deep_agent 收到的保持一致，否则替换后
+    # 加载不到技能源。三个 Agent 共用同一个实例。
+    skill_middleware = SkillRetrievalMiddleware(
+        backend=agent_backend,
+        sources=skill_sources,
+    )
 
     logger.info(
         "返回带 Backend 的 Agent：thread_id=%s task_kind=%s skills=%s",
@@ -493,8 +515,8 @@ def get_agent(config: RunnableConfig):
         ],
         system_prompt=get_system_prompt(task_kind),
         subagents=[
-            _general_purpose_subagent(subagent_model, skill_sources),
-            _code_reviewer_subagent(subagent_model, skill_sources),
+            _general_purpose_subagent(subagent_model, skill_sources, skill_middleware),
+            _code_reviewer_subagent(subagent_model, skill_sources, skill_middleware),
         ],
         backend=agent_backend,
         middleware=[
@@ -509,6 +531,7 @@ def get_agent(config: RunnableConfig):
                 exit_behavior="end",
             ),
             ToolErrorMiddleware(backend=backend),
+            skill_middleware,
         ],
         skills=skill_sources,
         memory=memory_paths,

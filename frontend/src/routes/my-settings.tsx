@@ -22,6 +22,7 @@ import type {
   CustomModelInput,
   BuiltinModel,
   CommandApprovalSettings,
+  SkillRetrievalSettings,
 } from "@/lib/api"
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
@@ -957,6 +958,137 @@ function CommandApprovalSection() {
   )
 }
 
+function SkillRetrievalSection() {
+  const queryClient = useQueryClient()
+  const settings = useQuery({
+    queryKey: ["skillRetrievalSettings"],
+    queryFn: api.getSkillRetrievalSettings,
+  })
+  const [draft, setDraft] = useState<SkillRetrievalSettings | null>(null)
+  const save = useMutation({
+    mutationFn: (value: SkillRetrievalSettings) =>
+      api.saveSkillRetrievalSettings({
+        mode: value.mode,
+        top_k: value.top_k,
+        auto_threshold: value.auto_threshold,
+      }),
+    onSuccess: (value) => {
+      setDraft(value)
+      void queryClient.invalidateQueries({
+        queryKey: ["skillRetrievalSettings"],
+      })
+    },
+  })
+  const value = draft ?? settings.data
+  if (!value) return null
+  const update = (patch: Partial<SkillRetrievalSettings>) =>
+    setDraft({ ...value, ...patch })
+  const setNumber = (key: "top_k" | "auto_threshold", raw: string) => {
+    if (raw.trim() === "") return
+    const next = Number(raw)
+    if (Number.isFinite(next)) update({ [key]: next })
+  }
+  const current = value.modes.find((mode) => mode.id === value.mode)
+  return (
+    <SettingsSection
+      title="技能检索"
+      description="技能列表会写进每次模型调用的系统提示词。技能变多以后可以开启检索，只列出当前任务用得上的技能。改动在下一条消息生效。"
+      contentClassName="overflow-hidden rounded-lg border"
+    >
+      <div className="p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium">检索模式</p>
+            <p className="text-xs text-muted-foreground">
+              {current?.description}
+            </p>
+          </div>
+          <Button
+            size="sm"
+            onClick={() => save.mutate(value)}
+            disabled={save.isPending}
+          >
+            {save.isSuccess && !save.isPending ? (
+              <CheckIcon className="approval-save-check size-3.5" weight="bold" />
+            ) : null}
+            {save.isPending
+              ? "保存中"
+              : save.isSuccess
+                ? "已保存"
+                : "保存设置"}
+          </Button>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-3">
+          {value.modes.map((mode) => (
+            <button
+              key={mode.id}
+              type="button"
+              onClick={() => update({ mode: mode.id })}
+              aria-pressed={value.mode === mode.id}
+              className={cn(
+                "rounded-md border px-3 py-2.5 text-left text-xs transition-colors",
+                value.mode === mode.id
+                  ? "border-foreground/40 bg-muted"
+                  : "border-border hover:bg-muted/50"
+              )}
+            >
+              <span className="block font-medium">{mode.label}</span>
+              <span className="mt-0.5 block text-muted-foreground">
+                {mode.description}
+              </span>
+            </button>
+          ))}
+        </div>
+        {value.mode === "off" ? null : (
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <label className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2.5 text-xs">
+              <span className="min-w-0">
+                <span className="block font-medium">最多列出几个技能</span>
+                <span className="mt-0.5 block text-muted-foreground">
+                  几个内置技能会一直列出，其余按相关度排
+                </span>
+              </span>
+              <Input
+                type="number"
+                min={value.limits.top_k.min}
+                max={value.limits.top_k.max}
+                value={value.top_k}
+                onChange={(event) => setNumber("top_k", event.target.value)}
+                className="w-[5.5rem] shrink-0 bg-background"
+                aria-label="最多列出几个技能"
+              />
+            </label>
+            {value.mode === "auto" ? (
+              <label className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2.5 text-xs">
+                <span className="min-w-0">
+                  <span className="block font-medium">超过几个技能开始筛选</span>
+                  <span className="mt-0.5 block text-muted-foreground">
+                    技能总数超过这个数时才筛选
+                  </span>
+                </span>
+                <Input
+                  type="number"
+                  min={value.limits.auto_threshold.min}
+                  max={value.limits.auto_threshold.max}
+                  value={value.auto_threshold}
+                  onChange={(event) =>
+                    setNumber("auto_threshold", event.target.value)
+                  }
+                  className="w-[5.5rem] shrink-0 bg-background"
+                  aria-label="超过几个技能开始筛选"
+                />
+              </label>
+            ) : null}
+          </div>
+        )}
+        <p className="mt-3 text-xs leading-5 text-muted-foreground">
+          筛选只影响提示词里列出的技能，技能本身不会失效：模型需要时仍能自己找到并加载没列出的技能。
+        </p>
+      </div>
+    </SettingsSection>
+  )
+}
+
 function WorkspaceSection() {
   const queryClient = useQueryClient()
   const workspace = useQuery({
@@ -1361,6 +1493,7 @@ function MySettingsPage() {
       <WorkspaceSection />
       <CustomModelsSection />
       <CommandApprovalSection />
+      <SkillRetrievalSection />
     </AppShell>
   )
 }
