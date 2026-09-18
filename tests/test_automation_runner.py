@@ -529,20 +529,29 @@ def test_resolve_workspace_swallows_lookup_failures(
 
 
 def test_token_usage_is_summed_across_the_round() -> None:
-    """一轮里模型可能被调用多次，用量要全加起来 —— 只算最后一条会严重低估。"""
+    """一轮里模型可能被调用多次，用量要全加起来 —— 只算最后一条会严重低估。
+
+    消息的实际形状是 ``{"type": ..., "content": ..., "usage_metadata": ...}``，
+    由 ``agent.runtime.streaming_runtime._message_dict`` 产出。
+    """
     messages = [
-        SimpleNamespace(usage_metadata={"total_tokens": 120}),
-        SimpleNamespace(usage_metadata={"total_tokens": 35}),
-        # 工具返回之类的消息没有用量，跳过即可。
-        SimpleNamespace(),
+        {"type": "ai", "content": "先看看仓库", "usage_metadata": {"total_tokens": 120}},
+        {"type": "tool", "content": "…"},
+        {"type": "ai", "content": "总结", "usage_metadata": {"total_tokens": 35}},
     ]
     assert _tokens_used(messages) == 155
+
+
+def test_token_usage_reads_langchain_objects_too() -> None:
+    """也兼容 LangChain 消息对象 —— 消息形状变了不该静默变成 0。"""
+    assert _tokens_used([SimpleNamespace(usage_metadata={"total_tokens": 7})]) == 7
 
 
 def test_missing_token_usage_counts_as_zero() -> None:
     """拿不到用量按 0 记 —— 统计是旁路信息，缺了不该把一轮好活判成失败。"""
     assert _tokens_used([]) == 0
-    assert _tokens_used([SimpleNamespace(usage_metadata=None)]) == 0
-    assert _tokens_used([SimpleNamespace(usage_metadata="不是字典")]) == 0
-    assert _tokens_used([SimpleNamespace(usage_metadata={"total_tokens": "坏值"})]) == 0
-    assert _tokens_used([SimpleNamespace(usage_metadata={"total_tokens": -5})]) == 0
+    assert _tokens_used([{"type": "ai", "content": "没有用量"}]) == 0
+    assert _tokens_used([{"usage_metadata": None}]) == 0
+    assert _tokens_used([{"usage_metadata": "不是字典"}]) == 0
+    assert _tokens_used([{"usage_metadata": {"total_tokens": "坏值"}}]) == 0
+    assert _tokens_used([{"usage_metadata": {"total_tokens": -5}}]) == 0

@@ -553,19 +553,30 @@ def _message_dict(message: Any) -> dict[str, Any]:
         message: LangChain 消息对象或其他类型的消息。
 
     Returns:
-        包含 type 和 content 的字典。
+        包含 type 和 content 的字典；消息带 token 用量时一并带上。用量是自动化任务
+        统计预算的唯一来源，这里丢掉就等于那项预算永远算不出来。
     """
 
     if isinstance(message, BaseMessage):
-        return {"type": message.type, "content": message.content}
+        payload: dict[str, Any] = {
+            "type": message.type,
+            "content": message.content,
+        }
+        usage = getattr(message, "usage_metadata", None)
+        if usage:
+            payload["usage_metadata"] = usage
+        return payload
     if isinstance(message, dict):
         # 部分 LangGraph/兼容模型返回已经序列化的消息字典。
         # 保留 type/role/content，避免后续正文提取把整个 dict 当成字符串。
-        return {
+        payload = {
             "type": message.get("type") or message.get("role") or "",
             "role": message.get("role"),
             "content": message.get("content") or message.get("text") or "",
         }
+        if message.get("usage_metadata"):
+            payload["usage_metadata"] = message["usage_metadata"]
+        return payload
     return {"type": type(message).__name__, "content": str(message)}
 
 

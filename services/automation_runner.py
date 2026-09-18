@@ -217,11 +217,14 @@ def resolve_workspace(thread_id: str, repo_url: str, *, backend_type: str) -> st
 def _tokens_used(messages: Sequence[object]) -> int:
     """把一轮里各条消息的 token 用量加起来。
 
-    模型每次调用都会在返回的消息上带 ``usage_metadata``。一轮里通常不止一次调用
-    （工具调用要来回几趟），所以要把整轮的消息都过一遍。
+    消息是 :func:`agent.runtime.streaming_runtime._message_dict` 产出的字典，带上
+    了模型返回的 ``usage_metadata``；这里也兼容 LangChain 消息对象，取不到就当这条
+    没有用量。
 
-    **拿不到用量时按 0 记，不能因此把这一轮判成失败。** 用量统计是给预算用的旁路
-    信息，缺了它只是预算算不准，活儿本身可能干得好好的。
+    一轮里通常不止一次模型调用（工具调用要来回几趟），所以要把整轮的消息都过一遍。
+
+    **拿不到用量时按 0 记，不能因此把这一轮判成失败。** 用量是给预算用的旁路信息，
+    缺了它只是预算算不准，活儿本身可能干得好好的。
 
     Args:
         messages: 这一轮结束时线程里的消息。
@@ -231,10 +234,14 @@ def _tokens_used(messages: Sequence[object]) -> int:
     """
     total = 0
     for message in messages:
-        usage = getattr(message, "usage_metadata", None)
-        if isinstance(usage, dict):
-            with contextlib.suppress(TypeError, ValueError):
-                total += max(0, int(usage.get("total_tokens") or 0))
+        if isinstance(message, Mapping):
+            usage = message.get("usage_metadata")
+        else:
+            usage = getattr(message, "usage_metadata", None)
+        if not isinstance(usage, Mapping):
+            continue
+        with contextlib.suppress(TypeError, ValueError):
+            total += max(0, int(usage.get("total_tokens") or 0))
     return total
 
 
