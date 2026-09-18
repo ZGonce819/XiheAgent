@@ -1427,9 +1427,16 @@ async def dashboard_stream_existing_message(
         latest_run = get_store().get_latest_run(thread_id)
         if latest_run:
             try:
-                rollback_run(repo_url, latest_run, get_store())
+                rolled_back = rollback_run(repo_url, latest_run, get_store())
             except RuntimeError as exc:
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
+            base = latest_run.get("base_commit")
+            head = latest_run.get("head_commit")
+            if not rolled_back and base and head and base != head:
+                raise HTTPException(
+                    status_code=409,
+                    detail="代码回退未生效：运行记录的版本信息不完整，请手动检查仓库状态",
+                )
         snapshot = conversation_snapshot(task, edited_message_id=body.edit_message_id)
         if body.edit_snapshot:
             snapshot["messages"] = body.edit_snapshot
@@ -1460,14 +1467,22 @@ def dashboard_edit_preview(thread_id: str, body: DashboardEditPreviewRequest) ->
     if not _is_latest_user_message(body.message_id, thread_id, messages, body.original_content):
         raise HTTPException(status_code=409, detail="只能编辑最近一条用户消息")
     index = next((i for i, message in enumerate(messages) if message.get("id") == body.message_id), len(messages) - 1)
+    latest_run = get_store().get_latest_run(thread_id)
+    committed_changes = bool(
+        latest_run
+        and latest_run.get("base_commit")
+        and latest_run.get("head_commit")
+        and latest_run["base_commit"] != latest_run["head_commit"]
+    )
+    uncommitted_changes = any(
+        event.get("kind") in {"edit", "delete", "move"}
+        for event in (task.get("run_events") or [])
+    ) and not committed_changes
     return {
         "message_id": body.message_id,
         "messages_to_replace": max(0, len(messages) - index),
-        "runs_to_replace": 1 if task.get("latest_run") else 0,
-        "code_changes_detected": any(
-            event.get("kind") in {"edit", "delete", "move"}
-            for event in (task.get("run_events") or [])
-        ),
+        "runs_to_replace": 1 if latest_run else 0,
+        "code_changes_detected": committed_changes or uncommitted_changes,
         "requires_rollback": bool(task.get("run_events") or len(messages) > index + 1),
     }
 

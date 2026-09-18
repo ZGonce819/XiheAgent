@@ -107,6 +107,13 @@ def build_streaming_response(
             # 消息建立新分支，保证连续编辑仍可用。
             if redis_client is None:
                 raise RuntimeError("无法访问会话 checkpoint，已拒绝回退")
+            # 安全检查：如果线程有多次运行记录，None 可能是枚举失败而非真正的首轮。
+            # 此时 delete_thread 会丢失所有 checkpoint 历史，必须拒绝。
+            run_count = get_store().count_runs(thread_id)
+            if run_count and run_count > 1:
+                raise RuntimeError(
+                    "无法定位回退起点：会话 checkpoint 枚举异常，已拒绝回退以保护历史数据"
+                )
             try:
                 checkpointer.delete_thread(thread_id)
             except Exception as exc:

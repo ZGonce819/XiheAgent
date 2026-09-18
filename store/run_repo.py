@@ -106,6 +106,14 @@ class RunRepo(ConnectionManager):
             (thread_id,),
         )
 
+    def count_runs(self, thread_id: str) -> int:
+        """统计某个 thread 的运行次数。"""
+        row = self.fetch_one(
+            "SELECT COUNT(*) AS cnt FROM runs WHERE thread_id = %s",
+            (thread_id,),
+        )
+        return int(row["cnt"]) if row else 0
+
     def delete_runs_by_thread(self, thread_id: str) -> int:
         """删除某个 thread 下的所有运行记录。
 

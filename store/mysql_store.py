@@ -253,6 +253,10 @@ class LocalMySQLStore:
         """
         return self.run_repo.get_latest_run(thread_id)
 
+    def count_runs(self, thread_id: str) -> int:
+        """统计某个 thread 的运行次数。"""
+        return self.run_repo.count_runs(thread_id)
+
     def add_conversation_version(self, thread_id: str, payload: dict[str, Any]) -> None:
         self.conversation_version_repo.add_version(thread_id, payload)
 

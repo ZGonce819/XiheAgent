@@ -65,12 +65,34 @@ def git_parent(repo_url: str, store: Any | None = None) -> str | None:
     return value if result.returncode == 0 and _COMMIT_RE.fullmatch(value) else None
 
 
-def git_is_dirty(repo_url: str, store: Any | None = None) -> bool:
+def git_changed_files(repo_url: str, base: str, head: str, store: Any | None = None) -> list[str]:
+    """Return file paths changed between two commits."""
+    path = repository_path(repo_url, store)
+    if not (path / ".git").exists():
+        return []
+    result = subprocess.run(
+        ["git", "-C", str(path), "diff", "--name-only", base, head],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=15,
+        check=False,
+    )
+    if result.returncode != 0:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def git_files_dirty(repo_url: str, files: list[str], store: Any | None = None) -> bool:
+    """Check whether any of the given files have uncommitted changes."""
     path = repository_path(repo_url, store)
     if not (path / ".git").exists():
         return False
+    if not files:
+        return False
     result = subprocess.run(
-        ["git", "-C", str(path), "status", "--porcelain"],
+        ["git", "-C", str(path), "status", "--porcelain", "--", *files],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -95,8 +117,9 @@ def rollback_run(repo_url: str, run: dict[str, Any], store: Any | None = None) -
     current = git_head(repo_url, store)
     if current != head:
         raise RuntimeError("仓库在任务完成后已有新的提交，已停止自动回退以避免覆盖新改动")
-    if git_is_dirty(repo_url, store):
-        raise RuntimeError("仓库存在未提交的新改动，已停止自动回退以避免覆盖新改动")
+    changed = git_changed_files(repo_url, base, head, store)
+    if git_files_dirty(repo_url, changed, store):
+        raise RuntimeError("Agent 修改过的文件存在未提交的新改动，已停止自动回退以避免覆盖新改动")
 
     result = subprocess.run(
         ["git", "-C", str(path), "reset", "--hard", base],
