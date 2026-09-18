@@ -21,7 +21,13 @@ from deepagents.backends.sandbox import BaseSandbox
 logger = logging.getLogger(__name__)
 
 
-def create_backend(*, thread_id: str | None = None, backend_type: str | None = None) -> BaseSandbox:
+def create_backend(
+    *,
+    thread_id: str | None = None,
+    backend_type: str | None = None,
+    local_folder: str | None = None,
+    global_workspace_root: str | None = None,
+) -> BaseSandbox:
     """根据配置创建对应的 Backend 实例。
 
     优先使用调用方显式传入的 ``backend_type``（来自前端用户选择），
@@ -30,10 +36,16 @@ def create_backend(*, thread_id: str | None = None, backend_type: str | None = N
     开启沙箱时返回 ``OpenSandboxBackend``（远程容器隔离），
     否则返回 ``LocalShellBackend``（本地受控执行层）。
 
+    当传入 ``local_folder`` 且未使用沙箱时，返回「本地文件夹模式」的
+    ``LocalShellBackend``：以该文件夹为项目根，写操作限制在文件夹内，
+    读操作可访问只读全局工作区 ``global_workspace_root``。
+
     Args:
         thread_id: 可选的会话 ID，沙箱模式下用于复用和注册。
         backend_type: 可选的运行环境类型，``"local"`` 或 ``"sandbox"``。
             为 ``None`` 时根据全局 ``USE_SANDBOX`` 配置决定。
+        local_folder: 可选的项目本地文件夹绝对路径；非空且非沙箱时启用本地文件夹模式。
+        global_workspace_root: 本地文件夹模式下使用的只读全局工作区根目录。
 
     Returns:
         符合 DeepAgents ``BaseSandbox`` 协议的 backend 实例。
@@ -54,6 +66,16 @@ def create_backend(*, thread_id: str | None = None, backend_type: str | None = N
             return create_opensandbox_backend(thread_id=thread_id)
         except Exception:
             logger.exception("OpenSandbox 创建失败，回退到 LocalShellBackend")
+
+    if local_folder:
+        from backends.local_shell import LocalShellBackend
+
+        logger.info("backend_type=local（本地文件夹模式），root=%s", local_folder)
+        return LocalShellBackend(
+            workspace=local_folder,
+            local_folder_mode=True,
+            global_workspace_root=global_workspace_root or get_settings().workspace_root,
+        )
 
     from backends.local_shell import get_local_shell_backend
 

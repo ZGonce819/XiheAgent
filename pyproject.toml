@@ -53,6 +53,7 @@ dev = [
     "black>=24.1.0",
     "mypy>=1.8.0",
     "isort>=5.13.0",
+    "import-linter>=2.0",
     "pytest>=7.4.0",
     "pytest-asyncio>=0.23.0",
 ]
@@ -64,20 +65,35 @@ xihe-agent-stop = "xihe.scripts.stop_all:main"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["xihe"]
+src = ["."]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "ARG", "SIM"]
 ignore = ["E501"]  # Line length handled by ruff automatically
 
 [tool.ruff.lint.isort]
-known-first-party = ["xihe"]
+# 本项目的顶层包直接位于仓库根目录（而非某个 src/xihe/ 下），
+# 必须显式声明为 first-party，否则 isort 会把它们当第三方与 langgraph 等混排。
+known-first-party = [
+    "agent",
+    "api",
+    "backends",
+    "config",
+    "database",
+    "models",
+    "schemas",
+    "scripts",
+    "services",
+    "store",
+    "tools",
+    "utils",
+]
 section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
 
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
-skip-magic-comma-trailing-commas = false
+skip-magic-trailing-comma = false
 
 [tool.mypy]
 python_version = "3.11"
@@ -87,6 +103,48 @@ disallow_untyped_defs = false
 disallow_incomplete_defs = false
 check_untyped_defs = true
 strict_optional = true
+
+[tool.importlinter]
+# 分层依赖契约：用可执行的规则固定包之间的依赖方向，
+# 防止再次出现 utils ↔ agent 这类跨层反向依赖导致的循环导入。
+# 运行方式：在项目根目录执行 `lint-imports`（由 import-linter 提供）。
+# 仅类型注解（if TYPE_CHECKING 分支）的 import 不构成运行时依赖，不计入契约。
+exclude_type_checking_imports = true
+root_packages = [
+    "agent",
+    "api",
+    "backends",
+    "config",
+    "database",
+    "models",
+    "schemas",
+    "services",
+    "store",
+    "tools",
+    "utils",
+]
+
+[[tool.importlinter.contracts]]
+# utils 是最底层的基础工具包，被上层业务包广泛依赖。
+# 它只能依赖 config 以及“依赖汇点”模块——即那些只依赖 config/第三方、
+# 绝不会回指 utils 的模块，如 agent.graph.model、database.redis（仅依赖 config.app_config）。
+# utils 绝不能反向 import 任何会（直接或间接）import utils 的上层业务包，否则成环。
+name = "utils 基础层禁止反向依赖上层业务包"
+type = "forbidden"
+source_modules = ["utils"]
+forbidden_modules = [
+    "agent.memory",
+    "agent.middleware",
+    "agent.runtime",
+    "agent.skills",
+    "api",
+    "backends",
+    "models",
+    "schemas",
+    "services",
+    "store",
+    "tools",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

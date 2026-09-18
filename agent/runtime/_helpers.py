@@ -12,11 +12,38 @@ import logging
 from typing import Any
 
 from agent.graph.checkpoint_history import extract_messages_from_writes, visible_checkpoint_messages
-from agent.graph.graph import get_checkpointer, get_langgraph_store
+from agent.graph.graph import get_checkpointer, get_langgraph_store, get_store
 from agent.memory.repo import ensure_repo_memory_initialized
 from server import get_agent
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_project_local_folder(thread_id: str) -> str | None:
+    """按 thread 反查其项目绑定的本地工作文件夹。
+
+    thread 记录里保存了 ``project_name``，项目再绑定到本地文件夹
+    （``project_local_folders`` 表）。未绑定或查询失败时返回 ``None``，
+    调用方据此回退到全局工作区。
+
+    Args:
+        thread_id: 会话唯一标识。
+
+    Returns:
+        本地文件夹绝对路径字符串；未绑定时返回 ``None``。
+    """
+    try:
+        store = get_store()
+        thread = store.get_thread(thread_id)
+        project_name = thread.get("project_name") if thread else None
+        if not project_name:
+            return None
+        record = store.get_project_folder(project_name)
+        folder = record.get("local_folder") if record else None
+        return folder if isinstance(folder, str) and folder.strip() else None
+    except Exception:
+        logger.warning("解析项目本地文件夹失败：thread_id=%s", thread_id, exc_info=True)
+        return None
 
 
 def _get_visible_messages(thread_id: str) -> list[dict[str, Any]]:
@@ -96,10 +123,10 @@ def build_agent_for_runtime(
 
 
 def ensure_repo_memory_for_repo(repo: Any, project_dir: str) -> None:
-    """根据固定项目目录初始化仓库级长期记忆文件。
+    """根据固定项目目录初始化仓库级长期记忆。
 
-    记忆正文通过 DeepAgents StoreBackend 写入 LangGraph Store，不再额外建立
-    SQLite 索引表。已有记忆不会被覆盖。
+    记忆正文通过 DeepAgents StoreBackend 写入 LangGraph Store。
+    已有记忆不会被覆盖。
 
     Args:
         repo: 仓库标识对象，包含 ``owner`` 和 ``repo`` 属性。

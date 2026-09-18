@@ -10,8 +10,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
-from backends.local_shell import LocalShellBackend
+if TYPE_CHECKING:
+    # 仅作类型注解使用（本文件已启用 from __future__ import annotations，注解为字符串惰性求值）。
+    # 放在 TYPE_CHECKING 分支可避免 utils 基础层在运行时反向依赖 backends 上层包。
+    from backends.local_shell import LocalShellBackend
 
 _SAFE_GIT_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/\-]{0,180}$")
 

@@ -15,6 +15,7 @@
 - 🎯 **意图识别路由** - 自动区分编码任务、方案生成、同步操作等不同流程
 - 🎛️ **自定义模型配置** - 支持通过 API 配置自定义模型（API Key/Base URL/模型名），可在对话中切换
 - 🔒 **会话环境隔离** - 自动追踪会话创建环境（local/sandbox），防止跨环境继续对话
+- 📁 **本地文件夹绑定** - 项目可绑定本地文件夹作为工作根目录，Agent 直接在用户项目中工作
 - ⏰ **自动化任务编排** - 支持定时任务和周期性自动化工作流
 - 🧩 **技能系统** - 内置可复用技能（代码审查、仓库引导等），支持技能安装与扩展
 - 🖥️ **现代化前端** - React + Vite + TanStack Router，响应式设计，支持深色模式
@@ -406,6 +407,7 @@ xihe-agent/
 │   ├── finding_repo.py    # review_findings 表
 │   ├── setting_repo.py    # settings 表（键值存储）
 │   ├── sandbox_repo.py    # sandbox_registry 表（线程-沙盒映射）
+│   ├── project_folder_repo.py # project_local_folders 表（项目-本地文件夹绑定）
 │   ├── mapping_repo.py    # repo_workspace_mappings 表
 │   ├── mysql_store.py     # LocalMySQLStore Facade（组合所有 Repo）
 │   └── __init__.py        # Store 导出
@@ -529,6 +531,18 @@ xihe-agent/
 
 当前端检测到会话环境与当前模式不匹配时，会显示只读提示并禁用输入，防止跨环境继续对话导致的问题。
 
+### 本地文件夹模式
+
+项目可以绑定一个本地文件夹作为工作根目录，绑定后 Agent 直接在该文件夹中工作：
+
+- **文件夹即项目根**：选定的本地文件夹就是项目根目录，不再经过全局工作区的 `/projects/<repo>` 中间层。
+- **Agent 目录布局**：系统自动在本地文件夹内维护 `.xihe-agent/{skills,reviews/<repo>/}` 目录结构。
+- **双根沙箱**：本地文件夹为可写区域，全局工作区（`.secrets`、运行时配置等）保持只读，无需修改 Workspace 权限模型。
+- **持久绑定**：`local_folder` 按项目名持久化到 MySQL（`project_local_folders` 表），同一项目的所有会话共享同一工作根目录。
+- **虚拟路径映射**：绑定后 `/skills/`、`/reviews/` 等虚拟路径自动映射到 `.xihe-agent/` 下的对应子目录。
+
+未绑定本地文件夹的项目继续使用传统的全局工作区模式。
+
 ### 自动化任务 (`config/automation_config.py`)
 
 自动化任务系统支持定时和周期性工作流：
@@ -629,8 +643,10 @@ DELETE /dashboard/api/skills/{name}              # 卸载技能
 ```
 GET    /dashboard/api/workspace                  # 获取工作目录配置
 PUT    /dashboard/api/workspace                  # 更新工作目录配置（workspace_root/projects_dir/skills_dir）
-GET    /dashboard/api/workspace/projects         # 获取项目列表
+GET    /dashboard/api/workspace/projects         # 获取项目列表（含 local_folder 绑定信息）
 GET    /dashboard/api/workspace/pick-folder      # 打开系统文件夹选择对话框
+POST   /dashboard/api/workspace/projects/bind-folder    # 绑定项目到本地文件夹
+DELETE /dashboard/api/workspace/projects/{project_name}/unbind-folder  # 解除项目本地文件夹绑定
 ```
 
 ## 环境变量

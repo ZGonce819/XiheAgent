@@ -525,8 +525,8 @@ def _destroy_thread_sandbox(thread_id: str) -> None:
             return
 
         # 从 server.py 的内存缓存中销毁 backend
-        from server import _BACKENDS
         from backends.opensandbox import OpenSandboxBackend
+        from server import _BACKENDS
 
         backend = _BACKENDS.pop(thread_id, None)
         if isinstance(backend, OpenSandboxBackend):

@@ -120,6 +120,7 @@ export interface WorkspaceInfo {
 export interface ProjectItem {
   name: string
   path: string
+  local_folder?: string | null
 }
 
 export interface ProjectList {
@@ -419,6 +420,16 @@ export const api = {
     }),
   pickFolder: () => request<{ path: string | null }>("/workspace/pick-folder"),
   listProjects: () => request<ProjectList>("/workspace/projects"),
+  bindProjectFolder: (body: { project_name: string; local_folder: string }) =>
+    request<{ project_name: string; local_folder: string }>(
+      "/workspace/projects/bind-folder",
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  unbindProjectFolder: (projectName: string) =>
+    request<{ project_name: string; unbound: boolean }>(
+      `/workspace/projects/${encodeURIComponent(projectName)}/unbind-folder`,
+      { method: "DELETE" },
+    ),
 }
 
 export function loginUrl(redirectTo?: string): string {

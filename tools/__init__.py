@@ -15,14 +15,30 @@ DeepAgents 创建智能体时会从这里统一导入项目内置工具，避免
 
 from __future__ import annotations
 
+# Codeup 工具：用于把已经推送的分支转换为 MR，并支持向 MR 写评论。
+from .codeup_tools import (
+    get_codeup_merge_request_context,
+    open_codeup_merge_request,
+    publish_codeup_mr_comment,
+)
+
 # 网页读取工具：用于读取用户给定的官方文档、错误页面或资料链接。
 from .fetch_url_tools import fetch_url
+
 # Gitee 工具：用于把已经推送的分支转换为 PR，并支持向 PR 写评论。
-from .gitee_tools import get_gitee_pull_request_context, open_gitee_pull_request, publish_gitee_pr_comment
+from .gitee_tools import (
+    get_gitee_pull_request_context,
+    open_gitee_pull_request,
+    publish_gitee_pr_comment,
+)
+
 # GitHub 工具：用于把已经推送的分支转换为 PR，并支持向 PR 写评论。
-from .github_tools import get_github_pull_request_context, open_github_pull_request, publish_github_pr_comment
-# Codeup 工具：用于把已经推送的分支转换为 MR，并支持向 MR 写评论。
-from .codeup_tools import get_codeup_merge_request_context, open_codeup_merge_request, publish_codeup_mr_comment
+from .github_tools import (
+    get_github_pull_request_context,
+    open_github_pull_request,
+    publish_github_pr_comment,
+)
+
 # Review 工具：用于结构化保存和读取代码审查发现。
 from .reviewer_tools import (
     add_review_finding,
@@ -31,6 +47,7 @@ from .reviewer_tools import (
     load_default_review_rules,
     validate_review_finding_location,
 )
+
 # 联网搜索工具：用于在本地上下文不足时补充外部公开资料。
 from .web_search import web_search
 

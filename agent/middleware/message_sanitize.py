@@ -24,9 +24,14 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Awaitable
+from typing import Any, Awaitable, Callable
 
-from langchain.agents.middleware.types import AgentMiddleware, AgentState, ModelRequest, ModelResponse
+from langchain.agents.middleware.types import (
+    AgentMiddleware,
+    AgentState,
+    ModelRequest,
+    ModelResponse,
+)
 from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, ToolMessage
 
 from config.constants import NON_TEXT_TOOL_BLOCK_TYPES, TEXT_BLOCK_TYPES

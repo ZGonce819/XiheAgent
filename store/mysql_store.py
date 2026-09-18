@@ -8,10 +8,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from store.event_repo import RunEventRepo
 from store.conversation_version_repo import ConversationVersionRepo
+from store.event_repo import RunEventRepo
 from store.finding_repo import FindingRepo
 from store.mapping_repo import MappingRepo
+from store.project_folder_repo import ProjectFolderRepo
 from store.run_repo import RunRepo
 from store.sandbox_repo import SandboxRepo
 from store.thread_repo import ThreadRepo
@@ -31,6 +32,7 @@ class LocalMySQLStore:
         self.event_repo = RunEventRepo()
         self.finding_repo = FindingRepo()
         self.mapping_repo = MappingRepo()
+        self.project_folder_repo = ProjectFolderRepo()
         self.conversation_version_repo = ConversationVersionRepo()
         self.sandbox_repo = SandboxRepo()
         self._init_schema()
@@ -42,6 +44,7 @@ class LocalMySQLStore:
         self.event_repo.ensure_table()
         self.finding_repo.ensure_table()
         self.mapping_repo.ensure_table()
+        self.project_folder_repo.ensure_table()
         self.conversation_version_repo.ensure_table()
         self.sandbox_repo.ensure_table()
 
@@ -52,6 +55,7 @@ class LocalMySQLStore:
         self.event_repo.close()
         self.finding_repo.close()
         self.mapping_repo.close()
+        self.project_folder_repo.close()
         self.conversation_version_repo.close()
         self.sandbox_repo.close()
 
@@ -158,6 +162,8 @@ class LocalMySQLStore:
     def rename_project(self, old_name: str, new_name: str) -> int:
         """把某个项目名下所有会话批量重命名。
 
+        同时同步该项目绑定的本地文件夹记录，保证改名后绑定不丢失。
+
         Args:
             old_name: 原项目名称。
             new_name: 新项目名称。
@@ -165,7 +171,9 @@ class LocalMySQLStore:
         Returns:
             受影响的会话条数。
         """
-        return self.thread_repo.rename_project(old_name, new_name)
+        affected = self.thread_repo.rename_project(old_name, new_name)
+        self.project_folder_repo.rename(old_name, new_name)
+        return affected
 
     def delete_thread(self, thread_id: str) -> bool:
         """删除一个 Dashboard 会话及其所有业务附属记录。
@@ -410,3 +418,56 @@ class LocalMySQLStore:
             映射字典列表。
         """
         return self.mapping_repo.list_mappings()
+
+    # ── Project Folder 操作（项目名 → 本地工作文件夹绑定）─────────────────────
+
+    def upsert_project_folder(self, project_name: str, local_folder: str) -> None:
+        """创建或更新项目到本地工作文件夹的绑定。
+
+        Args:
+            project_name: 项目名称。
+            local_folder: 本地文件夹绝对路径。
+        """
+        self.project_folder_repo.upsert(project_name, local_folder)
+
+    def get_project_folder(self, project_name: str) -> dict[str, Any] | None:
+        """按项目名查询本地文件夹绑定。
+
+        Args:
+            project_name: 项目名称。
+
+        Returns:
+            绑定记录字典，不存在时返回 None。
+        """
+        return self.project_folder_repo.get(project_name)
+
+    def list_project_folders(self) -> list[dict[str, Any]]:
+        """返回所有项目本地文件夹绑定，按更新时间降序。
+
+        Returns:
+            绑定记录字典列表。
+        """
+        return self.project_folder_repo.list_all()
+
+    def delete_project_folder(self, project_name: str) -> int:
+        """解除某个项目的本地文件夹绑定。
+
+        Args:
+            project_name: 项目名称。
+
+        Returns:
+            被删除的行数。
+        """
+        return self.project_folder_repo.delete(project_name)
+
+    def rename_project_folder(self, old_name: str, new_name: str) -> int:
+        """项目改名时同步更新本地文件夹绑定记录。
+
+        Args:
+            old_name: 原项目名称。
+            new_name: 新项目名称。
+
+        Returns:
+            受影响的行数。
+        """
+        return self.project_folder_repo.rename(old_name, new_name)

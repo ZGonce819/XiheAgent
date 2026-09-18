@@ -236,7 +236,8 @@ function ProjectGroup({
 
   return (
     <div className="mb-3">
-      <div className="group/proj flex items-center gap-1.5 px-2 py-1 text-[0.625rem] font-semibold tracking-wide text-[var(--ui-text-dim)]">
+      {/* 固定行高：避免悬停显示 size-4 操作按钮时撑高标题行，导致上下间距跳动 */}
+      <div className="group/proj flex h-6 items-center gap-1.5 px-2 text-[0.625rem] font-semibold tracking-wide text-[var(--ui-text-dim)]">
         <FolderOpen className="size-3 shrink-0" />
         <span className="min-w-0 flex-1 truncate">{projectName}</span>
         <button

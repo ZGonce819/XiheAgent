@@ -61,6 +61,18 @@ class DashboardProjectRenameRequest(BaseModel):
     new_name: str = Field(min_length=1, max_length=256, description="新项目名称")
 
 
+class DashboardProjectBindFolderRequest(BaseModel):
+    """项目绑定本地文件夹请求体。
+
+    Attributes:
+        project_name: 项目名称，绑定关系的业务键。
+        local_folder: 本地文件夹绝对路径，作为该项目的项目根。
+    """
+
+    project_name: str = Field(min_length=1, max_length=256, description="项目名称")
+    local_folder: str = Field(min_length=1, max_length=1000, description="本地文件夹绝对路径")
+
+
 class TaskCreateRequest(BaseModel):
     """通用任务创建请求体。
 

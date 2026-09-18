@@ -15,10 +15,10 @@ import logging
 from typing import Any
 
 from agent.graph.persistence import (
-    make_checkpointer,
-    make_langgraph_store,
     _verify_postgres_connection,
     _verify_redis_connection,
+    make_checkpointer,
+    make_langgraph_store,
 )
 from config.app_config import get_settings
 from database.postgres import build_pg_dsn

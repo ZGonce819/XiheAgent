@@ -22,6 +22,8 @@ from typing import Any
 
 from fastapi.responses import StreamingResponse
 
+from agent.graph.checkpoint_history import checkpoint_before_latest_user
+from agent.graph.graph import get_checkpointer
 from agent.runtime.events import clear_sse_callback, register_sse_callback
 from agent.runtime.task_router import (
     get_task,
@@ -29,12 +31,11 @@ from agent.runtime.task_router import (
     resume_agent_task,
     run_agent_task,
 )
-from config.approval_runtime import get_pending_approval
-from agent.graph.checkpoint_history import checkpoint_before_latest_user
-from agent.graph.graph import get_checkpointer
 from config.app_config import get_settings
+from config.approval_runtime import get_pending_approval
 from config.constants import SSE_HEADERS
 from services.thread_service import thread_meta_payload
+from utils.message_utils import extract_final_assistant_text
 from utils.redis_utils import (
     cleanup_stream,
     ensure_consumer_group,
@@ -42,7 +43,6 @@ from utils.redis_utils import (
     read_events,
 )
 from utils.thread_utils import user_visible_stream_text
-from utils.message_utils import extract_final_assistant_text
 
 logger = logging.getLogger(__name__)
 

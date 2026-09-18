@@ -11,8 +11,8 @@ from typing import Any
 
 from langgraph.config import get_config
 
-from agent.runtime.task_intent import is_read_only_task
-from config.constants import TaskKind, VALID_TASK_KINDS
+from config.constants import VALID_TASK_KINDS, TaskKind
+from utils.intent_utils import is_read_only_task
 
 
 def get_runtime_configurable() -> dict[str, Any]:

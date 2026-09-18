@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from agent.graph.graph import get_store
 from agent.runtime.events import record_event
+from utils.context_utils import get_runtime_thread_id, runtime_is_read_only_task
 from utils.gitee_utils import (
     create_pull_request,
     get_pull_request,
@@ -22,7 +23,6 @@ from utils.gitee_utils import (
     list_pull_request_files,
     post_pr_comment,
 )
-from utils.context_utils import get_runtime_thread_id, runtime_is_read_only_task
 
 logger = logging.getLogger("agent.run.gitee")
 

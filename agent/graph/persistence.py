@@ -17,8 +17,8 @@ import logging
 from typing import Any
 
 import psycopg
-from langgraph.store.postgres import PostgresStore
 import redis as _redis
+from langgraph.store.postgres import PostgresStore
 
 from agent.graph.redis_checkpointer import ReliableRedisSaver
 from config.app_config import Settings, get_settings

@@ -11,6 +11,7 @@ from typing import Any
 
 from deepagents import create_deep_agent
 from deepagents.backends import CompositeBackend, StoreBackend
+from deepagents.backends.sandbox import BaseSandbox
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from deepagents.middleware.summarization import create_summarization_tool_middleware
 from langchain.agents.middleware import ModelCallLimitMiddleware, TodoListMiddleware
@@ -37,7 +38,12 @@ from agent.middleware import (
 from agent.runtime.task_intent import TaskKind
 from backends import create_backend
 from backends.command_policy import evaluate_command
-from deepagents.backends.sandbox import BaseSandbox
+from config.constants import (
+    DEFAULT_RECURSION_LIMIT,
+    MAX_CACHED_BACKENDS,
+    MODEL_CALL_RECURSION_LIMIT,
+    VALID_TASK_KINDS,
+)
 from prompt import get_system_prompt
 from tools import (
     add_review_finding,
@@ -57,7 +63,6 @@ from tools import (
     validate_review_finding_location,
     web_search,
 )
-from config.constants import DEFAULT_RECURSION_LIMIT, MAX_CACHED_BACKENDS, MODEL_CALL_RECURSION_LIMIT, VALID_TASK_KINDS
 from utils.platform_utils import parse_repo_url
 
 logger = logging.getLogger(__name__)
@@ -102,8 +107,22 @@ def ensure_backend_for_thread(thread_id: str, backend_type: str | None = None) -
             oldest_key = next(iter(_BACKENDS))
             logger.info("Backend 缓存已满，淘汰最旧实例：%s", oldest_key)
             _BACKENDS.pop(oldest_key)
-        backend = create_backend(thread_id=thread_id, backend_type=backend_type)
-        logger.info("为 thread 创建 %s（backend_type=%s）：%s", type(backend).__name__, backend_type, thread_id)
+        # 项目若绑定了本地文件夹，则以该文件夹为项目根构建「本地文件夹模式」backend；
+        # 沙箱模式不涉及本地文件夹，直接跳过反查。
+        from agent.runtime._helpers import resolve_project_local_folder
+
+        local_folder = (
+            None if backend_type == "sandbox" else resolve_project_local_folder(thread_id)
+        )
+        backend = create_backend(
+            thread_id=thread_id,
+            backend_type=backend_type,
+            local_folder=local_folder,
+        )
+        logger.info(
+            "为 thread 创建 %s（backend_type=%s, local_folder=%s）：%s",
+            type(backend).__name__, backend_type, local_folder, thread_id,
+        )
         _BACKENDS[thread_id] = backend
     else:
         logger.info("复用 thread 的 %s：%s", type(backend).__name__, thread_id)
@@ -257,7 +276,8 @@ def _prepare_repo_backend_context(
 
     repo = parse_repo_url(repo_url)
     langgraph_store = get_langgraph_store()
-    project_dir = repo_project_dir(repo)
+    local_folder_mode = bool(getattr(backend, "local_folder_mode", False))
+    project_dir = repo_project_dir(repo, local_folder_mode=local_folder_mode)
     ensure_repo_memory_initialized(
         store=langgraph_store,
         repo=repo,

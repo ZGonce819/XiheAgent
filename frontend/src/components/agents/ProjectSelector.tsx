@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Dialog } from "@base-ui/react/dialog"
 import {
   ChevronDown,
@@ -34,13 +34,17 @@ export function ProjectSelector({
   const [open, setOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const queryClient = useQueryClient()
 
   // 创建项目表单状态
   const [newProjectName, setNewProjectName] = useState("")
   const [localFolderPath, setLocalFolderPath] = useState("")
   const [picking, setPicking] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [bindError, setBindError] = useState<string | null>(null)
   // 已创建的项目名：非空时顶部按钮变为项目行样式，再次点击可编辑
-  const [createdProject, setCreatedProject] = useState<string | null>(null)
+  // 从侧边栏「+」进入时，用 selectedProject 初始化，使顶部按钮显示项目名称（和手动创建后一致）
+  const [createdProject, setCreatedProject] = useState<string | null>(selectedProject ?? null)
 
   // 路径验证（实时）
   const folderValidation = useMemo(
@@ -94,20 +98,53 @@ export function ProjectSelector({
     }
   }, [newProjectName])
 
-  const handleCreateConfirm = useCallback(() => {
-    if (!newProjectName.trim()) return
+  const handleCreateConfirm = useCallback(async () => {
+    const name = newProjectName.trim()
+    if (!name) return
     // 如果有填写文件夹路径但验证不通过，阻止提交
     if (localFolderPath.trim() && !folderValidation.valid) return
-    setCreateDialogOpen(false)
-    // 记录已创建项目；表单内容保留，供再次点击时编辑
-    setCreatedProject(newProjectName.trim())
-    onProjectChange?.(newProjectName.trim())
-  }, [newProjectName, localFolderPath, folderValidation.valid, onProjectChange])
+    setSaving(true)
+    setBindError(null)
+    try {
+      const folder = localFolderPath.trim()
+      const existing = (projects.data?.projects ?? []).find((p) => p.name === name)
+      if (folder) {
+        await api.bindProjectFolder({ project_name: name, local_folder: folder })
+      } else if (existing?.local_folder) {
+        // 编辑时清空了文件夹：解除原有绑定，回退到全局工作区
+        await api.unbindProjectFolder(name)
+      }
+      await queryClient.invalidateQueries({ queryKey: ["workspace-projects"] })
+      setCreateDialogOpen(false)
+      setCreatedProject(name)
+      onProjectChange?.(name)
+    } catch (err) {
+      setBindError(err instanceof Error ? err.message : "绑定本地文件夹失败")
+    } finally {
+      setSaving(false)
+    }
+  }, [
+    newProjectName,
+    localFolderPath,
+    folderValidation.valid,
+    onProjectChange,
+    projects.data,
+    queryClient,
+  ])
 
   const handleOpenCreate = useCallback(() => {
     setOpen(false)
+    setBindError(null)
+    if (createdProject) {
+      // 编辑模式：用已保存的绑定预填表单
+      const existing = (projects.data?.projects ?? []).find(
+        (p) => p.name === createdProject
+      )
+      setNewProjectName(createdProject)
+      setLocalFolderPath(existing?.local_folder ?? "")
+    }
     setCreateDialogOpen(true)
-  }, [])
+  }, [createdProject, projects.data])
 
   const projectList = projects.data?.projects ?? []
   const isSandbox = backendType === "sandbox"
@@ -175,7 +212,17 @@ export function ProjectSelector({
                     style={{ animationDelay: `${Math.min(index * 30, 150)}ms` }}
                   >
                     <FolderOpen className="size-3 shrink-0 text-[color:var(--ui-text-dim)]" />
-                    <span className="flex-1 truncate">{item.name}</span>
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate">{item.name}</span>
+                      {item.local_folder && (
+                        <span
+                          className="truncate text-[0.65rem] text-[color:var(--ui-text-dim)]"
+                          title={item.local_folder}
+                        >
+                          {item.local_folder}
+                        </span>
+                      )}
+                    </span>
                     {selectedProject === item.name && (
                       <span className="text-[color:var(--ui-text-dim)]">✓</span>
                     )}
@@ -269,10 +316,14 @@ export function ProjectSelector({
             </div>
 
             {/* 底部按钮 */}
-            <div className="flex justify-end gap-2 border-t border-border px-5 py-3">
+            <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3">
+              {bindError && (
+                <p className="mr-auto text-xs text-destructive">{bindError}</p>
+              )}
               <Button
                 variant="outline"
                 size="sm"
+                disabled={saving}
                 onClick={() => setCreateDialogOpen(false)}
               >
                 取消
@@ -280,12 +331,13 @@ export function ProjectSelector({
               <Button
                 size="sm"
                 disabled={
+                  saving ||
                   !newProjectName.trim() ||
                   (Boolean(localFolderPath.trim()) && !folderValidation.valid)
                 }
                 onClick={handleCreateConfirm}
               >
-                {createdProject ? "保存" : "创建"}
+                {saving ? "保存中…" : createdProject ? "保存" : "创建"}
               </Button>
             </div>
           </Dialog.Popup>

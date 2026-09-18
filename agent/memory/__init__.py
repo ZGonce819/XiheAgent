@@ -18,7 +18,11 @@ from agent.memory.repo import (
     repo_memory_virtual_path,
     repo_project_dir,
 )
-from agent.memory.repo_update import RepoMemoryUpdate, build_updated_repo_memory, update_repo_memory_from_text
+from agent.memory.repo_update import (
+    RepoMemoryUpdate,
+    build_updated_repo_memory,
+    update_repo_memory_from_text,
+)
 from agent.memory.workspace import load_workspace_memory
 
 __all__ = [

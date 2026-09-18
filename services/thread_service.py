@@ -231,8 +231,11 @@ def conversation_snapshot(
 def _local_work_dirs(thread: dict[str, Any]) -> tuple[str, str] | None:
     """解析本地环境会话的本地工作目录（相对路径 + 绝对路径）。
 
-    解析规则与运行时保持一致：优先取仓库映射表登记的目录，
-    未登记时回退到默认的 ``projects/<repo>``。沙箱环境或未指定仓库时返回 ``None``。
+    解析规则与运行时保持一致：
+    1. 优先取项目绑定的本地文件夹（通过 project_name 反查）。
+    2. 其次取仓库映射表登记的目录。
+    3. 未登记时回退到默认的 ``projects/<repo>``。
+    沙箱环境或未指定仓库时返回 ``None``。
 
     Args:
         thread: 包含会话原始字段的字典。
@@ -248,9 +251,30 @@ def _local_work_dirs(thread: dict[str, Any]) -> tuple[str, str] | None:
     try:
         from agent.graph.graph import get_store
         from config.constants import WORKSPACE_ROOT
+
+        store = get_store()
+        thread_id = str(thread.get("thread_id") or "")
+
+        # 优先取项目绑定的本地文件夹（与运行时 resolve_project_local_folder 对齐）
+        project_name = thread.get("project_name")
+        if project_name:
+            try:
+                record = store.get_project_folder(project_name)
+                folder = record.get("local_folder") if record else None
+                if isinstance(folder, str) and folder.strip():
+                    abs_path = Path(folder)
+                    try:
+                        relative = abs_path.resolve().relative_to(Path(WORKSPACE_ROOT).resolve()).as_posix()
+                    except ValueError:
+                        relative = abs_path.name
+                    return relative, str(abs_path)
+            except Exception:
+                logger.warning("解析项目本地文件夹失败：project_name=%s", project_name, exc_info=True)
+
+        # 回退到仓库映射表
         from services.repo_rollback import repository_path
 
-        abs_path = repository_path(repo_url, get_store())
+        abs_path = repository_path(repo_url, store)
         try:
             relative = abs_path.resolve().relative_to(Path(WORKSPACE_ROOT).resolve()).as_posix()
         except ValueError:

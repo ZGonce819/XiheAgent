@@ -230,6 +230,7 @@ def discover_repo_mapping(
     repo_url: str,
     workspace: Workspace,
     store: LocalMySQLStore,
+    local_folder_mode: bool = False,
 ) -> RepoMappingResult:
     """解析仓库对应的本地 projects 目录。
 
@@ -239,16 +240,41 @@ def discover_repo_mapping(
     3. 只扫描 `projects/*` 下一级 Git 仓库，通过 origin remote 匹配。
     4. 都找不到时返回默认 clone 目录 `projects/仓库名`。
 
+    本地文件夹模式下（``local_folder_mode=True``），用户选定的文件夹本身就是
+    项目根，仓库目录恒为当前目录 ``.``，不再走 ``projects/<repo>`` 推导和扫描。
+    此时只判断文件夹根是否已经是对应仓库的 Git 目录，用以决定 source 和
+    remote_matched，clone 目标同样是 ``.``。
+
     Args:
         repo_url: 仓库完整地址。
         workspace: 当前工作区实例。
         store: MySQL Store 实例。
+        local_folder_mode: 是否为本地文件夹模式。
 
     Returns:
         仓库映射解析结果，包含本地路径、匹配来源和验证状态。
     """
 
     repo = parse_repo_url(repo_url)
+
+    if local_folder_mode:
+        # 文件夹即项目根：workspace.root 就是用户选定文件夹，仓库目录为 "."。
+        root_path = workspace.resolve(".")
+        remote = _read_origin_hidden(root_path)
+        already_repo = (
+            root_path.exists()
+            and (root_path / ".git").exists()
+            and remote_matches_repo(remote, repo.clone_url)
+        )
+        return RepoMappingResult(
+            repo=repo,
+            project_dir=".",
+            local_path=str(root_path),
+            source="local_folder" if already_repo else "local_folder_clone",
+            mapping=None,
+            remote_matched=already_repo,
+        )
+
     existing = store.get_mapping_by_repo(repo.clone_url)
     if existing:
         # 第一优先级：相信已经保存过的映射，但必须重新验证。

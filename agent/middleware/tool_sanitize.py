@@ -26,8 +26,8 @@ from langchain_core.messages import ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
-from backends.local_shell import LocalShellBackend
 from agent.runtime.events import record_event
+from backends.local_shell import LocalShellBackend
 from config.constants import (
     CODEUP_URL_ARGUMENTS,
     GITEE_URL_ARGUMENTS,

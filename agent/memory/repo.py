@@ -53,19 +53,25 @@ def repo_memory_store_key(owner: str, repo: str) -> str:
     return f"/{owner}/{repo}.md"
 
 
-def repo_project_dir(repo: ScmRepo) -> str:
+def repo_project_dir(repo: ScmRepo, *, local_folder_mode: bool = False) -> str:
     """根据仓库信息生成本地项目目录。
 
     只要前端传入仓库地址，后端就可以从 URL 解析出 repo 名称，
     并稳定落到 ``projects/<repo>``。本地目录、命令目录和仓库记忆路径
     都由同一个 owner/repo 规则推导，避免多套映射关系互相覆盖。
 
+    本地文件夹模式下，用户选定的文件夹本身就是项目根（文件夹即项目根），
+    仓库目录即当前目录 ``.``，不再有 ``projects/<repo>`` 中间层。
+
     Args:
         repo: 已解析的仓库信息，至少包含 ``repo`` 属性。
+        local_folder_mode: 是否为本地文件夹模式。
 
     Returns:
-        本地项目目录，格式为 ``projects/{repo}``。
+        本地项目目录：全局模式为 ``projects/{repo}``，本地文件夹模式为 ``.``。
     """
+    if local_folder_mode:
+        return "."
     return f"projects/{repo.repo}"
 
 
@@ -116,9 +122,15 @@ def build_initial_repo_memory(*, repo: ScmRepo, project_dir: str) -> str:
         Markdown 格式的记忆文件内容。
     """
     now = datetime.now(UTC).isoformat()
-    virtual_project_dir = "/" + project_dir.replace("\\", "/").strip("/")
-    command_repo_dir = project_dir.replace("\\", "/").removeprefix("projects/").strip("/")
-    command_repo_dir = command_repo_dir or repo.repo
+    normalized = project_dir.replace("\\", "/").strip()
+    if normalized in {".", "", "/"}:
+        # 本地文件夹模式：文件夹即项目根，虚拟路径为 /projects，命令目录为当前目录。
+        virtual_project_dir = "/projects"
+        command_repo_dir = "."
+    else:
+        virtual_project_dir = "/" + normalized.strip("/")
+        command_repo_dir = normalized.removeprefix("projects/").strip("/")
+        command_repo_dir = command_repo_dir or repo.repo
     return INITIAL_REPO_MEMORY_TEMPLATE.substitute(
         owner=repo.owner,
         repo=repo.repo,
@@ -172,12 +184,10 @@ def ensure_repo_memory_initialized(
     namespace = build_repo_memory_namespace(repo.owner, repo.repo)
     new_key = repo_memory_store_key(repo.owner, repo.repo)
 
-    if store.get(namespace, new_key) is not None:
+    existing = store.get(namespace, new_key)
+    if existing is not None:
         return False
 
-    store.put(
-        namespace,
-        new_key,
-        create_file_data(build_initial_repo_memory(repo=repo, project_dir=project_dir)),
-    )
+    initial_content = build_initial_repo_memory(repo=repo, project_dir=project_dir)
+    store.put(namespace, new_key, create_file_data(initial_content))
     return True

@@ -45,6 +45,7 @@ from config.model_config import (
 )
 from schemas.request_schema import (
     DashboardEditPreviewRequest,
+    DashboardProjectBindFolderRequest,
     DashboardProjectRenameRequest,
     DashboardThreadMessageRequest,
     DashboardThreadTitleUpdateRequest,
@@ -241,7 +242,7 @@ def dashboard_profile() -> dict[str, Any]:
         "auto_fix_ci": False,
         "create_prs": True,
         "review_draft_prs": None,
-        "backendType": "sandbox" if get_settings().use_sandbox else "local",
+        "backendType": "local",
         "sandbox_available": get_settings().use_sandbox,
     }
 
@@ -689,21 +690,35 @@ def dashboard_pick_folder() -> dict[str, Any]:
 def dashboard_list_projects() -> dict[str, Any]:
     """列出项目目录下的所有子目录作为项目。
 
+    每个项目会合并已持久化的本地文件夹绑定（``local_folder``），
+    未绑定时该字段为 ``None``。
+
     Returns:
-        dict: 包含 ``projects`` 列表，每项有 ``name`` 和 ``path`` 字段。
+        dict: 包含 ``projects`` 列表，每项有 ``name``、``path`` 和 ``local_folder`` 字段。
     """
     settings = get_settings()
     projects_dir = settings.projects_dir
 
+    bindings: dict[str, str] = {}
+    try:
+        for record in get_store().list_project_folders():
+            name = record.get("project_name")
+            folder = record.get("local_folder")
+            if isinstance(name, str) and isinstance(folder, str) and folder.strip():
+                bindings[name] = folder
+    except Exception:
+        logger.warning("读取项目本地文件夹绑定失败，返回未合并的目录列表", exc_info=True)
+
     if not projects_dir.exists():
         return {"projects": [], "projects_dir": str(projects_dir)}
 
-    items: list[dict[str, str]] = []
+    items: list[dict[str, Any]] = []
     for child in sorted(projects_dir.iterdir(), key=lambda p: p.name.lower()):
         if child.is_dir() and not child.name.startswith("."):
             items.append({
                 "name": child.name,
                 "path": str(child),
+                "local_folder": bindings.get(child.name),
             })
 
     return {"projects": items, "projects_dir": str(projects_dir)}
@@ -730,3 +745,46 @@ def dashboard_rename_project(body: DashboardProjectRenameRequest) -> dict[str, A
         return {"renamed": 0, "name": new_name}
     affected = get_store().rename_project(old_name, new_name)
     return {"renamed": affected, "name": new_name}
+
+
+@dashboard_router.post("/workspace/projects/bind-folder")
+def dashboard_bind_project_folder(body: DashboardProjectBindFolderRequest) -> dict[str, Any]:
+    """把项目绑定到一个本地文件夹，作为该项目的项目根。
+
+    绑定后，该项目的所有会话都以这个文件夹为 Agent 工作根目录（文件夹即项目根），
+    并在其中维护 ``.xihe-agent/{skills,memories,reviews}`` 布局。
+
+    Args:
+        body: 包含 ``project_name`` 和 ``local_folder`` 的请求体。
+
+    Returns:
+        dict: ``project_name`` 与绑定后的 ``local_folder``（已解析为绝对路径）。
+
+    Raises:
+        HTTPException: 文件夹不存在或不是目录时返回 400。
+    """
+    project_name = body.project_name.strip()
+    folder = Path(body.local_folder.strip()).resolve()
+    if not project_name:
+        raise HTTPException(status_code=400, detail="项目名称不能为空")
+    if not folder.exists() or not folder.is_dir():
+        raise HTTPException(status_code=400, detail=f"本地文件夹不存在或不是目录：{folder}")
+    get_store().upsert_project_folder(project_name, str(folder))
+    return {"project_name": project_name, "local_folder": str(folder)}
+
+
+@dashboard_router.delete("/workspace/projects/{project_name}/unbind-folder")
+def dashboard_unbind_project_folder(project_name: str) -> dict[str, Any]:
+    """解除项目的本地文件夹绑定，恢复使用全局工作区。
+
+    Args:
+        project_name: 项目名称。
+
+    Returns:
+        dict: ``project_name`` 与 ``unbound``（是否确实删除了一条绑定）。
+    """
+    name = project_name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="项目名称不能为空")
+    removed = get_store().delete_project_folder(name)
+    return {"project_name": name, "unbound": removed > 0}

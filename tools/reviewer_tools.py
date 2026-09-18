@@ -16,7 +16,11 @@ from pydantic import BaseModel, Field
 from agent.graph.graph import get_store
 from backends import create_backend
 from utils.context_utils import get_runtime_thread_id
-from utils.reviewer_utils import get_local_diff_summary, parse_unified_diff, validate_finding_location
+from utils.reviewer_utils import (
+    get_local_diff_summary,
+    parse_unified_diff,
+    validate_finding_location,
+)
 
 DEFAULT_RULES_PATH = Path(__file__).resolve().parents[1] / "reviewer_rules" / "default_review_rules.md"
 

@@ -15,8 +15,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from agent.memory.repo import repo_project_dir
 from agent.graph.graph import get_store
+from agent.memory.repo import repo_project_dir
 from agent.runtime._helpers import ensure_repo_memory_for_repo
 from agent.runtime.events import record_event
 from backends.local_shell import LocalShellBackend
@@ -170,9 +170,21 @@ def run_pull_only_task(
     run_id = str(uuid.uuid4())
     store.record_run(run_id=run_id, thread_id=thread_id, status="running")
     repo = parse_repo_url(repo_url)
-    workspace = Workspace(WORKSPACE_ROOT)
-    backend = LocalShellBackend(workspace)
-    project_dir = repo_project_dir(repo)
+    from agent.runtime._helpers import resolve_project_local_folder
+
+    local_folder = resolve_project_local_folder(thread_id)
+    local_folder_mode = bool(local_folder)
+    if local_folder:
+        # 本地文件夹模式：文件夹即项目根，仓库目录为 "."，全局工作区只读提供基础设施。
+        workspace = Workspace(local_folder)
+        backend = LocalShellBackend(
+            workspace, local_folder_mode=True, global_workspace_root=WORKSPACE_ROOT,
+        )
+        project_dir = "."
+    else:
+        workspace = Workspace(WORKSPACE_ROOT)
+        backend = LocalShellBackend(workspace)
+        project_dir = repo_project_dir(repo)
     ensure_repo_memory_for_repo(repo, project_dir)
     relative_dir = Path(project_dir)
     target = workspace.resolve(relative_dir)
@@ -181,7 +193,10 @@ def run_pull_only_task(
     try:
         logger.info("开始执行 pull-only 任务：thread_id=%s repo=%s/%s", thread_id, repo.owner, repo.repo)
         record_event(thread_id, "workspace", "准备本地工作区", status="in_progress")
-        PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
+        if local_folder_mode:
+            target.mkdir(parents=True, exist_ok=True)
+        else:
+            PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
         if target.exists() and (target / ".git").exists():
             # 本地已经存在 Git 仓库时，只更新远程地址并快进拉取 master。
             # 这里使用 --ff-only，避免自动产生 merge commit，保持教学项目历史清晰。
@@ -199,12 +214,16 @@ def run_pull_only_task(
             )
             outputs = [remote_result, checkout_result, fetch_result, pull_result]
         else:
-            # 本地还没有对应目录时，直接 clone 到 workspace/projects 下。
+            # 本地还没有对应目录时，直接 clone。
+            # 全局模式 clone 到 workspace/projects 下；本地文件夹模式 clone 到文件夹根 "."。
             record_event(thread_id, "workspace", "准备本地工作区", status="completed")
             record_event(thread_id, "sync", "克隆仓库", kind="execute", status="in_progress")
-            clone_result = backend.run(
-                f"git clone {clone_url} {target.name}", cwd="projects", timeout=600,
-            )
+            if local_folder_mode:
+                clone_result = backend.run(f"git clone {clone_url} .", cwd=".", timeout=600)
+            else:
+                clone_result = backend.run(
+                    f"git clone {clone_url} {target.name}", cwd="projects", timeout=600,
+                )
             outputs = [clone_result]
 
         failed = next((result for result in outputs if result.exit_code != 0), None)

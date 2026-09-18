@@ -33,9 +33,9 @@ from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
+from agent.runtime.events import record_event
 from backends.local_shell import LocalShellBackend
 from backends.permissions import WorkspacePermissionError
-from agent.runtime.events import record_event
 from utils.gitee_utils import mask_token
 
 logger = logging.getLogger(__name__)

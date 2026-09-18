@@ -19,13 +19,12 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
 import re
 from typing import Any
-
-import base64
 
 from config.constants import MIN_MESSAGE_LENGTH
 from utils.message_utils import message_content_to_text

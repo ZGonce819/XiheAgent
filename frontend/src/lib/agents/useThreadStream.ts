@@ -57,6 +57,8 @@ interface ThreadMetaPayload {
   updatedAt?: number
   runEvents?: Array<RunEvent>
   conversationVersions?: AgentThread["conversationVersions"]
+  localWorkDir?: string | null
+  localWorkDirFull?: string | null
 }
 
 interface TextDeltaPayload {
@@ -341,6 +343,8 @@ function applyThreadMeta(
     runEvents: data.runEvents ?? thread.runEvents,
     conversationVersions:
       data.conversationVersions ?? thread.conversationVersions,
+    localWorkDir: data.localWorkDir ?? thread.localWorkDir,
+    localWorkDirFull: data.localWorkDirFull ?? thread.localWorkDirFull,
   }
 }
 

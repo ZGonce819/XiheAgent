@@ -18,7 +18,12 @@ from datetime import date
 
 from langgraph.store.base import BaseStore
 
-from agent.memory.repo import ScmRepo, build_repo_memory_namespace, get_repo_memory_item, repo_memory_store_key
+from agent.memory.repo import (
+    ScmRepo,
+    build_repo_memory_namespace,
+    get_repo_memory_item,
+    repo_memory_store_key,
+)
 from config.constants import MAX_FACT_CHARS, MAX_RECENT_ITEMS, SENSITIVE_MARKERS
 from utils.gitee_utils import mask_token
 

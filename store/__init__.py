@@ -17,14 +17,14 @@ Example:
 """
 
 from database.mysql import ConnectionManager, utc_now
+from store.conversation_version_repo import ConversationVersionRepo
+from store.event_repo import RunEventRepo
 from store.finding_repo import FindingRepo
 from store.mapping_repo import MappingRepo
 from store.mysql_store import LocalMySQLStore
-from store.event_repo import RunEventRepo
 from store.run_repo import RunRepo
-from store.thread_repo import ThreadRepo
-from store.conversation_version_repo import ConversationVersionRepo
 from store.sandbox_repo import SandboxRepo
+from store.thread_repo import ThreadRepo
 
 __all__ = [
     "ConnectionManager",

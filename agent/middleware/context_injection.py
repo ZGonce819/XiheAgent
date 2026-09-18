@@ -24,10 +24,19 @@ from langchain_core.messages import SystemMessage
 from langgraph.config import get_config
 
 from agent.graph.graph import get_langgraph_store
-from agent.memory.repo import build_repo_memory_namespace, repo_memory_store_key, repo_memory_virtual_path
+from agent.memory.repo import (
+    build_repo_memory_namespace,
+    repo_memory_store_key,
+    repo_memory_virtual_path,
+)
 from config.constants import MAX_REPO_MEMORY_CHARS
 from utils.gitee_utils import mask_token
-from utils.platform_utils import detect_platform, get_platform_display_name, get_platform_tools, parse_repo_url
+from utils.platform_utils import (
+    detect_platform,
+    get_platform_display_name,
+    get_platform_tools,
+    parse_repo_url,
+)
 
 logger = logging.getLogger(__name__)
 

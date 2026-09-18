@@ -163,6 +163,8 @@ class LocalShellBackend(BaseSandbox):
         workspace: Workspace | str | os.PathLike[str] | None = None,
         *,
         timeout: int = 3600,
+        local_folder_mode: bool = False,
+        global_workspace_root: Path | str | None = None,
     ) -> None:
         """初始化本地 backend 实例。
 
@@ -170,6 +172,13 @@ class LocalShellBackend(BaseSandbox):
             workspace: 工作区对象或根目录路径；为空时从 ``LOCAL_SHELL_WORKSPACE``
                 环境变量或默认值推导。
             timeout: ``execute()`` 未显式指定超时时的默认值（秒），默认 3600。
+            local_folder_mode: 是否启用「本地文件夹模式」。启用后 ``root`` 即用户
+                选定的项目文件夹（文件夹即项目根），只在其中维护
+                ``.xihe-agent/{skills,memories,reviews}`` 布局；后端基础设施
+                （``.secrets`` / ``runtimes`` 等）指向全局工作区，且写操作被限制在
+                ``root`` 内、读操作可访问整个全局工作区（只读）。
+            global_workspace_root: 本地文件夹模式下使用的只读全局工作区根目录，
+                为空时回退到 ``_DEFAULT_WORKSPACE_ROOT``。
         """
         # 确定工作区根目录：传入的 workspace > 环境变量 > 默认值
         if isinstance(workspace, Workspace):
@@ -184,21 +193,44 @@ class LocalShellBackend(BaseSandbox):
             self.workspace = Workspace(Path(configured_root))
 
         self.root = Path(configured_root).expanduser().resolve()
-        # 工作区子目录规划
-        self.projects_dir = self.root / os.environ.get(
-            "LOCAL_SHELL_PROJECTS_DIR", "projects"
-        )
-        self.skills_dir = self.root / "skills"
-        self.policies_dir = self.root / "policies"
-        self.reviews_dir = self.root / "reviews"
-        self.runtimes_dir = self.root / "runtimes"
-        self.tmp_dir = self.root / "tmp"
-        self.logs_dir = self.root / "logs"
-        self.secrets_dir = self.root / ".secrets"
-        self.shared_python_venv = self.root / os.environ.get(
-            "LOCAL_SHELL_SHARED_PYTHON_VENV",
-            r"runtimes\python\default\.venv",
-        )
+        self.local_folder_mode = local_folder_mode
+
+        if local_folder_mode:
+            # 本地文件夹模式：root 就是项目根，基础设施复用全局工作区（只读）。
+            self.global_workspace_root = Path(
+                global_workspace_root or _DEFAULT_WORKSPACE_ROOT
+            ).expanduser().resolve()
+            self.agent_dir: Path | None = self.root / ".xihe-agent"
+            self.projects_dir = self.root
+            self.skills_dir = self.agent_dir / "skills"
+            self.reviews_dir = self.agent_dir / "reviews"
+            self.policies_dir = self.global_workspace_root / "policies"
+            self.runtimes_dir = self.global_workspace_root / "runtimes"
+            self.tmp_dir = self.global_workspace_root / "tmp"
+            self.logs_dir = self.global_workspace_root / "logs"
+            self.secrets_dir = self.global_workspace_root / ".secrets"
+            self.shared_python_venv = self.global_workspace_root / os.environ.get(
+                "LOCAL_SHELL_SHARED_PYTHON_VENV",
+                r"runtimes\python\default\.venv",
+            )
+        else:
+            self.global_workspace_root = self.root
+            self.agent_dir = None
+            # 工作区子目录规划
+            self.projects_dir = self.root / os.environ.get(
+                "LOCAL_SHELL_PROJECTS_DIR", "projects"
+            )
+            self.skills_dir = self.root / "skills"
+            self.policies_dir = self.root / "policies"
+            self.reviews_dir = self.root / "reviews"
+            self.runtimes_dir = self.root / "runtimes"
+            self.tmp_dir = self.root / "tmp"
+            self.logs_dir = self.root / "logs"
+            self.secrets_dir = self.root / ".secrets"
+            self.shared_python_venv = self.root / os.environ.get(
+                "LOCAL_SHELL_SHARED_PYTHON_VENV",
+                r"runtimes\python\default\.venv",
+            )
         self.default_timeout = timeout
         self.command_guard_enabled = (
             os.environ.get("LOCAL_SHELL_ENABLE_COMMAND_GUARD", "true").lower()
@@ -726,7 +758,25 @@ class LocalShellBackend(BaseSandbox):
 
         后端启动时会确保这些目录存在，而不是要求运维或用户手工创建。
         这样 Agent 第一次启动就具备稳定的文件系统语义。
+
+        本地文件夹模式下只创建 ``.xihe-agent/{skills,reviews}``，
+        不在用户项目文件夹里生成任何其它目录；Git askpass 等基础设施写到全局工作区。
         """
+        if self.local_folder_mode:
+            assert self.agent_dir is not None
+            for directory in (self.root, self.skills_dir, self.reviews_dir):
+                directory.mkdir(parents=True, exist_ok=True)
+            # askpass 脚本必须存在才能非交互认证，写到全局 .secrets（只读复用）。
+            self.secrets_dir.mkdir(parents=True, exist_ok=True)
+            if os.environ.get("LOCAL_SHELL_CREATE_PYTHON_VENV", "false").lower() not in {
+                "0",
+                "false",
+                "no",
+            }:
+                self._ensure_shared_python_venv()
+            self._ensure_gitee_askpass_files()
+            return
+
         for directory in (
             self.root,
             self.projects_dir,
@@ -886,6 +936,9 @@ class LocalShellBackend(BaseSandbox):
         无论调用方传入虚拟路径还是 Windows 绝对路径，最终都必须解析成真实路径，
         并确认它仍然位于 ``self.root`` 工作区内。
 
+        本地文件夹模式下额外允许解析到只读全局工作区，以支持读取全局资源；
+        写操作是否越界由 ``_write_deny_reason`` 和各写方法的守卫负责。
+
         Args:
             path: 虚拟路径或 Windows 绝对路径。
 
@@ -896,6 +949,8 @@ class LocalShellBackend(BaseSandbox):
             PermissionError: 路径逃逸出工作区。
         """
         raw = str(path).strip() or "/"
+        if self.local_folder_mode:
+            return self._resolve_local_folder_path(raw)
         if re.match(r"^[A-Za-z]:[\\/]", raw):
             resolved = Path(raw).resolve()
         else:
@@ -906,6 +961,57 @@ class LocalShellBackend(BaseSandbox):
         if not self._is_under_root(resolved):
             raise PermissionError(f"path outside local workspace is denied: {path}")
         return resolved
+
+    def _local_virtual_roots(self) -> dict[str, Path]:
+        """本地文件夹模式下虚拟前缀到真实目录的映射。
+
+        ``projects`` 指向 root 本身（文件夹即项目根），``skills/memories/reviews``
+        指向 ``.xihe-agent`` 下的对应目录，其余基础设施指向全局工作区。
+
+        Returns:
+            虚拟前缀名到真实目录的字典。
+        """
+        roots = {
+            "projects": self.root,
+            "skills": self.skills_dir,
+            "reviews": self.reviews_dir,
+            "policies": self.policies_dir,
+            "runtimes": self.runtimes_dir,
+            "tmp": self.tmp_dir,
+            "logs": self.logs_dir,
+        }
+        return roots
+
+    def _resolve_local_folder_path(self, raw: str) -> Path:
+        """本地文件夹模式下的路径解析。
+
+        放行 root（读写）与全局工作区（只读）两类路径，其余一律拒绝。
+
+        Args:
+            raw: 已 strip 的原始路径字符串。
+
+        Returns:
+            解析后的真实路径。
+
+        Raises:
+            PermissionError: 路径既不在 root 也不在全局工作区内。
+        """
+        if re.match(r"^[A-Za-z]:[\\/]", raw):
+            resolved = Path(raw).resolve()
+        else:
+            normalized = raw.replace("\\", "/").strip("/")
+            if not normalized:
+                return self.root
+            first, _, rest = normalized.partition("/")
+            roots = self._local_virtual_roots()
+            if first in roots:
+                base = roots[first]
+                resolved = (base / rest).resolve() if rest else base.resolve()
+            else:
+                resolved = (self.root / normalized).resolve()
+        if self._is_under_root(resolved) or self._is_under_global(resolved):
+            return resolved
+        raise PermissionError(f"path outside local workspace is denied: {raw}")
 
     def _to_virtual_path(self, path: Path) -> str:
         """把真实路径转回虚拟路径（/ 开头）。
@@ -922,10 +1028,43 @@ class LocalShellBackend(BaseSandbox):
             PermissionError: 路径逃逸出工作区。
         """
         resolved = path.resolve()
+        if self.local_folder_mode:
+            return self._to_virtual_path_local(resolved)
         if not self._is_under_root(resolved):
             raise PermissionError(f"path outside local workspace is denied: {path}")
         rel = resolved.relative_to(self.root).as_posix()
         return "/" + rel if rel else "/"
+
+    def _to_virtual_path_local(self, resolved: Path) -> str:
+        """本地文件夹模式下把真实路径转回虚拟路径。
+
+        ``.xihe-agent`` 子目录优先映射为 ``/skills``、``/memories``、``/reviews``；
+        root 下其余路径映射为 ``/projects/...``；全局工作区路径按其相对全局根的
+        形式返回（如 ``/policies/...``）。
+
+        Args:
+            resolved: 已解析的真实路径。
+
+        Returns:
+            虚拟路径字符串。
+
+        Raises:
+            PermissionError: 路径既不在 root 也不在全局工作区内。
+        """
+        for name, base in (
+            ("skills", self.skills_dir),
+            ("reviews", self.reviews_dir),
+        ):
+            if base is not None and self._is_under(resolved, base):
+                rel = resolved.relative_to(base).as_posix()
+                return f"/{name}/{rel}" if rel else f"/{name}"
+        if self._is_under_root(resolved):
+            rel = resolved.relative_to(self.root).as_posix()
+            return f"/projects/{rel}" if rel else "/projects"
+        if self._is_under_global(resolved):
+            rel = resolved.relative_to(self.global_workspace_root).as_posix()
+            return "/" + rel if rel else "/"
+        raise PermissionError(f"path outside local workspace is denied: {resolved}")
 
     def _is_under_root(self, path: Path) -> bool:
         """判断路径是否在工作区根目录之下。
@@ -941,6 +1080,19 @@ class LocalShellBackend(BaseSandbox):
             return True
         except ValueError:
             return False
+
+    def _is_under_global(self, path: Path) -> bool:
+        """判断路径是否在只读全局工作区之下（仅本地文件夹模式有意义）。
+
+        Args:
+            path: 待检查的路径。
+
+        Returns:
+            本地文件夹模式且路径在全局工作区下返回 True，否则返回 False。
+        """
+        if not self.local_folder_mode:
+            return False
+        return self._is_under(path, self.global_workspace_root)
 
     def _is_under(self, path: Path, parent: Path) -> bool:
         """判断 path 是否在 parent 目录之下。
@@ -967,12 +1119,21 @@ class LocalShellBackend(BaseSandbox):
         ``skills/policies/runtimes/logs/.secrets`` 都属于后端运行基础设施或规则资产，
         不允许在普通任务中被模型写入。
 
+        本地文件夹模式下：写操作必须落在项目文件夹 ``root`` 内，全局工作区一律只读；
+        ``.xihe-agent/skills`` 视为只读技能资产，``memories``/``reviews`` 与项目文件可写。
+
         Args:
             path: 待检查的目标路径。
 
         Returns:
             禁止写入时返回原因字符串，允许写入时返回 None。
         """
+        if self.local_folder_mode:
+            if not self._is_under(path, self.root):
+                return "write denied: outside project folder"
+            if self._is_under(path, self.skills_dir):
+                return "write denied: skills are read-only"
+            return None
         if self._is_under(path, self.policies_dir):
             return "write denied: policies are read-only"
         if self._is_under(path, self.skills_dir):
@@ -1029,7 +1190,8 @@ class LocalShellBackend(BaseSandbox):
                 return f"dangerous command pattern matched: {pattern}"
         for match in _DRIVE_PATH_RE.finditer(command):
             candidate = Path(match.group(1)).resolve()
-            if not self._is_under_root(candidate):
+            # 本地文件夹模式允许命令引用只读全局工作区路径（如 type E:\ai_workspace\x）。
+            if not self._is_under_root(candidate) and not self._is_under_global(candidate):
                 return f"absolute path outside workspace: {candidate}"
         return None
 
@@ -1141,7 +1303,7 @@ class LocalShellBackend(BaseSandbox):
         Returns:
             替换后的带引号真实路径字符串。
         """
-        roots = {
+        roots = self._local_virtual_roots() if self.local_folder_mode else {
             "projects": self.projects_dir,
             "skills": self.skills_dir,
             "policies": self.policies_dir,
@@ -1153,7 +1315,7 @@ class LocalShellBackend(BaseSandbox):
         root = roots[match.group(1)]
         suffix = (match.group(2) or "").lstrip("/")
         path = (root / Path(*suffix.split("/"))).resolve() if suffix else root
-        if not self._is_under_root(path):
+        if not self._is_under_root(path) and not self._is_under_global(path):
             raise PermissionError(f"virtual path escapes workspace: {match.group(0)}")
         return f'"{path}"'
 
