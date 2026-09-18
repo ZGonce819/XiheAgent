@@ -91,6 +91,14 @@ class Settings:
             get_env("SANDBOX_MAX_PER_THREAD", "3"), 3
         )
 
+        # ── 自动化任务调度 ────────────────────────────────────
+        self.automation_scheduler_enabled: bool = (
+            get_env("XIHE_AUTOMATION_SCHEDULER", "true").lower() == "true"
+        )
+        self.automation_tick_seconds: int = _safe_int(
+            get_env("XIHE_AUTOMATION_TICK_SECONDS", "30"), 30
+        )
+
         # ── 外部服务密钥 ──────────────────────────────────────
         self.deepseek_api_key: str = get_env("DEEPSEEK_API_KEY")
         self.gitee_token: str = get_env("GITEE_TOKEN")

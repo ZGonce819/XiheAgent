@@ -25,6 +25,8 @@ const deletedThreadIds = new Set<string>()
 
 export const agentScheduleKeys = {
   all: ["agent-schedules"] as const,
+  state: (scheduleId: string) =>
+    ["agent-schedules", scheduleId, "state"] as const,
 }
 
 function invalidateThreadList(queryClient: ReturnType<typeof useQueryClient>) {
@@ -117,6 +119,44 @@ export function useDeleteAgentSchedule() {
     mutationFn: agentsApi.deleteSchedule,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: agentScheduleKeys.all })
+    },
+  })
+}
+
+/**
+ * 读一个自动化任务的循环状态。
+ *
+ * 默认不拉取：状态只在手动触发之后才需要看，页面一打开就对每个任务发一次请求
+ * 不划算。要看的时候把 `enabled` 打开。
+ */
+export function useAgentScheduleState(
+  scheduleId: string,
+  options?: { enabled?: boolean; refetchInterval?: number | false }
+) {
+  return useQuery({
+    queryKey: agentScheduleKeys.state(scheduleId),
+    queryFn: () => agentsApi.getScheduleState(scheduleId),
+    enabled: options?.enabled ?? false,
+    refetchInterval: options?.refetchInterval,
+  })
+}
+
+/**
+ * 手动跑一轮。
+ *
+ * 接口是受理式的：返回 202 表示这一轮已经派到后台，真正跑完要几分钟。所以这里
+ * 拿到回执后只刷新列表与状态，不去等结果。
+ */
+export function useRunAgentSchedule() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (scheduleId: string) => agentsApi.runSchedule(scheduleId),
+    onSuccess: (_receipt, scheduleId) => {
+      queryClient.invalidateQueries({ queryKey: agentScheduleKeys.all })
+      queryClient.invalidateQueries({
+        queryKey: agentScheduleKeys.state(scheduleId),
+      })
     },
   })
 }

@@ -156,6 +156,57 @@ export interface AgentSchedule {
   updatedAt?: string | null
 }
 
+/** 一轮循环跑完之后记下来的结果。 */
+export interface AutomationRunRecord {
+  runId: string
+  threadId: string | null
+  startedAt: string | null
+  finishedAt: string | null
+  outcome: "succeeded" | "failed" | "blocked"
+  summary: string
+  changed: Array<string>
+  nextSteps: Array<string>
+}
+
+/** 自动化任务跨轮保存的循环状态。 */
+export interface AutomationLoopState {
+  version: number
+  automationId: string
+  updatedAt: string
+  cursor: Record<string, unknown>
+  budget: {
+    maxRuns: number
+    runsUsed: number
+    maxTokens: number
+    tokensUsed: number
+    maxConsecutiveFailures: number
+  }
+  stop: {
+    reached: boolean
+    reason: string | null
+    at: string | null
+  }
+  runs: Array<AutomationRunRecord>
+  attempts: Array<Record<string, unknown>>
+  lastFeedback: string
+}
+
+export interface AutomationStateResponse {
+  state: AutomationLoopState
+  /** 服务端渲染好的多行纯文本，直接展示即可。 */
+  text: string
+  stopped: boolean
+  stopReason: string | null
+}
+
+/** 手动触发一轮的受理回执。 */
+export interface AutomationRunReceipt {
+  automationId: string
+  accepted: boolean
+  threadId: string
+  roundNumber: number
+}
+
 export type RunEventKind = "think" | "execute" | "search" | "other" | "todo"
 
 export type RunEventStatus = "pending" | "in_progress" | "completed" | "error"

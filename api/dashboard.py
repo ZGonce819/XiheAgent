@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -30,9 +30,12 @@ from config.approval_runtime import get_pending_approval, public_approval
 from config.automation_config import (
     create_automation,
     delete_automation,
+    get_automation,
     list_automations,
+    mark_automation_triggered,
     update_automation,
 )
+from config.automation_state import load_state, render_state, stop_status
 from config.env_config import get_env
 from config.model_config import (
     create_custom_model,
@@ -58,6 +61,13 @@ from schemas.request_schema import (
     DashboardViewSnapshotRequest,
 )
 from services.approval_explanation import explain_pending_approval
+from services.automation_loop import run_cycle
+from services.automation_runner import (
+    make_agent_round_runner,
+    read_only_refusal,
+    resolve_backend_type,
+)
+from services.automation_verification import parse_checks
 from services.repo_rollback import rollback_run
 from services.streaming_service import build_streaming_response
 from services.thread_service import (
@@ -78,6 +88,11 @@ def _validate_automation_payload(body: dict[str, Any], partial: bool = False) ->
             raise HTTPException(status_code=400, detail=f"{label}不能为空")
     if "schedule" in body and len(str(body["schedule"]).split()) != 5:
         raise HTTPException(status_code=400, detail="执行计划必须是 5 段 Cron 表达式")
+    # 检查项只做「是不是列表」这一层校验；命令本身合法与否由
+    # services.automation_verification.parse_checks 在真正要跑的时候判定，
+    # 因为 api 层不该替验证门决定它能接受什么。
+    if body.get("checks") is not None and not isinstance(body["checks"], list):
+        raise HTTPException(status_code=400, detail="检查项必须是列表")
 
 
 def _skill_summary(skill_file: Path) -> dict[str, Any]:
@@ -326,6 +341,101 @@ def dashboard_delete_schedule(schedule_id: str) -> None:
     """Delete an automation definition."""
     if not delete_automation(schedule_id):
         raise HTTPException(status_code=404, detail="自动化任务不存在")
+
+
+@dashboard_router.get("/schedules/{schedule_id}/state")
+def dashboard_schedule_state(schedule_id: str) -> dict[str, Any]:
+    """返回某个自动化任务的循环状态。
+
+    只读操作，不会把状态文件建出来。
+
+    Args:
+        schedule_id: 自动化任务 id。
+
+    Returns:
+        含原始 ``state``、给人看的 ``text``，以及是否已停止的字段。
+
+    Raises:
+        HTTPException: 自动化任务不存在时返回 404。
+    """
+    if get_automation(schedule_id) is None:
+        raise HTTPException(status_code=404, detail="自动化任务不存在")
+    stopped, reason = stop_status(schedule_id)
+    return {
+        "state": load_state(schedule_id),
+        "text": render_state(schedule_id),
+        "stopped": stopped,
+        "stopReason": reason,
+    }
+
+
+@dashboard_router.post("/schedules/{schedule_id}/run", status_code=202)
+def dashboard_run_schedule(
+    schedule_id: str, background: BackgroundTasks
+) -> dict[str, Any]:
+    """手动跑一轮循环。
+
+    「能不能跑」的判断全部同步做完：不能跑就带着理由直接返回，不留一个 202 让前端
+    去猜。能跑则把整轮交给后台 —— 一轮可能要跑几分钟，不该占着这个请求。
+    跑完之后的进展用 GET ``/schedules/{id}/state`` 读。
+
+    Args:
+        schedule_id: 自动化任务 id。
+        background: FastAPI 的后台任务收集器。
+
+    Returns:
+        含 ``threadId`` 与第几轮的受理回执。
+
+    Raises:
+        HTTPException: 任务不存在返回 404；循环已停返回 409；
+            超出只读范围、没配仓库或检查项配错返回 400。
+    """
+    automation = get_automation(schedule_id)
+    if automation is None:
+        raise HTTPException(status_code=404, detail="自动化任务不存在")
+
+    stopped, reason = stop_status(schedule_id)
+    if stopped:
+        raise HTTPException(status_code=409, detail=f"这个循环已经停了：{reason}")
+
+    refusal = read_only_refusal(str(automation.get("prompt") or ""))
+    if refusal:
+        raise HTTPException(status_code=400, detail=refusal)
+    if not automation.get("repo"):
+        raise HTTPException(status_code=400, detail="自动化任务没有配置代码仓库")
+    try:
+        parse_checks(automation.get("checks"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"检查项配置有误：{exc}") from exc
+
+    # 会话 id 在这里就定下来：触发时间要连同它一起记进定义，前端也能立刻跳过去。
+    thread_id = str(uuid.uuid4())
+    mark_automation_triggered(schedule_id, thread_id=thread_id)
+    round_number = int(load_state(schedule_id)["budget"]["runsUsed"]) + 1
+
+    # 执行环境要显式定下来传下去：验证门的审批策略按它判断，缺省值 "local" 在
+    # 开了沙箱的部署里会用错一套策略。
+    environment = resolve_backend_type()
+
+    def run_once() -> None:
+        try:
+            run_cycle(
+                automation,
+                make_agent_round_runner(thread_id=thread_id, backend_type=environment),
+                backend_type=environment,
+            )
+        except Exception:
+            # 跑一轮里的异常已经在 run_cycle 内部记成失败轮次了，能漏到这里的
+            # 只剩编排本身的问题，记日志即可，不要让它冒到后台线程外面。
+            logger.exception("自动化任务 %s 手动触发失败", schedule_id)
+
+    background.add_task(run_once)
+    return {
+        "automationId": schedule_id,
+        "accepted": True,
+        "threadId": thread_id,
+        "roundNumber": round_number,
+    }
 
 
 def _skill_scope_context(

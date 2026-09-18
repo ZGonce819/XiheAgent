@@ -1,0 +1,312 @@
+"""验证门的测试。
+
+重点覆盖三条安全性质：
+
+1. **没配置检查项时结论是不通过**，不是通过；
+2. **需要审批的命令在无人值守时不会被偷偷执行**（策略判 ``deny`` 与 ``approval``
+   都记为跳过，执行器一次都不该被调用）；
+3. 执行器抛异常、命令超时都不能把循环带崩，只记为一条「执行出错」。
+
+用例里的审批结论依赖 ``LOCAL_DEFAULTS`` / ``SANDBOX_DEFAULTS``，所以必须把
+``Settings.data_dir`` 指向临时目录，避免开发机上真实的 ``command_approval.json``
+覆盖默认值把测试结果改掉。
+"""
+
+from __future__ import annotations
+
+import subprocess
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from services.automation_verification import (
+    MAX_OUTPUT_CHARS,
+    Check,
+    VerificationResult,
+    parse_checks,
+    run_checks,
+)
+
+ALLOWED_COMMAND = "git status"
+"""命中「永远允许」名单，任何 backend 下都是 ``allow``。"""
+
+TEST_COMMAND = "pytest tests/"
+"""本地默认 ``run_tests=allow``，用来当「会真正执行」的命令。"""
+
+LOCAL_ONLY_APPROVAL = "ruff check ."
+"""本地默认 ``run_build=approval``、沙箱默认 ``allow``，用来验证 backend_type 真的生效。"""
+
+DENIED_COMMAND = "sudo rm -rf /"
+"""命中硬性拒绝规则。"""
+
+UNKNOWN_COMMAND = "frobnicate --now"
+"""未识别命令，策略一律判需要审批。"""
+
+
+@pytest.fixture
+def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """把 ``Settings.data_dir`` 指向临时目录，隔离审批设置。
+
+    Returns:
+        临时的 data 目录。
+    """
+    from config.app_config import get_settings
+
+    target = tmp_path / "data"
+    monkeypatch.setattr(get_settings(), "data_dir", target)
+    return target
+
+
+def make_runner(
+    results: dict[str, Any] | None = None,
+) -> tuple[Callable[[str, int], tuple[int, str]], list[str]]:
+    """造一个记录调用的假执行器。
+
+    Args:
+        results: 命令到 ``(退出码, 输出)`` 的映射；值也可以是异常实例，用来
+            模拟执行器抛错。未列出的命令默认成功且无输出。
+
+    Returns:
+        ``(执行器, 被调用的命令列表)``。
+    """
+    calls: list[str] = []
+    table = results or {}
+
+    def run(command: str, timeout_seconds: int) -> tuple[int, str]:
+        calls.append(command)
+        value = table.get(command, (0, ""))
+        if isinstance(value, BaseException):
+            raise value
+        return value
+
+    return run, calls
+
+
+def test_all_checks_pass() -> None:
+    """全部通过时结论是通过。"""
+    runner, calls = make_runner()
+    result = run_checks(
+        (Check(command=ALLOWED_COMMAND), Check(command=TEST_COMMAND)),
+        runner=runner,
+    )
+    assert result.passed is True
+    assert result.summary == "2 项检查全部通过"
+    assert calls == [ALLOWED_COMMAND, TEST_COMMAND]
+
+
+def test_one_failure_fails_the_whole_verification() -> None:
+    """只要有一项没过，整体就是不通过。"""
+    runner, _ = make_runner({TEST_COMMAND: (1, "1 failed, 3 passed")})
+    result = run_checks(
+        (Check(command=ALLOWED_COMMAND), Check(command=TEST_COMMAND)), runner=runner
+    )
+    assert result.passed is False
+    assert result.summary == "1 项检查未通过（共 2 项）"
+
+
+def test_no_checks_is_not_a_pass() -> None:
+    """没配置检查项 ≠ 检查通过，这是这套东西最容易自欺的地方。"""
+    result = run_checks(())
+    assert result.passed is False
+    assert result.summary == "没有配置检查项，无法确认结果"
+
+
+def test_skipped_check_prevents_a_pass() -> None:
+    """被跳过的检查项算「没确认」，不能因为别的项过了就整体通过。"""
+    runner, _ = make_runner()
+    result = run_checks(
+        (Check(command=ALLOWED_COMMAND), Check(command=UNKNOWN_COMMAND)), runner=runner
+    )
+    assert result.passed is False
+
+
+def test_denied_command_is_skipped_and_never_executed() -> None:
+    """策略判 deny 的命令不执行，记为跳过并说明原因。"""
+    runner, calls = make_runner()
+    result = run_checks((Check(command=DENIED_COMMAND),), runner=runner)
+    outcome = result.outcomes[0]
+    assert outcome.status == "skipped"
+    assert "审批策略禁止执行" in outcome.note
+    assert calls == []
+
+
+def test_approval_command_is_skipped_when_unattended() -> None:
+    """需要审批的命令在无人值守时也不执行 —— 静默跑掉就等于绕过审批。"""
+    runner, calls = make_runner()
+    result = run_checks((Check(command=UNKNOWN_COMMAND),), runner=runner)
+    outcome = result.outcomes[0]
+    assert outcome.status == "skipped"
+    assert "人工审批" in outcome.note
+    assert calls == []
+
+
+def test_backend_type_actually_changes_the_decision() -> None:
+    """同一条命令在本地要审批、在沙箱里允许 —— 证明 backend_type 真的传下去了。"""
+    local_runner, local_calls = make_runner()
+    local = run_checks(
+        (Check(command=LOCAL_ONLY_APPROVAL),), backend_type="local", runner=local_runner
+    )
+    assert local.outcomes[0].status == "skipped"
+    assert local_calls == []
+
+    sandbox_runner, sandbox_calls = make_runner()
+    sandbox = run_checks(
+        (Check(command=LOCAL_ONLY_APPROVAL),), backend_type="sandbox", runner=sandbox_runner
+    )
+    assert sandbox.outcomes[0].status == "passed"
+    assert sandbox_calls == [LOCAL_ONLY_APPROVAL]
+
+
+def test_runner_exception_becomes_error_instead_of_crashing() -> None:
+    """执行器抛异常只记一条「执行出错」，不能让循环崩掉。"""
+    runner, _ = make_runner({TEST_COMMAND: OSError("找不到可执行文件")})
+    result = run_checks((Check(command=TEST_COMMAND),), runner=runner)
+    outcome = result.outcomes[0]
+    assert outcome.status == "error"
+    assert "OSError" in outcome.note
+    assert result.passed is False
+
+
+def test_timeout_becomes_error_with_the_limit_in_the_note() -> None:
+    """超时同样只记一条出错，并把超时时间写清楚。"""
+    runner, _ = make_runner(
+        {TEST_COMMAND: subprocess.TimeoutExpired(cmd=TEST_COMMAND, timeout=7)}
+    )
+    result = run_checks((Check(command=TEST_COMMAND, timeout_seconds=7),), runner=runner)
+    outcome = result.outcomes[0]
+    assert outcome.status == "error"
+    assert "7" in outcome.note
+
+
+def test_every_check_runs_even_after_a_failure() -> None:
+    """不在第一条失败时就中断 —— 一次拿全反馈，下一轮才能一次改到位。"""
+    runner, calls = make_runner({ALLOWED_COMMAND: (1, "boom")})
+    run_checks(
+        (Check(command=ALLOWED_COMMAND), Check(command=TEST_COMMAND)), runner=runner
+    )
+    assert calls == [ALLOWED_COMMAND, TEST_COMMAND]
+
+
+def test_long_output_keeps_the_tail() -> None:
+    """输出超长时保留末尾 —— 报错和失败断言都在最后。"""
+    runner, _ = make_runner({TEST_COMMAND: (1, "开" * 2000 + "真正有用的报错")})
+    result = run_checks((Check(command=TEST_COMMAND),), runner=runner)
+    output = result.outcomes[0].output
+    assert "真正有用的报错" in output
+    assert "已省略" in output
+    assert len(output) < MAX_OUTPUT_CHARS + 100
+
+
+def test_short_output_is_kept_whole() -> None:
+    """输出没超长时原样保留，不加省略提示。"""
+    runner, _ = make_runner({TEST_COMMAND: (1, "简短报错")})
+    result = run_checks((Check(command=TEST_COMMAND),), runner=runner)
+    assert result.outcomes[0].output == "简短报错"
+
+
+def test_feedback_only_mentions_unconfirmed_checks() -> None:
+    """反馈里只写没过、没跑、出错的项，通过的项不必再提。"""
+    runner, _ = make_runner({TEST_COMMAND: (1, "1 failed")})
+    result = run_checks(
+        (Check(command=ALLOWED_COMMAND), Check(command=TEST_COMMAND)), runner=runner
+    )
+    feedback = result.feedback()
+    assert TEST_COMMAND in feedback
+    assert "退出码 1" in feedback
+    assert "1 failed" in feedback
+    assert ALLOWED_COMMAND not in feedback
+
+
+def test_feedback_gives_no_repair_advice() -> None:
+    """反馈只陈述事实，不替下一轮编修复建议。"""
+    runner, _ = make_runner({TEST_COMMAND: (1, "1 failed")})
+    feedback = run_checks((Check(command=TEST_COMMAND),), runner=runner).feedback()
+    assert "建议" not in feedback
+
+
+def test_state_dict_carries_conclusions_not_output() -> None:
+    """写进循环状态的只有结论，不带测试输出正文。"""
+    runner, _ = make_runner({TEST_COMMAND: (1, "一大段测试输出")})
+    payload = run_checks(
+        (Check(command=TEST_COMMAND, description="跑测试"),), runner=runner
+    ).as_state_dict()
+
+    assert payload["passed"] is False
+    assert payload["summary"] == "1 项检查未通过（共 1 项）"
+    assert payload["checks"] == [
+        {
+            "command": TEST_COMMAND,
+            "description": "跑测试",
+            "status": "failed",
+            "exitCode": 1,
+        }
+    ]
+    assert "一大段测试输出" not in str(payload)
+
+
+def test_empty_result_has_no_checks_in_state_dict() -> None:
+    """空结果写进状态时 ``checks`` 是空列表，不能变成缺键。"""
+    payload = VerificationResult(()).as_state_dict()
+    assert payload["passed"] is False
+    assert payload["checks"] == []
+
+
+def test_parse_checks_accepts_plain_strings() -> None:
+    """条目可以只写一条命令。"""
+    checks = parse_checks(["pytest tests/", "ruff check ."])
+    assert [item.command for item in checks] == ["pytest tests/", "ruff check ."]
+    assert all(item.timeout_seconds > 0 for item in checks)
+
+
+def test_parse_checks_accepts_dicts_with_options() -> None:
+    """条目也可以带上说明和超时。"""
+    checks = parse_checks(
+        [{"command": "pytest tests/", "description": "跑测试", "timeoutSeconds": 30}]
+    )
+    assert checks[0].description == "跑测试"
+    assert checks[0].timeout_seconds == 30
+
+
+def test_parse_checks_accepts_a_single_entry() -> None:
+    """只配一条时不必再包一层列表。"""
+    assert len(parse_checks("pytest tests/")) == 1
+    assert len(parse_checks({"command": "pytest tests/"})) == 1
+
+
+def test_parse_checks_none_is_empty() -> None:
+    """没配检查项时返回空元组，由调用方去面对「无法确认」这个结论。"""
+    assert parse_checks(None) == ()
+
+
+def test_parse_checks_rejects_empty_command() -> None:
+    """空命令要报错，不能静默丢掉 —— 少一条检查会让「通过」不可信。"""
+    with pytest.raises(ValueError, match="命令不能为空"):
+        parse_checks(["   "])
+
+
+def test_parse_checks_rejects_bad_timeout() -> None:
+    """超时必须是正整数。"""
+    with pytest.raises(ValueError, match="超时时间必须是整数"):
+        parse_checks([{"command": "pytest", "timeoutSeconds": "很久"}])
+    with pytest.raises(ValueError, match="超时时间必须大于 0"):
+        parse_checks([{"command": "pytest", "timeoutSeconds": 0}])
+
+
+def test_parse_checks_rejects_wrong_shapes() -> None:
+    """整体不是列表、条目类型不对，都要报错并指出第几项。"""
+    with pytest.raises(ValueError, match="必须是一个列表"):
+        parse_checks(123)
+    with pytest.raises(ValueError, match="第 2 项检查必须是字符串或字典"):
+        parse_checks(["pytest tests/", 42])
+
+
+def test_real_local_runner_reports_exit_code(tmp_path: Path) -> None:
+    """默认执行器要能真的跑命令并拿到退出码与输出。"""
+    from services.automation_verification import _make_local_runner
+
+    runner = _make_local_runner(tmp_path)
+    code, output = runner("echo hello", 30)
+    assert code == 0
+    assert "hello" in output

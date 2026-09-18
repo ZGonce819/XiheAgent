@@ -1,0 +1,481 @@
+"""自动化任务循环状态的测试。
+
+覆盖三块：
+
+1. 读写与容错——文件不存在、内容损坏、字段类型不对时都不能让循环卡死；
+2. 记账语义——轮数 / token 累加、历史上限、游标合并；
+3. 停止条件——显式停止、轮数上限、token 上限三个来源要各自生效。
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from config.automation_state import (
+    MAX_ATTEMPTS_KEPT,
+    MAX_CHECKS_KEPT,
+    MAX_RUNS_KEPT,
+    MAX_SUMMARY_CHARS,
+    clear_stopped,
+    delete_state,
+    failure_streak,
+    initial_state,
+    load_state,
+    mark_stopped,
+    record_attempt,
+    record_run,
+    render_state,
+    reset_state,
+    save_state,
+    set_budget,
+    set_cursor,
+    state_dir,
+    state_path,
+    stop_status,
+)
+
+AUTOMATION_ID = "ab12cd34"
+
+
+@pytest.fixture
+def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """把 ``Settings.data_dir`` 指向临时目录，避免写到开发机的真实数据目录。
+
+    Returns:
+        临时的 data 目录。
+    """
+    from config.app_config import get_settings
+
+    target = tmp_path / "data"
+    monkeypatch.setattr(get_settings(), "data_dir", target)
+    return target
+
+
+def test_state_path_lives_under_data_dir(data_dir: Path) -> None:
+    """状态文件落在 data_dir 下的独立子目录里，与定义文件分开。"""
+    assert state_dir() == data_dir / "automation_state"
+    assert state_path(AUTOMATION_ID) == data_dir / "automation_state" / f"{AUTOMATION_ID}.json"
+
+
+def test_missing_file_returns_initial_state(data_dir: Path) -> None:
+    """文件不存在时返回初始状态，而不是抛异常。"""
+    state = load_state(AUTOMATION_ID)
+    assert state["automationId"] == AUTOMATION_ID
+    assert state["runs"] == []
+    assert state["attempts"] == []
+    assert state["budget"]["runsUsed"] == 0
+    assert state["stop"]["reached"] is False
+
+
+def test_corrupt_file_returns_initial_state(data_dir: Path) -> None:
+    """磁盘上是一段坏 JSON 时也要能继续跑，不能把循环卡死。"""
+    path = state_path(AUTOMATION_ID)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{ 这不是 json", encoding="utf-8")
+    assert load_state(AUTOMATION_ID)["runs"] == []
+
+
+def test_wrong_field_types_are_folded_back(data_dir: Path) -> None:
+    """字段类型不对时逐项退回默认值，其余字段仍然读得出来。"""
+    path = state_path(AUTOMATION_ID)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "cursor": "不是字典",
+                "budget": {"runsUsed": "三次", "maxRuns": 5},
+                "stop": "不是字典",
+                "runs": ["不是字典", {"outcome": "succeeded"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    state = load_state(AUTOMATION_ID)
+    assert state["cursor"] == {}
+    assert state["budget"]["runsUsed"] == 0
+    assert state["budget"]["maxRuns"] == 5
+    assert state["stop"]["reached"] is False
+    assert state["runs"] == [{"outcome": "succeeded"}]
+
+
+def test_record_run_round_trips(data_dir: Path) -> None:
+    """一轮运行的结果要能完整读回来。"""
+    record_run(
+        AUTOMATION_ID,
+        outcome="succeeded",
+        summary="修好了登录页的布局",
+        run_id="run-1",
+        thread_id="thread-1",
+        changed=["src/login.tsx"],
+        next_steps=["补一个移动端的回归用例"],
+    )
+    run = load_state(AUTOMATION_ID)["runs"][0]
+    assert run["runId"] == "run-1"
+    assert run["threadId"] == "thread-1"
+    assert run["outcome"] == "succeeded"
+    assert run["changed"] == ["src/login.tsx"]
+    assert run["nextSteps"] == ["补一个移动端的回归用例"]
+    assert run["finishedAt"]
+
+
+def test_newest_run_comes_first(data_dir: Path) -> None:
+    """历史按新到旧排列，看状态时不用再翻。"""
+    record_run(AUTOMATION_ID, outcome="failed", summary="第一轮")
+    record_run(AUTOMATION_ID, outcome="succeeded", summary="第二轮")
+    runs = load_state(AUTOMATION_ID)["runs"]
+    assert [run["summary"] for run in runs] == ["第二轮", "第一轮"]
+
+
+def test_runs_are_capped_and_drop_oldest(data_dir: Path) -> None:
+    """超过上限后丢最旧的，保留最近的 N 轮。"""
+    for index in range(MAX_RUNS_KEPT + 5):
+        record_run(AUTOMATION_ID, outcome="succeeded", summary=f"第 {index} 轮")
+    runs = load_state(AUTOMATION_ID)["runs"]
+    assert len(runs) == MAX_RUNS_KEPT
+    assert runs[0]["summary"] == f"第 {MAX_RUNS_KEPT + 4} 轮"
+    assert all(run["summary"] != "第 0 轮" for run in runs)
+
+
+def test_attempts_are_capped_and_keep_newest(data_dir: Path) -> None:
+    """「试过没成功」的记录同样有上限，且保留最近的。"""
+    for index in range(MAX_ATTEMPTS_KEPT + 3):
+        record_attempt(AUTOMATION_ID, tried=f"做法 {index}", result="无效")
+    attempts = load_state(AUTOMATION_ID)["attempts"]
+    assert len(attempts) == MAX_ATTEMPTS_KEPT
+    assert attempts[0]["tried"] == f"做法 {MAX_ATTEMPTS_KEPT + 2}"
+
+
+def test_record_run_counts_usage(data_dir: Path) -> None:
+    """每记一轮就把轮数加一，token 累加。"""
+    record_run(AUTOMATION_ID, outcome="succeeded", tokens=1200)
+    record_run(AUTOMATION_ID, outcome="failed", tokens=800)
+    budget = load_state(AUTOMATION_ID)["budget"]
+    assert budget["runsUsed"] == 2
+    assert budget["tokensUsed"] == 2000
+
+
+def test_record_run_rejects_unknown_outcome(data_dir: Path) -> None:
+    """结果取值必须是约定的三种之一，写错就报错而不是静默存下。"""
+    with pytest.raises(ValueError, match="未知的运行结果"):
+        record_run(AUTOMATION_ID, outcome="差不多完成了")
+
+
+def test_long_summary_is_clipped(data_dir: Path) -> None:
+    """单条摘要超长要截断，避免状态文件无上限膨胀。"""
+    record_run(AUTOMATION_ID, outcome="succeeded", summary="很" * (MAX_SUMMARY_CHARS + 50))
+    summary = load_state(AUTOMATION_ID)["runs"][0]["summary"]
+    assert len(summary) == MAX_SUMMARY_CHARS + 3
+    assert summary.endswith("...")
+
+
+def test_set_cursor_merges_keys(data_dir: Path) -> None:
+    """游标只覆盖传进来的键，之前记下的键不能被抹掉。"""
+    set_cursor(AUTOMATION_ID, {"lastCommit": "abc123"})
+    set_cursor(AUTOMATION_ID, {"lastRunAt": "2026-09-18T00:00:00+00:00"})
+    cursor = load_state(AUTOMATION_ID)["cursor"]
+    assert cursor == {
+        "lastCommit": "abc123",
+        "lastRunAt": "2026-09-18T00:00:00+00:00",
+    }
+
+
+def test_stop_status_is_false_by_default(data_dir: Path) -> None:
+    """没设任何限制时循环可以继续。"""
+    assert stop_status(AUTOMATION_ID) == (False, None)
+
+
+def test_mark_stopped_and_clear(data_dir: Path) -> None:
+    """显式停止能生效，也能被清掉。"""
+    mark_stopped(AUTOMATION_ID, "没有待处理的问题了")
+    stopped, reason = stop_status(AUTOMATION_ID)
+    assert stopped is True
+    assert reason == "没有待处理的问题了"
+
+    clear_stopped(AUTOMATION_ID)
+    assert stop_status(AUTOMATION_ID) == (False, None)
+
+
+def test_mark_stopped_rejects_empty_reason(data_dir: Path) -> None:
+    """停止原因会展示给人看，不能是空的。"""
+    with pytest.raises(ValueError, match="停止原因不能为空"):
+        mark_stopped(AUTOMATION_ID, "   ")
+
+
+def test_max_runs_stops_the_loop(data_dir: Path) -> None:
+    """轮数上限到了就该停，且原因里带上具体数字。"""
+    set_budget(AUTOMATION_ID, max_runs=2)
+    record_run(AUTOMATION_ID, outcome="succeeded")
+    assert stop_status(AUTOMATION_ID)[0] is False
+
+    record_run(AUTOMATION_ID, outcome="succeeded")
+    stopped, reason = stop_status(AUTOMATION_ID)
+    assert stopped is True
+    assert "2" in str(reason)
+
+
+def test_max_tokens_stops_the_loop(data_dir: Path) -> None:
+    """token 上限到了同样要停。"""
+    set_budget(AUTOMATION_ID, max_tokens=1000)
+    record_run(AUTOMATION_ID, outcome="succeeded", tokens=400)
+    assert stop_status(AUTOMATION_ID)[0] is False
+
+    record_run(AUTOMATION_ID, outcome="succeeded", tokens=700)
+    stopped, reason = stop_status(AUTOMATION_ID)
+    assert stopped is True
+    assert "1000" in str(reason)
+
+
+def test_zero_budget_means_unlimited(data_dir: Path) -> None:
+    """上限为 0 表示不限制，不能把它当成「跑满 0 轮」。"""
+    set_budget(AUTOMATION_ID, max_runs=0, max_tokens=0)
+    for _ in range(5):
+        record_run(AUTOMATION_ID, outcome="succeeded", tokens=10_000)
+    assert stop_status(AUTOMATION_ID) == (False, None)
+
+
+def test_set_budget_rejects_negative(data_dir: Path) -> None:
+    """负的上限没有意义，直接报错。"""
+    with pytest.raises(ValueError, match="不能为负数"):
+        set_budget(AUTOMATION_ID, max_runs=-1)
+    with pytest.raises(ValueError, match="不能为负数"):
+        set_budget(AUTOMATION_ID, max_tokens=-1)
+
+
+def test_reset_state_clears_history_but_keeps_file(data_dir: Path) -> None:
+    """重置后历史清空，文件仍在。"""
+    record_run(AUTOMATION_ID, outcome="succeeded", summary="跑过一轮")
+    set_cursor(AUTOMATION_ID, {"lastCommit": "abc123"})
+
+    reset_state(AUTOMATION_ID)
+    state = load_state(AUTOMATION_ID)
+    assert state["runs"] == []
+    assert state["cursor"] == {}
+    assert state["budget"]["runsUsed"] == 0
+    assert state_path(AUTOMATION_ID).exists()
+
+
+def test_delete_state_reports_whether_anything_was_removed(data_dir: Path) -> None:
+    """删一个不存在的状态返回 False，删存在的返回 True。"""
+    assert delete_state(AUTOMATION_ID) is False
+    record_run(AUTOMATION_ID, outcome="succeeded")
+    assert delete_state(AUTOMATION_ID) is True
+    assert state_path(AUTOMATION_ID).exists() is False
+
+
+def test_two_automations_do_not_share_state(data_dir: Path) -> None:
+    """不同自动化各存各的，不会互相覆盖。"""
+    record_run("aaaa1111", outcome="succeeded", summary="甲")
+    record_run("bbbb2222", outcome="failed", summary="乙")
+    assert load_state("aaaa1111")["runs"][0]["summary"] == "甲"
+    assert load_state("bbbb2222")["runs"][0]["summary"] == "乙"
+
+
+def test_illegal_ids_are_rejected(data_dir: Path) -> None:
+    """id 会被拼进文件名，必须挡掉路径字符。"""
+    for bad in ("", "   ", "../escape", "a/b", "a\\b", "带中文", "x" * 65):
+        with pytest.raises(ValueError, match="id 非法"):
+            state_path(bad)
+
+
+def test_save_state_leaves_no_temp_file(data_dir: Path) -> None:
+    """原子写用的临时文件不能留在磁盘上。"""
+    save_state(AUTOMATION_ID, initial_state(AUTOMATION_ID))
+    leftovers = list(state_dir().glob("*.tmp"))
+    assert leftovers == []
+
+
+def test_render_state_shows_runs_attempts_and_next_steps(data_dir: Path) -> None:
+    """给人看的文本里要有最近几轮、待办和试过没成功的做法。"""
+    record_run(
+        AUTOMATION_ID,
+        outcome="blocked",
+        summary="登录页修好了，回归用例还没补",
+        next_steps=["补移动端回归用例"],
+    )
+    record_attempt(AUTOMATION_ID, tried="加大超时时间", result="无效", reason="不是超时问题")
+    set_cursor(AUTOMATION_ID, {"lastCommit": "abc123"})
+
+    text = render_state(AUTOMATION_ID)
+    assert "登录页修好了" in text
+    assert "补移动端回归用例" in text
+    assert "加大超时时间" in text
+    assert "不是超时问题" in text
+    assert "abc123" in text
+    assert "可继续" in text
+
+
+def test_render_state_mentions_stop_reason(data_dir: Path) -> None:
+    """停下时文本里要写清为什么停。"""
+    mark_stopped(AUTOMATION_ID, "没有待处理的问题了")
+    assert "没有待处理的问题了" in render_state(AUTOMATION_ID)
+
+
+def test_render_state_works_without_history(data_dir: Path) -> None:
+    """一次都没跑过时也要给出一份可读的骨架，而不是空串。"""
+    text = render_state(AUTOMATION_ID)
+    assert "还没有任何运行记录" in text
+    assert AUTOMATION_ID in text
+
+
+def test_render_state_does_not_write_anything(data_dir: Path) -> None:
+    """渲染是只读操作，不能顺手把状态文件建出来。"""
+    render_state(AUTOMATION_ID)
+    assert state_path(AUTOMATION_ID).exists() is False
+
+
+def verification(passed: bool, *, summary: str = "", checks: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """造一份验证结论。
+
+    Returns:
+        与 ``VerificationResult.as_state_dict()`` 同构的字典。
+    """
+    return {
+        "passed": passed,
+        "summary": summary or ("检查通过" if passed else "检查未通过"),
+        "checks": checks or [],
+    }
+
+
+def test_run_keeps_the_verification_conclusion(data_dir: Path) -> None:
+    """验证结论要跟着这一轮一起落盘。"""
+    record_run(
+        AUTOMATION_ID,
+        outcome="succeeded",
+        verification=verification(
+            True,
+            checks=[
+                {
+                    "command": "pytest tests/",
+                    "description": "跑测试",
+                    "status": "passed",
+                    "exitCode": 0,
+                }
+            ],
+        ),
+    )
+    stored = load_state(AUTOMATION_ID)["runs"][0]["verification"]
+    assert stored["passed"] is True
+    assert stored["summary"] == "检查通过"
+    assert stored["checks"][0]["exitCode"] == 0
+
+
+def test_run_without_verification_keeps_it_empty(data_dir: Path) -> None:
+    """没做验证时要看得出来是「没做」，不能编一个结论出来。"""
+    record_run(AUTOMATION_ID, outcome="succeeded")
+    assert load_state(AUTOMATION_ID)["runs"][0]["verification"] is None
+
+
+def test_verification_without_passed_flag_is_dropped(data_dir: Path) -> None:
+    """形状不对的验证结论一律丢掉，避免被当成「已确认」。"""
+    record_run(AUTOMATION_ID, outcome="succeeded", verification={"summary": "看着还行"})
+    assert load_state(AUTOMATION_ID)["runs"][0]["verification"] is None
+
+
+def test_verification_checks_are_capped(data_dir: Path) -> None:
+    """检查项很多时只留前若干条，防止状态文件膨胀。"""
+    record_run(
+        AUTOMATION_ID,
+        outcome="failed",
+        verification=verification(
+            False,
+            checks=[
+                {"command": f"check-{index}", "status": "failed", "exitCode": 1}
+                for index in range(MAX_CHECKS_KEPT + 5)
+            ],
+        ),
+    )
+    stored = load_state(AUTOMATION_ID)["runs"][0]["verification"]
+    assert len(stored["checks"]) == MAX_CHECKS_KEPT
+
+
+def test_failure_streak_counts_from_the_latest_round(data_dir: Path) -> None:
+    """连续未通过要从最近一轮往前数。"""
+    record_run(AUTOMATION_ID, outcome="failed")
+    record_run(AUTOMATION_ID, outcome="failed")
+    record_run(AUTOMATION_ID, outcome="failed")
+    assert failure_streak(AUTOMATION_ID) == 3
+
+
+def test_failure_streak_stops_at_the_first_pass(data_dir: Path) -> None:
+    """中间一旦有一轮通过，连续计数就断掉。"""
+    record_run(AUTOMATION_ID, outcome="failed")
+    record_run(AUTOMATION_ID, outcome="succeeded")
+    record_run(AUTOMATION_ID, outcome="failed")
+    assert failure_streak(AUTOMATION_ID) == 1
+
+
+def test_failure_streak_is_zero_without_history(data_dir: Path) -> None:
+    """一次都没跑过时不算连续失败。"""
+    assert failure_streak(AUTOMATION_ID) == 0
+
+
+def test_verification_verdict_beats_the_outcome(data_dir: Path) -> None:
+    """有验证结论时以它为准：outcome 写 succeeded 但验证没过，仍算未通过。"""
+    record_run(
+        AUTOMATION_ID, outcome="succeeded", verification=verification(False)
+    )
+    assert failure_streak(AUTOMATION_ID) == 1
+
+
+def test_blocked_round_does_not_count_as_a_failure(data_dir: Path) -> None:
+    """``blocked`` 是「没做完但也没报错」，不算验证失败。"""
+    record_run(AUTOMATION_ID, outcome="blocked")
+    assert failure_streak(AUTOMATION_ID) == 0
+
+
+def test_max_consecutive_failures_stops_the_loop(data_dir: Path) -> None:
+    """连续失败到上限就停下交给人，并把原因写清楚。"""
+    set_budget(AUTOMATION_ID, max_consecutive_failures=2)
+    record_run(AUTOMATION_ID, outcome="failed")
+    assert stop_status(AUTOMATION_ID)[0] is False
+
+    record_run(AUTOMATION_ID, outcome="failed")
+    stopped, reason = stop_status(AUTOMATION_ID)
+    assert stopped is True
+    assert "人工介入" in str(reason)
+
+
+def test_a_pass_resets_the_consecutive_failure_stop(data_dir: Path) -> None:
+    """中间成功一轮之后，连续失败的停止条件就不该再拦着。"""
+    set_budget(AUTOMATION_ID, max_consecutive_failures=2)
+    record_run(AUTOMATION_ID, outcome="failed")
+    record_run(AUTOMATION_ID, outcome="succeeded")
+    record_run(AUTOMATION_ID, outcome="failed")
+    assert stop_status(AUTOMATION_ID) == (False, None)
+
+
+def test_set_budget_rejects_negative_consecutive_failures(data_dir: Path) -> None:
+    """负的连续失败上限没有意义，直接报错。"""
+    with pytest.raises(ValueError, match="不能为负数"):
+        set_budget(AUTOMATION_ID, max_consecutive_failures=-1)
+
+
+def test_render_state_shows_verification_and_streak(data_dir: Path) -> None:
+    """给人看的文本里要有每轮的验证结论和当前的连续失败次数。"""
+    record_run(
+        AUTOMATION_ID,
+        outcome="failed",
+        summary="测试还是没过",
+        verification=verification(False, summary="1 项检查未通过（共 2 项）"),
+    )
+    text = render_state(AUTOMATION_ID)
+    assert "验证未通过：1 项检查未通过（共 2 项）" in text
+    assert "已连续 1 轮未通过验证" in text
+
+
+def test_render_state_marks_a_passing_verification(data_dir: Path) -> None:
+    """通过的那一轮也要标出来，不然看不出「跑过了」。"""
+    record_run(AUTOMATION_ID, outcome="succeeded", verification=verification(True))
+    text = render_state(AUTOMATION_ID)
+    assert "验证通过：检查通过" in text
+    assert "已连续" not in text
+
+
+def test_render_state_lists_the_failure_limit(data_dir: Path) -> None:
+    """预算里配了连续失败上限时要在文本里体现。"""
+    set_budget(AUTOMATION_ID, max_consecutive_failures=3)
+    assert "连续 3 轮未通过就停" in render_state(AUTOMATION_ID)

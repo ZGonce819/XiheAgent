@@ -16,7 +16,7 @@
 - 🎛️ **自定义模型配置** - 支持通过 API 配置自定义模型（API Key/Base URL/模型名），可在对话中切换
 - 🔒 **会话环境隔离** - 自动追踪会话创建环境（local/sandbox），防止跨环境继续对话
 - 📁 **本地文件夹绑定** - 项目可绑定本地文件夹作为工作根目录，Agent 直接在用户项目中工作
-- ⏰ **自动化任务编排** - 支持定时任务和周期性自动化工作流
+- ⏰ **自动化任务编排** - 自动化任务按「一轮一轮」跑：每轮读上一轮状态、跑完独立验证、把结论写回状态，连续没通过就停下交给人；支持按 cron 自动触发，也可以手动跑一轮
 - 🧩 **四层技能系统** - 内置 / 全局 / 项目集合 / 本地四层作用域，同名逐层覆盖；支持网页上传与 Agent 自动沉淀
 - 🖥️ **现代化前端** - React + Vite + TanStack Router，响应式设计，支持深色模式
 
@@ -95,6 +95,10 @@ docker run -d \
   -v /home/user/data/postgres/logs:/var/log/postgresql \
   postgres:latest
 ```
+
+> ⚠️ 上面这条 Redis 命令带 `--requirepass root`，**密码必须同时写进 `.env` 的 `REDIS_PASSWORD`**，否则后端连不上 Redis（`NOAUTH Authentication required`），checkpointer 建不出来，任何一轮对话都跑不完。而「手动安装」里 WSL2 的 `apt install redis-server` 默认**不设密码**，两种装法对 `.env` 的要求相反 —— 换装法时要记得同步改。
+>
+> 想确认当前实例到底要不要密码：`redis-cli -h 127.0.0.1 -p 6379 ping`。回 `PONG` 就是不要；回 `NOAUTH Authentication required.` 就是要（注意别把 `NOAUTH` 误当成「没设密码」，那正好是反的）。
 
 #### 手动安装
 
@@ -324,7 +328,8 @@ xihe-agent/
 │   ├── app_config.py      # Settings 单例配置
 │   ├── env_config.py      # 环境变量加载
 │   ├── model_config.py    # 自定义模型配置管理
-│   ├── automation_config.py # 自动化任务配置
+│   ├── automation_config.py # 自动化任务定义（data/automations.json）
+│   ├── automation_state.py  # 自动化任务跨轮状态（data/automation_state/<id>.json）
 │   ├── approval_config.py # 命令审批策略配置
 │   ├── approval_runtime.py # 审批运行时状态管理
 │   └── logging_config.py  # 日志配置
@@ -441,6 +446,11 @@ xihe-agent/
 │   ├── skill_registry.py    # 技能注册表（四层作用域的唯一事实来源）
 │   ├── skill_installer.py   # 技能安装器（薄封装 skill_registry）
 │   ├── sandbox_skill_sync.py # 技能变更后同步进沙箱（运行中的会话延迟同步）
+│   ├── cron_schedule.py     # cron 表达式解析与命中判断
+│   ├── automation_loop.py   # 自动化任务的一轮循环（读状态 → 跑一轮 → 验证 → 写状态）
+│   ├── automation_verification.py # 循环的独立验证门（跑检查项，不靠模型自评）
+│   ├── automation_runner.py # 循环接真实运行时的一侧（当前只放行只读任务）
+│   ├── automation_scheduler.py # 按分钟扫描并启动到点的任务（进程内常驻）
 │   └── __init__.py        # 服务导出
 │
 ├── scripts/               # CLI 脚本
@@ -485,9 +495,18 @@ xihe-agent/
 │   └── vite.config.ts     # Vite 配置（代理到后端）
 │
 ├── tests/                 # 后端 pytest 测试
-│   ├── conftest.py        # 夹具：临时技能目录 + 技能写入工厂
+│   ├── conftest.py        # 夹具：临时技能目录 / 临时数据目录 + 技能写入工厂
 │   ├── test_sandbox_skill_paths.py # 技能分层 → 沙箱落点的路径契约
-│   └── test_sandbox_skill_sync.py  # 幂等同步与刷新调度
+│   ├── test_sandbox_skill_sync.py  # 幂等同步与刷新调度
+│   ├── test_cron_schedule.py       # cron 解析与命中（含日/周同时限定的「或」语义）
+│   ├── test_automation_state.py    # 循环状态的读写、记账与停止条件
+│   ├── test_automation_verification.py # 验证门（审批闸、没配检查项不算通过）
+│   ├── test_automation_loop.py     # 一轮循环的编排顺序与状态流转
+│   ├── test_automation_runner.py   # 只读任务的放行与拒绝边界
+│   ├── test_automation_scheduler.py # 常驻调度（先写触发标记再启动、不重复触发、不重入）
+│   ├── test_task_router_routing.py # 任务类型判定只看用户写的那一句
+│   ├── test_app_lifespan.py        # 调度有没有被正确地拉起与停掉
+│   └── test_automation_api.py      # 循环状态接口与手动触发接口
 │
 ├── docs/                  # 补充文档
 │   └── COMMAND_APPROVAL.md # 命令审批机制说明
@@ -560,13 +579,64 @@ xihe-agent/
 
 ### 自动化任务 (`config/automation_config.py`)
 
-自动化任务系统支持定时和周期性工作流：
+一个自动化任务由**定义**和**跨轮状态**两部分组成，分开存：
 
-- **定时任务**：在指定时间执行一次性任务
-- **周期任务**：按 cron 表达式周期性执行
-- **任务配置**：包含触发条件、执行动作、通知方式等
+| | 落点 | 内容 |
+|---|---|---|
+| 定义 | `data/automations.json` | 名称、任务指令、cron 表达式、仓库、模型、验证检查项、最近一次触发信息 |
+| 状态 | `data/automation_state/<任务 id>.json` | 已跑几轮、每轮结果、上一轮验证反馈、处理到哪、是否已停止 |
 
-自动化配置存储在 `data/automations.json`，通过 Dashboard API 管理。
+分开存有三个原因：多个任务可能同时跑，分开存不会互相覆盖；单个任务的历史变长不拖累其它任务；删除任务时直接删对应文件即可。
+
+#### 一轮循环做了什么
+
+顺序固定，每一步都落盘，跑完能查到每一轮发生了什么：
+
+1. **先看该不该停** —— 上一轮可能已经把循环跑停了，这一轮不该再启动；
+2. **读状态** —— 拿到「上一轮做到哪」「上一轮验证反馈」；
+3. **拼指令** —— 任务指令 + 状态摘要 + 上一轮验证反馈，一起发给模型；
+4. **跑一轮** —— 走和普通会话一样的 Agent 流程，产生一条会话记录；
+5. **独立验证** —— 在**循环自己**这一侧跑配置好的检查项（例如 `pytest -q`），不采信模型的自我评价；
+6. **写状态** —— 记下这一轮的结果、验证结论与新的游标；
+7. **再看该不该停** —— 判断下一轮还能不能继续。
+
+#### 停止条件
+
+停止条件必须是机器能判定的，否则循环停不下来。目前有四个来源：
+
+- **连续多少轮没通过验证**（`maxConsecutiveFailures`）—— 这是最常用的一个；
+- **最多跑多少轮**（`maxRuns`）；
+- **最多消耗多少 token**（`maxTokens`）—— **当前不生效**，运行时的用量还没上报出来；
+- **显式停止** —— 由验证连续失败升级而来，也可以人工置位。
+
+上限写 `0` 表示不限制。验证的判定规则：配了检查项就**以检查项的结论为准**，没配检查项时退回看这一轮本身跑成没跑成；「没做完但也没报错」（`blocked`）不算失败。
+
+#### 验证门的三条硬规则
+
+- **没配置检查项 = 不通过**。否则「什么都没验」会被当成「验过了」。
+- **要审批的命令不执行**。检查项里的命令先过一遍既有的命令审批策略，判定为「拒绝」或「需要审批」的一律记为跳过，执行器一次都不调用。无人值守的循环不能自己批准自己。
+- **说不清仓库在哪就不执行验证**。检查项必须在**目标仓库**里跑：调用方没指定目录时用「跑一轮」报上来的那个，两者都没有就整体记为「没有执行验证」并说明原因。退回后端进程的当前目录会在后端自己的仓库里跑检查项，得到一份与目标仓库无关的结论，比「没验证」更糟。沙箱会话属于这一类 —— 仓库在容器里，容器内执行验证的通道还没接通。
+
+#### 当前只放行只读任务
+
+循环目前只允许**只读任务**：项目分析、问题解答、代码审查、仓库同步、工作区查看。判定走既有的任务类型识别，被识别为「开发实现」或「方案规划」的任务会被拒掉，并说明原因。
+
+不放行「开发实现」是因为现有路径会把首轮开发需求转成方案规划并停下来等用户确认 —— 对无人值守的循环，那等于永远停在等确认那一步。要放开得先给循环定一条不经过方案确认的写入路径。
+
+判定**只看用户写的那一句任务指令**，不看拼上去的循环状态与上一轮反馈。拼装出来的文字里会带「提交」「push」这类词（来自状态摘要或验证反馈），拿它去判会把只读任务误判成开发实现，进而走到「等用户确认」那一步；而「等确认」在循环里不算失败，于是连续未通过次数永远不触发，任务会静默卡住。
+
+#### 怎么触发
+
+两条路都通：
+
+- **手动触发** —— 在自动化任务页面点「立即跑一轮」，或调 `POST /dashboard/api/schedules/{id}/run`。接口是受理式的，返回 `202` 表示这一轮已经派到后台，跑完会作为一条会话记录出现在会话列表里。
+- **按 cron 自动触发** —— 服务启动时拉起一个后台扫描线程（`services/automation_scheduler.py`），默认每 30 秒扫一遍，到点的任务各起一个线程去跑。扫描顺序上**先把触发时间写进定义，再启动这一轮**：`is_due` 靠 `lastTriggeredAt` 判断「这一分钟跑过没有」，写晚了同一分钟会被重复触发。同一个任务上一轮还没跑完时这一分钟跳过它。
+
+自动触发跑出问题时会写进定义的 `lastError`，列表上直接看得见；跑成功的那次触发会把它清掉。算「问题」的有三种：这一轮失败了、这一轮根本没执行、以及这一轮**没做完**（`blocked`）—— 最后这种最常见的是「停在等人工审批」，定时任务在列表上看着一切正常、实际每轮都在等一个没人会点的确认，不写出来基本发现不了。
+
+循环已经把自己停了的任务（连续没通过、到达轮数上限等）**不再触发** —— 触发它只会空转，却会把 `lastTriggeredAt` 写新，界面上显示成「刚触发过」。
+
+> ⚠️ 调度是**进程内**的。多进程部署时每个进程都会扫一遍，同一个任务会被重复触发；要支持多进程得先把「谁负责触发」收敛到一处（单实例选主，或换成外部定时器打手动触发那个接口）。目前只支持单进程。
 
 ### 技能系统
 
@@ -720,6 +790,8 @@ XiheAgent 对 `execute` 工具采用统一的三段式策略：`ALLOW` 直接执
 
 本地工作区默认更保守：测试可自动运行，构建、依赖安装、项目脚本、文件修改、Git 写操作和网络访问默认询问。OpenSandbox 只在隔离容器内自动放行可恢复的构建、脚本、依赖和只读网络操作；删除、远端写入、凭据、提权和沙箱逃逸仍受保护。
 
+`git` 允许把全局选项写在子命令前面（`git -C <路径> status`、`git --no-pager diff`），分类时会**先剥掉这些选项再匹配**，因此 `git -C <路径> status` 与 `git status` 同判、`git -C <路径> push --force` 与 `git push --force` 同判。这一步是必需的：不剥掉的话，只读命令会掉进「未识别 → 每次询问」，破坏性命令则会绕过上面那条「强制推送、破坏性重置」的高危规则。Agent 在仓库外的目录里工作时天然会用 `-C <路径>` 这种写法，所以这条不是边角情况。
+
 个人设置可以按语义类别选择“自动允许”或“每次询问”。服务端会过滤未知类别，且设置无法覆盖高危规则，包括工作区外写入、受保护密钥、强制推送、破坏性重置、提权、系统/磁盘配置、凭据注入和沙箱逃逸。
 
 人工审批面板以内联方式显示在会话输入框上方，展示命令详情以及”解释””拒绝””允许一次”，不会使用遮挡会话内容的居中弹窗。
@@ -770,12 +842,23 @@ PUT    /dashboard/api/builtin-model              # 更新内置模型配置
 ### 自动化任务管理
 
 ```
-GET    /dashboard/api/automations                # 获取自动化任务列表
-POST   /dashboard/api/automations                # 创建自动化任务
-PUT    /dashboard/api/automations/{id}           # 更新自动化任务
-DELETE /dashboard/api/automations/{id}           # 删除自动化任务
-POST   /dashboard/api/automations/{id}/run       # 立即执行自动化任务
+GET    /dashboard/api/schedules                  # 列出自动化任务
+POST   /dashboard/api/schedules                  # 创建自动化任务
+PATCH  /dashboard/api/schedules/{id}             # 更新自动化任务（支持局部字段）
+DELETE /dashboard/api/schedules/{id}             # 删除自动化任务
+GET    /dashboard/api/schedules/{id}/state       # 读这个任务的循环状态（只读，不会建出状态文件）
+POST   /dashboard/api/schedules/{id}/run         # 手动跑一轮（202 受理；不能跑时返回 404/409/400 与原因）
 ```
+
+`POST /schedules/{id}/run` 的失败状态码：
+
+| 状态码 | 含义 |
+|--------|------|
+| 404 | 任务不存在 |
+| 409 | 这个循环已经停了（响应里带上停止原因） |
+| 400 | 任务超出只读范围、没有配置代码仓库，或验证检查项配置有误 |
+
+「能不能跑」的判断全部在这个请求里同步做完，不会先回 `202` 再在后台失败。
 
 ### 技能管理
 
@@ -831,10 +914,12 @@ DELETE /dashboard/api/workspace/projects/{project_name}/unbind-folder  # 解除�
 | `XIHE_AGENT_DATA_DIR` | 数据文件目录 | `{project_root}/data` |
 | `XIHE_AGENT_LOG_DIR` | 日志文件目录 | `{project_root}/logs` |
 | `XIHE_AGENT_LOG_LEVEL` | 日志级别 | `INFO` |
+| `XIHE_AUTOMATION_SCHEDULER` | 是否启用自动化任务的常驻调度 | `true` |
+| `XIHE_AUTOMATION_TICK_SECONDS` | 常驻调度多久扫一次（秒，最小 1） | `30` |
 | `AI_WORKSPACE_ROOT` | 代码工作区根目录 | `E:/ai_workspace` |
 | `REDIS_HOST` | Redis 主机地址（Checkpoint） | `localhost` |
 | `REDIS_PORT` | Redis 端口 | `6379` |
-| `REDIS_PASSWORD` | Redis 密码（可选） | *无* |
+| `REDIS_PASSWORD` | Redis 密码（实例开了认证就必须填，否则建不出 checkpoint，任何一轮都跑不完） | *无* |
 | `REDIS_CHECKPOINT_DB` | Checkpoint 使用的 Redis DB | `0` |
 | `MYSQL_HOST` | MySQL 主机地址（业务数据） | `localhost` |
 | `MYSQL_PORT` | MySQL 端口 | `3306` |
@@ -891,7 +976,9 @@ npx vitest run         # 运行全部单元测试（watch 模式用 npx vitest�
 后端测试使用 pytest，统一放在仓库根的 `tests/`（`pyproject.toml` 里 `testpaths = ["tests"]`）。
 
 - `tests/conftest.py` 会把 `Settings.skills_dir` 指向临时目录，用例不会读写开发机上真实的技能目录；新增涉及技能落盘的测试请复用 `skills_root` / `make_skill` 夹具。
+- 涉及自动化任务的测试要复用 `data_root` 夹具（把 `Settings.data_dir` 指向临时目录），否则会读写开发机上真实的 `data/automations.json`。
 - 沙箱相关测试不需要真实容器：`OpenSandboxBackend` 只用到底层沙箱的 `id` 与 `files` 两个接口，用记录调用的假对象即可覆盖同步行为（见 `tests/test_sandbox_skill_sync.py`）。
+- **需要模型的判断一律打桩**。任务类型识别（`classify_task_kind`）会真的调模型，一次几秒且结果随模型变，把它写进断言会让用例既慢又不稳。要测的是「拿到某个判断结果之后怎么处置」。
 
 前端测试使用 Vitest + Testing Library，测试文件与被测组件同目录（`*.test.tsx`）。
 

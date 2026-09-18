@@ -92,8 +92,9 @@ section-order = ["future", "standard-library", "third-party", "first-party", "lo
 
 [tool.ruff.lint.per-file-ignores]
 # 测试里的假对象必须照抄真实签名（哪怕某个参数用不到），夹具也常只依赖副作用，
-# 因此对 tests/ 放开「未使用参数」这一类规则。
-"tests/**" = ["ARG001", "ARG005"]
+# 因此对 tests/ 放开「未使用参数」这一类规则。ARG002 是其中的「方法参数未使用」，
+# 替身类照抄 `def get_thread(self, thread_id)` 就会命中它。
+"tests/**" = ["ARG001", "ARG002", "ARG005"]
 
 [tool.ruff.format]
 quote-style = "double"

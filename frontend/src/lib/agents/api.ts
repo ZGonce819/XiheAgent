@@ -1,12 +1,20 @@
 import type {
   AgentSchedule,
   AgentThread,
+  AutomationRunReceipt,
+  AutomationStateResponse,
   ImageChunk,
   Message,
   PendingCommandApproval,
 } from "./types"
 
-export type { AgentSchedule, AgentThread, Message }
+export type {
+  AgentSchedule,
+  AgentThread,
+  AutomationRunReceipt,
+  AutomationStateResponse,
+  Message,
+}
 
 export interface ThreadCreateRequest {
   prompt: string
@@ -143,6 +151,15 @@ export const agentsApi = {
     agentsRequest<void>(`/schedules/${encodeURIComponent(scheduleId)}`, {
       method: "DELETE",
     }),
+  getScheduleState: (scheduleId: string) =>
+    agentsRequest<AutomationStateResponse>(
+      `/schedules/${encodeURIComponent(scheduleId)}/state`
+    ),
+  runSchedule: (scheduleId: string) =>
+    agentsRequest<AutomationRunReceipt>(
+      `/schedules/${encodeURIComponent(scheduleId)}/run`,
+      { method: "POST" }
+    ),
   getThread: (threadId: string) =>
     agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}`),
   saveViewSnapshot: (threadId: string, messages: Array<Message>) =>

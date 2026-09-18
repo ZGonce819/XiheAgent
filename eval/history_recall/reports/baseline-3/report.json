@@ -1,0 +1,768 @@
+{
+  "meta": {
+    "label": "baseline-3",
+    "samples_path": "eval\\history_recall\\samples.jsonl",
+    "schema": "xihe_knowledge_eval_baseline_3_b21749",
+    "schema_kept": false,
+    "started_at": "2026-09-17 21:40:06",
+    "duration_ms": 22357,
+    "samples_in_file": 14,
+    "samples_selected": 13,
+    "history_search_enabled": true,
+    "conclusion_write_enabled": true,
+    "history_search_repos": [],
+    "switches_note": "驱动器强制打开检索与写入开关：评估测的是能力本身，开关行为由测试覆盖",
+    "not_run": [
+      {
+        "sample_id": "hr-structure-001",
+        "stage": "agent",
+        "reason": "该执行层级尚未实现：需要完整 Agent 运行，本次只跑检索层"
+      }
+    ]
+  },
+  "metrics": {
+    "total": 13,
+    "executed": 13,
+    "errored": 0,
+    "passed": 11,
+    "failed": 2,
+    "gated_samples": 12,
+    "recall_at_k": 0.9,
+    "recall_hit_keys": 9,
+    "recall_total_keys": 10,
+    "hard_violations": [],
+    "divergences": [],
+    "uncalibrated": [
+      "hr-decision-001",
+      "hr-decision-002",
+      "hr-incident-001",
+      "hr-incident-002",
+      "hr-noanswer-001",
+      "hr-stale-001",
+      "hr-stale-002",
+      "hr-crossrepo-001",
+      "hr-edited-001",
+      "hr-edited-002",
+      "hr-deleted-001",
+      "hr-synonym-001",
+      "hr-version-001"
+    ],
+    "fallback_ok": 1,
+    "fallback_total": 1,
+    "observed_pass": 0,
+    "observed_total": 1,
+    "latency_p50_ms": 0,
+    "latency_p95_ms": 1780,
+    "latency_samples": 13,
+    "by_category": [
+      {
+        "category": "cross_repo",
+        "samples": 1,
+        "executed": 1,
+        "passed": 1,
+        "gated": 1,
+        "recall_hit_keys": 1,
+        "recall_total_keys": 1
+      },
+      {
+        "category": "deleted_thread",
+        "samples": 1,
+        "executed": 1,
+        "passed": 1,
+        "gated": 1,
+        "recall_hit_keys": 0,
+        "recall_total_keys": 0
+      },
+      {
+        "category": "edited_branch",
+        "samples": 2,
+        "executed": 2,
+        "passed": 2,
+        "gated": 2,
+        "recall_hit_keys": 1,
+        "recall_total_keys": 1
+      },
+      {
+        "category": "historical_decision",
+        "samples": 2,
+        "executed": 2,
+        "passed": 2,
+        "gated": 2,
+        "recall_hit_keys": 2,
+        "recall_total_keys": 2
+      },
+      {
+        "category": "incident_fix",
+        "samples": 2,
+        "executed": 2,
+        "passed": 2,
+        "gated": 2,
+        "recall_hit_keys": 2,
+        "recall_total_keys": 2
+      },
+      {
+        "category": "no_answer",
+        "samples": 1,
+        "executed": 1,
+        "passed": 1,
+        "gated": 1,
+        "recall_hit_keys": 0,
+        "recall_total_keys": 0
+      },
+      {
+        "category": "stale_knowledge",
+        "samples": 2,
+        "executed": 2,
+        "passed": 2,
+        "gated": 2,
+        "recall_hit_keys": 3,
+        "recall_total_keys": 3
+      },
+      {
+        "category": "synonym_rewrite",
+        "samples": 1,
+        "executed": 1,
+        "passed": 0,
+        "gated": 0,
+        "recall_hit_keys": 0,
+        "recall_total_keys": 0
+      },
+      {
+        "category": "version_change",
+        "samples": 1,
+        "executed": 1,
+        "passed": 0,
+        "gated": 1,
+        "recall_hit_keys": 0,
+        "recall_total_keys": 1
+      }
+    ],
+    "gates": [
+      {
+        "name": "越界召回与伪造验证",
+        "target": "0 条",
+        "observed": "0 条",
+        "applicable": true,
+        "passed": true,
+        "note": "不设容忍区间，也不因样本未校准而豁免：出现即缺陷"
+      },
+      {
+        "name": "Recall@k",
+        "target": "≥ 85%",
+        "observed": "90.0%（9/10，门槛样本 12 条）",
+        "applicable": false,
+        "passed": null,
+        "note": "门槛样本只有 12 条，少于 20 条，样本不足时比例与分位数都在追噪声，本次仅观测"
+      },
+      {
+        "name": "无匹配时回落真实工具",
+        "target": "全部按要求提示",
+        "observed": "1/1",
+        "applicable": true,
+        "passed": true,
+        "note": "只核对了提示语；模型是否真的改用实时工具属 Agent 层，未测量"
+      },
+      {
+        "name": "检索 p95 时延（含适用性检查）",
+        "target": "≤ 2000 ms",
+        "observed": "p95 1780 ms / p50 0 ms（13 条）",
+        "applicable": false,
+        "passed": null,
+        "note": "样本只有 13 条，不足以取分位数，本次仅观测"
+      },
+      {
+        "name": "引用可打开率",
+        "target": "≥ 95%",
+        "observed": "未测量",
+        "applicable": false,
+        "passed": null,
+        "note": "需要完整 Agent 执行，本次只跑了检索层"
+      },
+      {
+        "name": "重复工具调用数中位数下降",
+        "target": "≥ 20%",
+        "observed": "未测量",
+        "applicable": false,
+        "passed": null,
+        "note": "需要「无召回 / 有召回」两组 Agent 运行，本次只跑了检索层"
+      }
+    ],
+    "unmeasured": [
+      "引用可打开率（目标 ≥95%）：需要完整 Agent 执行并观察其答案引用，本次只跑了检索层",
+      "重复工具调用数中位数下降（目标 ≥20%）：需要「无召回 / 有召回」两组 Agent 运行",
+      "纯数据库检索 p95（目标 ≤300ms）：上报的是含本地适用性检查的端到端耗时，两者未分开测量"
+    ]
+  },
+  "verdicts": [
+    {
+      "sample_id": "hr-decision-001",
+      "category": "historical_decision",
+      "split": "tuning",
+      "stage": "retrieval",
+      "assertion": "required",
+      "calibrated": false,
+      "query": "checkpoint 存储",
+      "mode": "current",
+      "executed": true,
+      "error": null,
+      "divergences": [],
+      "status_expected": "found",
+      "status_observed": "found",
+      "failures": [],
+      "missing_hits": [],
+      "must_hit_ranks": {
+        "c-checkpoint-redis": 1
+      },
+      "violations": [],
+      "fabricated": [],
+      "top_hit_ok": true,
+      "applicability_ok": null,
+      "fallback_ok": null,
+      "hits": [
+        {
+          "key": "c-checkpoint-redis",
+          "conclusion_id": "cn-284ccc32cccc281a62765bf0491c11df",
+          "rank": 1,
+          "statement": "checkpoint 存储选用 Redis，理由是恢复速度与团队已有运维能力，不使用 PostgreSQL",
+          "evidence_state": "observed",
+          "applicability": "unknown",
+          "applicability_reason": "验证记录未声明依赖，也没有可对应的提交，无法判断是否仍适用",
+          "needs_recheck": true,
+          "superseded_by": null
+        }
+      ],
+      "elapsed_ms": 0,
+      "degraded": false,
+      "fallback_reason": null,
+      "corpus_notes": [
+        "写入语料 c-checkpoint-redis（decision）：stored",
+        "写入语料 c-state-mysql（fact）：stored"
+      ],
+      "workspace_changes": [],
+      "note": "历史决策类基线：已接受、单一证据的决策应被召回并排在首位"
+    },
+    {
+      "sample_id": "hr-decision-002",
+      "category": "historical_decision",
+      "split": "tuning",
+      "stage": "retrieval",
+      "assertion": "required",
+      "calibrated": false,
+      "query": "import-linter",
+      "mode": "current",
+      "executed": true,
+      "error": null,
+      "divergences": [],
+      "status_expected": "found",
+      "status_observed": "found",
+      "failures": [],
+      "missing_hits": [],
+      "must_hit_ranks": {
+        "c-import-linter": 1
+      },
+      "violations": [],
+      "fabricated": [],
+      "top_hit_ok": true,
+      "applicability_ok": true,
+      "fallback_ok": null,
+      "hits": [
+        {
+          "key": "c-import-linter",
+          "conclusion_id": "cn-af7928221aae81f28763a954c0e92526",
+          "rank": 1,
+          "statement": "分层依赖用 import-linter 固定：utils 不得反向依赖上层业务包，防止再次出现循环导入",
+          "evidence_state": "observed",
+          "applicability": "unchanged",
+          "applicability_reason": "工作区仍在验证时的提交上，且没有未提交变化",
+          "needs_recheck": true,
+          "superseded_by": null
+        }
+      ],
+      "elapsed_ms": 1780,
+      "degraded": false,
+      "fallback_reason": null,
+      "corpus_notes": [
+        "写入语料 c-import-linter（decision）：stored",
+        "c-import-linter 在初始提交上留下验证记录（证据状态 observed）"
+      ],
+      "workspace_changes": [],
+      "note": "带依赖路径的决策：适用性应为检查通过态，不能被误标为需复核"
+    },
+    {
+      "sample_id": "hr-incident-001",
+      "category": "incident_fix",
+      "split": "tuning",
+      "stage": "retrieval",
+      "assertion": "required",
+      "calibrated": false,
+      "query": "pytest 收集失败",
+      "mode": "current",
+      "executed": true,
+      "error": null,
+      "divergences": [],
+      "status_expected": "found",
+      "status_observed": "found",
+      "failures": [],
+      "missing_hits": [],
+      "must_hit_ranks": {
+        "c-pytest-cjk": 1
+      },
+      "violations": [],
+      "fabricated": [],
+      "top_hit_ok": true,
+      "applicability_ok": null,
+      "fallback_ok": null,
+      "hits": [
+        {
+          "key": "c-pytest-cjk",
+          "conclusion_id": "cn-46ea68886455342aa94973da5be1069f",
+          "rank": 1,
+          "statement": "Windows 中文路径下 pytest 收集失败，通过设置 PYTHONUTF8=1 并改用 pathlib 读取路径解决",
+          "evidence_state": "supported",
+          "applicability": "unchanged",
+          "applicability_reason": "工作区仍在验证时的提交上，且没有未提交变化",
+          "needs_recheck": false,
+          "superseded_by": null
+        }
+      ],
+      "elapsed_ms": 1765,
+      "degraded": false,
+      "fallback_reason": null,
+      "corpus_notes": [
+        "写入语料 c-pytest-cjk（fact）：stored",
+        "c-pytest-cjk 在初始提交上留下验证记录（证据状态 supported）"
+      ],
+      "workspace_changes": [],
+      "note": "旧故障修复：先失败后成功的两条证据都要能读到，且失败证据的退出码保持 1 不被改写"
+    },
+    {
+      "sample_id": "hr-incident-002",
+      "category": "incident_fix",
+      "split": "tuning",
+      "stage": "retrieval",
+      "assertion": "required",
+      "calibrated": false,
+      "query": "authentication plugin",
+      "mode": "current",
+      "executed": true,
+      "error": null,
+      "divergences": [],
+      "status_expected": "found",
+      "status_observed": "found",
+      "failures": [],
+      "missing_hits": [],
+      "must_hit_ranks": {
+        "c-pymysql-crypto": 1
+      },
+      "violations": [],
+      "fabricated": [],
+      "top_hit_ok": true,
+      "applicability_ok": null,
+      "fallback_ok": null,
+      "hits": [
+        {
+          "key": "c-pymysql-crypto",
+          "conclusion_id": "cn-9d4f11be774e6b0abd399d3531a4b974",
+          "rank": 1,
+          "statement": "MySQL 8 认证失败需要在依赖里保留 cryptography，pymysql 缺少它会报 authentication plugin 错误",
+          "evidence_state": "observed",
+          "applicability": "unchanged",
+          "applicability_reason": "工作区仍在验证时的提交上，且没有未提交变化",
+          "needs_recheck": true,
+          "superseded_by": null
+        }
+      ],
+      "elapsed_ms": 1640,
+      "degraded": false,
+      "fallback_reason": null,
+      "corpus_notes": [
+        "写入语料 c-pymysql-crypto（fact）：stored",
+        "c-pymysql-crypto 在初始提交上留下验证记录（证据状态 observed）"
+      ],
+      "workspace_changes": [],
+      "note": "证据只到 observed：pip show 能证明装了包，不能单独证明它解决了认证报错，不应被升级成 supported"
+    },
+    {
+      "sample_id": "hr-noanswer-001",
+      "category": "no_answer",
+      "split": "tuning",
+      "stage": "retrieval",
+      "assertion": "required",
+      "calibrated": false,
+      "query": "Kubernetes 部署清单",
+      "mode": "current",
+      "executed": true,
+      "error": null,
+      "divergences": [],
+      "status_expected": "no_match",
+      "status_observed": "no_match",
+      "failures": [],
+      "missing_hits": [],
+      "must_hit_ranks": {},
+      "violations": [],
+      "fabricated": [],
+      "top_hit_ok": null,
+      "applicability_ok": null,
+      "fallback_ok": true,
+      "hits": [],
+      "elapsed_ms": 15,
+      "degraded": false,
+      "fallback_reason": null,
+      "corpus_notes": [],
+      "workspace_changes": [],
+      "note": "范围内确实无依据：必须返回 no_match 并提示改用实时工具，不能含糊说成「没有历史」"
+    },
+    {
+      "sample_id": "hr-stale-001",
+      "category": "stale_knowledge",
+      "split": "tuning",
+      "stage": "retrieval",
+      "assertion": "required",
+      "calibrated": false,
+      "query": "测试入口",
+      "mode": "current",
+      "executed": true,
+      "error": null,
+      "divergences": [],
+      "status_expected": "found",
+      "status_observed": "found",
+      "failures": [],
+      "missing_hits": [],
+      "must_hit_ranks": {
+        "c-entry-new": 1
+      },
+      "violations": [],
+      "fabricated": [],
+      "top_hit_ok": true,
+      "applicability_ok": null,
+      "fallback_ok": null,
+      "hits": [
+        {
+          "key": "c-entry-new",
+          "conclusion_id": "cn-40a2ce203a38213e565e51d8e1fecc65",
+          "rank": 1,
+          "statement": "项目测试入口是 python -m pytest -q，需先激活 .venv",
+          "evidence_state": "unverified",
+          "applicability": "unknown",
+          "applicability_reason": "当时即为未验证状态，没有可复核的依据",
+          "needs_recheck": true,
+          "superseded_by": null
+        }
+      ],
+      "elapsed_ms": 16,
+      "degraded": false,
+      "fallback_reason": null,
+      "corpus_notes": [
+        "写入语料 c-entry-old（fact）：stored",
+        "写入语料 c-entry-new（fact）：stored",
+        "c-entry-old 被 c-entry-new 替代"
+      ],
+      "workspace_changes": [],
+      "note": "过期知识不进当前模式：被替代的旧结论必须被排除，不能因为时间较新就静默覆盖"
+    },
+    {
+      "sample_id": "hr-stale-002",
+      "category": "stale_knowledge",
+      "split": "tuning",
+      "stage": "retrieval",
+      "assertion": "required",
+      "calibrated": false,
+      "query": "测试入口",
+      "mode": "history",
+      "executed": true,
+      "error": null,
+      "divergences": [],
+      "status_expected": "found",
+      "status_observed": "found",
+      "failures": [],
+      "missing_hits": [],
+      "must_hit_ranks": {
+        "c-entry-old": 1,
+        "c-entry-new": 2
+      },
+      "violations": [],
+      "fabricated": [],
+      "top_hit_ok": null,
+      "applicability_ok": null,
+      "fallback_ok": null,
+      "hits": [
+        {
+          "key": "c-entry-old",
+          "conclusion_id": "cn-fc297bf3c0dc8e3986b5d3477984cbf3",
+          "rank": 1,
+          "statement": "项目测试入口是 python -m pytest",
+          "evidence_state": "unverified",
+          "applicability": "unknown",
+          "applicability_reason": "当时即为未验证状态，没有可复核的依据",
+          "needs_recheck": true,
+          "superseded_by": "cn-06140aaa6a9b8f247def2967c249765e"
+        },
+        {
+          "key": "c-entry-new",
+          "conclusion_id": "cn-06140aaa6a9b8f247def2967c249765e",
+          "rank": 2,
+          "statement": "项目测试入口是 python -m pytest -q，需先激活 .venv",
+          "evidence_state": "unverified",
+          "applicability": "unknown",
+          "applicability_reason": "当时即为未验证状态，没有可复核的依据",
+          "needs_recheck": true,
+          "superseded_by": null
+        }
+      ],
+      "elapsed_ms": 14,
+      "degraded": false,
+      "fallback_reason": null,
+      "corpus_notes": [
+        "写入语料 c-entry-old（fact）：stored",
+        "写入语料 c-entry-new（fact）：stored",
+        "c-entry-old 被 c-entry-new 替代"
+      ],
+      "workspace_changes": [],
+      "note": "history 模式用于追溯「当初为什么改」：旧结论要返回，并带出它被谁替代"
+    },
+    {
+      "sample_id": "hr-crossrepo-001",
+      "category": "cross_repo",
+      "split": "tuning",
+      "stage": "retrieval",
+      "assertion": "required",
+      "calibrated": false,
+      "query": "测试入口",
+      "mode": "current",
+      "executed": true,
+      "error": null,
+      "divergences": [],
+      "status_expected": "found",
+      "status_observed": "found",
+      "failures": [],
+      "missing_hits": [],
+      "must_hit_ranks": {
+        "c-entry-mine": 1
+      },
+      "violations": [],
+      "fabricated": [],
+      "top_hit_ok": true,
+      "applicability_ok": null,
+      "fallback_ok": null,
+      "hits": [
+        {
+          "key": "c-entry-mine",
+          "conclusion_id": "cn-2a719b0a0ab9c074756ea9daf7b0ea55",
+          "rank": 1,
+          "statement": "本仓库测试入口是 python -m pytest -q",
+          "evidence_state": "unverified",
+          "applicability": "unknown",
+          "applicability_reason": "当时即为未验证状态，没有可复核的依据",
+          "needs_recheck": true,
+          "superseded_by": null
+        }
+      ],
+      "elapsed_ms": 0,
+      "degraded": false,
+      "fallback_reason": null,
+      "corpus_notes": [
+        "写入语料 c-entry-mine（fact）：stored",
+        "写入语料 c-entry-other（fact）：stored"
+      ],
+      "workspace_changes": [],
+      "note": "跨仓库同名内容：另一仓库的结论即使内容完全一致也不得召回，对应「跨仓库泄漏为 0」的硬约束"
+    },
+    {
+      "sample_id": "hr-edited-001",
+      "category": "edited_branch",
+      "split": "tuning",
+      "stage": "retrieval",
+      "assertion": "required",
+      "calibrated": false,
+      "query": "编辑废弃分支",
+      "mode": "current",
+      "executed": true,
+      "error": null,
+      "divergences": [],
+      "status_expected": "no_match",
+      "status_observed": "no_match",
+      "failures": [],
+      "missing_hits": [],
+      "must_hit_ranks": {},
+      "violations": [],
+      "fabricated": [],
+      "top_hit_ok": null,
+      "applicability_ok": null,
+      "fallback_ok": null,
+      "hits": [],
+      "elapsed_ms": 0,
+      "degraded": false,
+      "fallback_reason": null,
+      "corpus_notes": [
+        "写入语料 c-edited-branch（decision）：stored",
+        "c-edited-branch 的来源可见性改为 historical（只改可见性，不撤销结论）"
+      ],
+      "workspace_changes": [],
+      "note": "编辑废弃分支：当前模式必须排除，它是「旧分支退出当前召回」的可见行为"
+    },
+    {
+      "sample_id": "hr-edited-002",
+      "category": "edited_branch",
+      "split": "tuning",
+      "stage": "retrieval",
+      "assertion": "required",
+      "calibrated": false,
+      "query": "编辑废弃分支",
+      "mode": "history",
+      "executed": true,
+      "error": null,
+      "divergences": [],
+      "status_expected": "found",
+      "status_observed": "found",
+      "failures": [],
+      "missing_hits": [],
+      "must_hit_ranks": {
+        "c-edited-branch": 1
+      },
+      "violations": [],
+      "fabricated": [],
+      "top_hit_ok": true,
+      "applicability_ok": null,
+      "fallback_ok": null,
+      "hits": [
+        {
+          "key": "c-edited-branch",
+          "conclusion_id": "cn-e7b0bae2378418a691aadb7dd6e27600",
+          "rank": 1,
+          "statement": "被编辑废弃分支上的结论默认不参与当前注入，只允许历史模式读取",
+          "evidence_state": "observed",
+          "applicability": "unknown",
+          "applicability_reason": "验证记录未声明依赖，也没有可对应的提交，无法判断是否仍适用",
+          "needs_recheck": true,
+          "superseded_by": null
+        }
+      ],
+      "elapsed_ms": 0,
+      "degraded": false,
+      "fallback_reason": null,
+      "corpus_notes": [
+        "写入语料 c-edited-branch（decision）：stored",
+        "c-edited-branch 的来源可见性改为 historical（只改可见性，不撤销结论）"
+      ],
+      "workspace_changes": [],
+      "note": "同一语料在 history 模式的对照：历史分支可追溯，但不能反过来泄漏到 current"
+    },
+    {
+      "sample_id": "hr-deleted-001",
+      "category": "deleted_thread",
+      "split": "tuning",
+      "stage": "retrieval",
+      "assertion": "required",
+      "calibrated": false,
+      "query": "异步队列",
+      "mode": "history",
+      "executed": true,
+      "error": null,
+      "divergences": [],
+      "status_expected": "no_match",
+      "status_observed": "no_match",
+      "failures": [],
+      "missing_hits": [],
+      "must_hit_ranks": {},
+      "violations": [],
+      "fabricated": [],
+      "top_hit_ok": null,
+      "applicability_ok": null,
+      "fallback_ok": null,
+      "hits": [],
+      "elapsed_ms": 0,
+      "degraded": false,
+      "fallback_reason": null,
+      "corpus_notes": [
+        "写入语料 c-deleted-thread（decision）：stored",
+        "c-deleted-thread 的来源可见性改为 deleted（只改可见性，不撤销结论）"
+      ],
+      "workspace_changes": [],
+      "note": "删除优先于一切：连 history 模式都不能召回，对应用户删除优先于 append-only 的要求"
+    },
+    {
+      "sample_id": "hr-synonym-001",
+      "category": "synonym_rewrite",
+      "split": "holdout",
+      "stage": "retrieval",
+      "assertion": "observed",
+      "calibrated": false,
+      "query": "跑单测的命令是啥",
+      "mode": "current",
+      "executed": true,
+      "error": null,
+      "divergences": [],
+      "status_expected": "found",
+      "status_observed": "no_match",
+      "failures": [
+        "期望命中（found），实际 no_match；候选 0 条，说明：该仓库范围内没有匹配的当前仍有效的结论。请使用实时文件、Git 与测试命令核实，不要据此推断结论不存在。",
+        "未命中 c-synonym-entry"
+      ],
+      "missing_hits": [
+        "c-synonym-entry"
+      ],
+      "must_hit_ranks": {
+        "c-synonym-entry": null
+      },
+      "violations": [],
+      "fabricated": [],
+      "top_hit_ok": null,
+      "applicability_ok": null,
+      "fallback_ok": null,
+      "hits": [],
+      "elapsed_ms": 0,
+      "degraded": false,
+      "fallback_reason": null,
+      "corpus_notes": [
+        "写入语料 c-synonym-entry（fact）：stored"
+      ],
+      "workspace_changes": [],
+      "note": "只观测不判失败：查询与结论几无字面重叠，用于测量词面召回的上限，作为是否需要向量的证据"
+    },
+    {
+      "sample_id": "hr-version-001",
+      "category": "version_change",
+      "split": "holdout",
+      "stage": "retrieval",
+      "assertion": "required",
+      "calibrated": false,
+      "query": "MySQL 认证依赖哪个库",
+      "mode": "current",
+      "executed": true,
+      "error": null,
+      "divergences": [],
+      "status_expected": "found",
+      "status_observed": "no_match",
+      "failures": [
+        "期望命中（found），实际 no_match；候选 0 条，说明：该仓库范围内没有匹配的当前仍有效的结论。请使用实时文件、Git 与测试命令核实，不要据此推断结论不存在。",
+        "未命中 c-deps-cryptography",
+        "首位期望 c-deps-cryptography，实际为 无结果",
+        "c-deps-cryptography 未出现在结果里，无法核对其适用性"
+      ],
+      "missing_hits": [
+        "c-deps-cryptography"
+      ],
+      "must_hit_ranks": {
+        "c-deps-cryptography": null
+      },
+      "violations": [],
+      "fabricated": [],
+      "top_hit_ok": false,
+      "applicability_ok": false,
+      "fallback_ok": null,
+      "hits": [],
+      "elapsed_ms": 0,
+      "degraded": false,
+      "fallback_reason": null,
+      "corpus_notes": [
+        "写入语料 c-deps-cryptography（fact）：stored",
+        "c-deps-cryptography 在初始提交上留下验证记录（证据状态 supported）",
+        "按期望构造依赖变更（未提交改动）：pyproject.toml"
+      ],
+      "workspace_changes": [
+        "pyproject.toml"
+      ],
+      "note": "结论仍可能有效但依赖已变：必须标为需复核，且不允许在未复核时被直接当成当前事实采用"
+    }
+  ]
+}

@@ -1,8 +1,10 @@
-import { Navigate, createFileRoute } from "@tanstack/react-router"
+import { Navigate, createFileRoute, Link } from "@tanstack/react-router"
 import {
   CalendarBlankIcon,
+  CaretDownIcon,
   ClockIcon,
   PencilSimpleIcon,
+  PlayIcon,
   PlusIcon,
   RobotIcon,
   TrashIcon,
@@ -16,14 +18,17 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { formatRelativeTime } from "@/lib/agents/api"
 import { CRON_PRESETS, describeCron, presetForCron } from "@/lib/agents/cron"
 import {
+  useAgentScheduleState,
   useAgentSchedules,
   useCreateAgentSchedule,
   useDeleteAgentSchedule,
+  useRunAgentSchedule,
   useUpdateAgentSchedule,
 } from "@/lib/agents/queries"
-import type { AgentSchedule } from "@/lib/agents/types"
+import type { AgentSchedule, AutomationRunReceipt } from "@/lib/agents/types"
 import { useModelOptions } from "@/lib/agents/useModelOptions"
 import { useSession } from "@/lib/session"
 import { cn } from "@/lib/utils"
@@ -400,6 +405,10 @@ function AutomationManager() {
   )
 }
 
+function describeLastTriggered(iso: string): string {
+  return `上次触发 ${formatRelativeTime(Date.parse(iso))}前`
+}
+
 function AutomationRow({
   schedule,
   index,
@@ -415,66 +424,160 @@ function AutomationRow({
   onDelete: () => void
   onToggle: (enabled: boolean) => void
 }) {
+  const runSchedule = useRunAgentSchedule()
+  const [stateOpen, setStateOpen] = useState(false)
+  const [receipt, setReceipt] = useState<AutomationRunReceipt | null>(null)
+  const [runError, setRunError] = useState<string | null>(null)
+  const loopState = useAgentScheduleState(schedule.id, { enabled: stateOpen })
+
+  const run = () => {
+    setReceipt(null)
+    setRunError(null)
+    runSchedule.mutate(schedule.id, {
+      onSuccess: (data) => setReceipt(data),
+      onError: (reason) =>
+        setRunError(
+          reason instanceof Error ? reason.message : "触发失败，请稍后重试。"
+        ),
+    })
+  }
+
   return (
     <div
       className={cn(
-        "automation-row flex flex-col gap-3 px-4 py-3 transition-[background-color,opacity] duration-150 sm:flex-row sm:items-center",
+        "automation-row flex flex-col gap-3 px-4 py-3 transition-[background-color,opacity] duration-150",
         !schedule.enabled && "opacity-60"
       )}
       style={{ animationDelay: `${Math.min(index * 35, 140)}ms` }}
     >
-      <div className="flex min-w-0 flex-1 gap-3">
-        <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-          <RobotIcon className="size-4" />
-        </div>
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <h3 className="truncate text-xs font-medium">{schedule.name}</h3>
-            {schedule.lastError && (
-              <span className="text-[0.625rem] text-destructive">
-                最近运行失败
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="flex min-w-0 flex-1 gap-3">
+          <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+            <RobotIcon className="size-4" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <h3 className="truncate text-xs font-medium">{schedule.name}</h3>
+              {schedule.lastError && (
+                <span
+                  className="text-[0.625rem] text-destructive"
+                  title={schedule.lastError}
+                >
+                  最近运行失败
+                </span>
+              )}
+            </div>
+            <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
+              {schedule.prompt}
+            </p>
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.625rem] text-muted-foreground">
+              <span className="inline-flex items-center gap-1">
+                <ClockIcon />
+                {describeCron(schedule.schedule)}
               </span>
-            )}
-          </div>
-          <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
-            {schedule.prompt}
-          </p>
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.625rem] text-muted-foreground">
-            <span className="inline-flex items-center gap-1">
-              <ClockIcon />
-              {describeCron(schedule.schedule)}
-            </span>
-            {schedule.repo && <span className="truncate">{schedule.repo}</span>}
-            <span className="font-mono">{schedule.model}</span>
+              {schedule.lastTriggeredAt && (
+                <span title={schedule.lastTriggeredAt}>
+                  {describeLastTriggered(schedule.lastTriggeredAt)}
+                </span>
+              )}
+              {schedule.repo && <span className="truncate">{schedule.repo}</span>}
+              <span className="font-mono">{schedule.model}</span>
+            </div>
           </div>
         </div>
+        <div className="flex items-center justify-end gap-1 sm:shrink-0">
+          <Switch
+            checked={schedule.enabled}
+            disabled={disabled}
+            aria-label={schedule.enabled ? "停用任务" : "启用任务"}
+            onCheckedChange={onToggle}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            className="mr-1"
+            disabled={runSchedule.isPending}
+            title="不等计划时间，现在就跑一轮"
+            onClick={run}
+          >
+            <PlayIcon />
+            {runSchedule.isPending ? "已提交" : "立即跑一轮"}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="循环状态"
+            title="循环状态"
+            aria-expanded={stateOpen}
+            onClick={() => setStateOpen((open) => !open)}
+          >
+            <CaretDownIcon
+              className={cn(
+                "transition-transform duration-150",
+                !stateOpen && "-rotate-90"
+              )}
+            />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="编辑任务"
+            title="编辑任务"
+            onClick={onEdit}
+          >
+            <PencilSimpleIcon />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="删除任务"
+            title="删除任务"
+            onClick={onDelete}
+          >
+            <TrashIcon />
+          </Button>
+        </div>
       </div>
-      <div className="flex items-center justify-end gap-1 sm:shrink-0">
-        <Switch
-          checked={schedule.enabled}
-          disabled={disabled}
-          aria-label={schedule.enabled ? "停用任务" : "启用任务"}
-          onCheckedChange={onToggle}
-        />
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="编辑任务"
-          title="编辑任务"
-          onClick={onEdit}
-        >
-          <PencilSimpleIcon />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="删除任务"
-          title="删除任务"
-          onClick={onDelete}
-        >
-          <TrashIcon />
-        </Button>
-      </div>
+
+      {receipt && (
+        <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+          <span>
+            已开始第 {receipt.roundNumber} 轮，跑完会出现在会话列表里。
+          </span>
+          <Link
+            to="/agents/$threadId"
+            params={{ threadId: receipt.threadId }}
+            className="font-medium text-foreground underline underline-offset-2"
+          >
+            查看这一轮
+          </Link>
+        </p>
+      )}
+      {runError && (
+        <p className="text-xs text-destructive">{runError}</p>
+      )}
+
+      {stateOpen && (
+        <div className="rounded-md border border-border bg-muted/40 p-3">
+          {loopState.isLoading ? (
+            <p className="text-xs text-muted-foreground">正在读取循环状态…</p>
+          ) : loopState.isError ? (
+            <p className="text-xs text-destructive">无法读取循环状态。</p>
+          ) : (
+            <>
+              {loopState.data?.stopped && (
+                <p className="mb-2 text-xs text-destructive">
+                  这个循环已经停了：
+                  {loopState.data.stopReason ?? "原因未知"}
+                </p>
+              )}
+              <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[0.6875rem] leading-relaxed text-muted-foreground">
+                {loopState.data?.text ?? ""}
+              </pre>
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }

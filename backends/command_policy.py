@@ -58,9 +58,51 @@ _ALWAYS_ALLOW = re.compile(
 )
 
 
+_GIT_GLOBAL_OPTION = re.compile(
+    r"""
+    ^git\s+
+    (?:
+        (?:-C|-c|--git-dir|--work-tree|--namespace|--exec-path|--config-env)
+        (?:\s*=\s*|\s+)\S+\s+
+      |
+        --(?:no-pager|paginate|bare|no-replace-objects|literal-pathspecs|
+             glob-pathspecs|noglob-pathspecs|icase-pathspecs|no-optional-locks)\s+
+      |
+        -[pP]\s+
+    )*
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+"""``git`` 与子命令之间的全局选项。
+
+git 允许把全局选项写在子命令前面（``git -C <路径> status``、``git --no-pager diff``），
+而下面所有规则都锚定在 ``git`` 后面紧跟子命令。不先剥掉这些选项，匹配就会失配：
+只读命令掉进「未识别 → 需要人工确认」（无人值守的循环会停在这里），
+破坏性命令则**绕过硬拒绝**。
+"""
+
+
 def _parts(command: str) -> list[str]:
     """Split common compound shell forms so every segment is classified."""
     return [part.strip() for part in re.split(r"\s*(?:&&|\|\||;|\|)\s*", command) if part.strip()]
+
+
+def _strip_git_global_options(part: str) -> str:
+    """剥掉 ``git`` 后面的全局选项，只留下子命令供匹配。
+
+    ``git -C <路径> status`` 与 ``git status`` 是同一条只读命令；
+    ``git -C <路径> push --force`` 与 ``git push --force`` 同样是破坏性的。
+    两者必须得到同样的判定。
+
+    Args:
+        part: 一条简单命令（已经按 ``&&`` / ``|`` / ``;`` 拆开）。
+
+    Returns:
+        剥掉全局选项后的命令；不是 git 命令时原样返回。
+    """
+    if not part.lower().startswith("git"):
+        return part
+    return _GIT_GLOBAL_OPTION.sub("git ", part)
 
 
 def evaluate_command(command: str, backend_type: str) -> CommandPolicyResult:
@@ -78,8 +120,20 @@ def evaluate_command(command: str, backend_type: str) -> CommandPolicyResult:
         return CommandPolicyResult(action, "modify_workspace_files", "输出重定向会修改工作区文件")
 
     parts = _parts(normalized)
+
+    # 硬拒绝规则要**再对着剥掉全局选项的每一段**跑一遍。只对整串跑的话，
+    # ``git -C <路径> push --force`` 里 ``git`` 与 ``push`` 之间插了东西就匹配不上，
+    # 破坏性命令会从 deny 掉到「未识别 → 需要人工确认」。
+    for pattern, category, reason in _HARD_DENY:
+        if any(
+            re.search(pattern, _strip_git_global_options(part), re.IGNORECASE)
+            for part in parts
+        ):
+            return CommandPolicyResult("deny", category, reason)
+
     decisions: list[CommandPolicyResult] = []
     for part in parts:
+        part = _strip_git_global_options(part)
         if _EXTERNAL_WRITE.search(part):
             decisions.append(CommandPolicyResult("approval", "external_write", "向外部服务写入数据始终需要审批"))
             continue

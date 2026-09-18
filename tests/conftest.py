@@ -55,6 +55,24 @@ def skills_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture
+def data_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """把数据目录指向临时目录，并返回该目录。
+
+    自动化定义（``automations.json``）与循环状态（``automation_state/``）都落在
+    ``Settings.data_dir`` 下，不隔离会读写开发机上真实的任务定义。
+
+    Returns:
+        临时的数据根目录。
+    """
+    from config.app_config import get_settings
+
+    root = tmp_path / "data"
+    root.mkdir()
+    monkeypatch.setattr(get_settings(), "data_dir", root)
+    return root
+
+
+@pytest.fixture
 def make_skill() -> Callable[..., Path]:
     """返回「在任意目录写技能」的工厂函数。
 

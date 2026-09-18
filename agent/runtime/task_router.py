@@ -111,6 +111,8 @@ def run_agent_task(
     checkpoint_id: str | None = None,
     model_id: str | None = None,
     backend_type: str | None = None,
+    routing_prompt: str | None = None,
+    task_kind: str | None = None,
 ) -> dict[str, Any]:
     """运行一次普通 Agent 任务的总入口。
 
@@ -122,11 +124,22 @@ def run_agent_task(
     3. 用户确认后，从 checkpoint 找到上一轮方案，再切换为 coding。
     4. 普通 qa/analysis/review 等只读任务直接构建对应 task_kind 的 DeepAgent。
     5. 任务结束后更新 Store 状态和仓库级长期记忆。
+
+    Args:
+        prompt: 真正发给模型的内容。
+        routing_prompt: 决定走哪条流程时看的文本；不传则看 ``prompt``。
+            **两者必须分开的场合**：自动化任务的循环会在用户写的任务指令后面拼上
+            循环状态与上一轮验证反馈，那两段附言里出现「提交」「push」这类词时，
+            拿拼好的文本判类型会把只读任务判成开发实现，于是走进等确认的分支停住。
+            判定只能看用户写的那一句，不能看附言。
+        task_kind: 已经判好的任务类型；不传则自己判。调用方已经判过一次时传进来，
+            既保证两边结论一致，也省掉一次模型调用。
     """
 
     thread_id = thread_id or str(uuid.uuid4())
+    routing_text = prompt if routing_prompt is None else routing_prompt
 
-    if is_workspace_listing_task(prompt):
+    if is_workspace_listing_task(routing_text):
         record_event(thread_id, "intent", "已识别任务类型：工作区查看", status="completed")
         return run_workspace_listing_task(
             repo_url=repo_url,
@@ -135,12 +148,13 @@ def run_agent_task(
             backend_type=backend_type,
         )
 
-    if is_pull_only_task(prompt):
+    if is_pull_only_task(routing_text):
         record_event(thread_id, "intent", "已识别任务类型：仓库同步", status="completed")
         return run_pull_only_task(repo_url=repo_url, prompt=prompt, thread_id=thread_id)
 
-    record_event(thread_id, "intent", "正在识别任务类型", status="in_progress")
-    task_kind = classify_task_kind(prompt)
+    if task_kind is None:
+        record_event(thread_id, "intent", "正在识别任务类型", status="in_progress")
+        task_kind = classify_task_kind(routing_text)
     task_kind_label = TASK_KIND_LABELS.get(task_kind, task_kind)
     record_event(
         thread_id,
@@ -154,7 +168,7 @@ def run_agent_task(
     display_prompt = prompt
     coding_prompt = prompt
 
-    if existing_thread and is_approval_prompt(prompt):
+    if existing_thread and is_approval_prompt(routing_text):
         plan_message = latest_confirmable_plan_message(thread_id)
         if plan_message is not None:
             metadata = message_metadata(plan_message)
@@ -165,8 +179,8 @@ def run_agent_task(
             )
             task_kind = "coding"
     elif existing_thread:
-        plan_message = latest_confirmable_plan_message(thread_id) if is_plan_revision_prompt(prompt) else None
-        if plan_message is not None and prompt.strip():
+        plan_message = latest_confirmable_plan_message(thread_id) if is_plan_revision_prompt(routing_text) else None
+        if plan_message is not None and routing_text.strip():
             return run_plan_response_task(
                 repo_url=repo_url,
                 prompt=plan_source_prompt(plan_message, latest_non_approval_user_prompt(thread_id, prompt)),
@@ -180,7 +194,7 @@ def run_agent_task(
                 backend_type=backend_type,
                 project_name=existing_thread.get("project_name"),
             )
-    if existing_thread and approved_plan_text is None and is_approval_prompt(prompt):
+    if existing_thread and approved_plan_text is None and is_approval_prompt(routing_text):
         logger.warning("用户确认实施但未找到待确认方案：thread_id=%s", thread_id)
         record_event(thread_id, "plan:not_found", "未找到待确认的技术方案", kind="other", status="error")
         store.update_thread_status(thread_id, "failed")
