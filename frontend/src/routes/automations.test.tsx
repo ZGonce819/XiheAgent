@@ -209,4 +209,21 @@ describe("表单里的下拉与项目统一", () => {
     // 触发器直接渲染当前选项的中文标签（执行频率的默认预设是「每天」）。
     expect(screen.getByText("每天")).toBeTruthy()
   })
+
+  it("下拉菜单从触发器下方浮出，不是原地盖住触发器展开", async () => {
+    render(<AutomationsPage />)
+    fireEvent.click(screen.getAllByRole("button", { name: "新建任务" })[0]!)
+
+    // alignItemWithTrigger 的默认值 true 会把菜单原地对齐触发器展开：
+    // 撑满触发器宽度、盖住触发器、且组件在该模式下关掉动画——就是和技能页
+    // 筛选下拉（alignItemWithTrigger={false}，从下方 4px 浮出、带滑入动画）
+    // 长得不一样的那次根源。共享组件把该值透传到弹层的 data-align-trigger 上。
+    fireEvent.click(screen.getByText("每天"))
+    await screen.findByRole("option", { name: "每小时" })
+
+    const popup = document.querySelector('[data-slot="select-content"]')
+    if (!popup) throw new Error("弹出层没有挂载")
+    expect(popup.getAttribute("data-align-trigger")).toBe("false")
+    expect(popup.getAttribute("data-side")).toBe("bottom")
+  })
 })

@@ -302,7 +302,9 @@ function AutomationManager() {
                           ?.label ?? "自定义"}
                       </span>
                     </SelectTrigger>
-                    <SelectContent>
+                    {/* 与技能页一致：菜单从触发器下方浮出（带滑入动画），
+                        不用默认的「对齐触发器原地展开」——那个模式没有浮层感 */}
+                    <SelectContent align="start" alignItemWithTrigger={false}>
                       {CRON_PRESETS.map((preset) => (
                         <SelectItem key={preset.id} value={preset.id}>
                           {preset.label}
@@ -343,7 +345,7 @@ function AutomationManager() {
                         )?.label ?? form.modelId}
                       </span>
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent align="start" alignItemWithTrigger={false}>
                       {modelOptions.models.map((model) => (
                         <SelectItem key={model.id} value={model.id}>
                           {model.label}
