@@ -10,7 +10,7 @@ import {
   parseSseBlock,
   processStreamResponse,
 } from "./useThreadStream"
-import type { ScheduleUpdateRequest } from "./api"
+import type { ScheduleBudgetRequest, ScheduleUpdateRequest } from "./api"
 import type { AgentThread, ImageChunk, Message } from "./types"
 
 export const agentThreadKeys = {
@@ -176,6 +176,27 @@ export function useResumeAgentSchedule() {
       queryClient.invalidateQueries({ queryKey: agentScheduleKeys.all })
       queryClient.invalidateQueries({
         queryKey: agentScheduleKeys.state(scheduleId),
+      })
+    },
+  })
+}
+
+/**
+ * 改预算上限。
+ *
+ * 上限存在循环状态里，所以真正要刷新的是状态；任务列表一并刷是因为列表上会显示
+ * 上次错误，而调高上限可能让「已停止」这件事跟着变化。
+ */
+export function useUpdateAgentScheduleBudget() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (vars: { scheduleId: string; body: ScheduleBudgetRequest }) =>
+      agentsApi.updateScheduleBudget(vars.scheduleId, vars.body),
+    onSuccess: (_state, vars) => {
+      queryClient.invalidateQueries({ queryKey: agentScheduleKeys.all })
+      queryClient.invalidateQueries({
+        queryKey: agentScheduleKeys.state(vars.scheduleId),
       })
     },
   })

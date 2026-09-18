@@ -1,8 +1,9 @@
 """自动化任务的循环状态接口与手动触发接口的测试。
 
 覆盖 ``GET /dashboard/api/schedules/{id}/state``、
-``POST /dashboard/api/schedules/{id}/run`` 与
-``POST /dashboard/api/schedules/{id}/resume``。
+``POST /dashboard/api/schedules/{id}/run``、
+``POST /dashboard/api/schedules/{id}/resume`` 与
+``PATCH /dashboard/api/schedules/{id}/budget``。
 
 Note:
     「能不能跑」的判断要调模型（任务类型判定），所以这里**一律打桩**，测的是接口
@@ -245,3 +246,95 @@ def test_state_reports_where_the_stop_came_from(dashboard: TestClient) -> None:
     record_run(automation["id"], outcome="failed")
     body = dashboard.get(f"/dashboard/api/schedules/{automation['id']}/state").json()
     assert body["stopSource"] == "failures"
+
+
+def test_budget_returns_404_for_unknown_automation(dashboard: TestClient) -> None:
+    """预算接口对不存在的任务返回 404。"""
+    response = dashboard.patch(
+        "/dashboard/api/schedules/nope/budget", json={"maxRuns": 1}
+    )
+    assert response.status_code == 404
+
+
+def test_budget_updates_only_what_was_given(dashboard: TestClient) -> None:
+    """只改给出来的那一个上限，其余保持原值。"""
+    automation = make_automation()
+    set_budget(automation["id"], max_runs=5, max_consecutive_failures=3)
+
+    response = dashboard.patch(
+        f"/dashboard/api/schedules/{automation['id']}/budget",
+        json={"maxTokens": 1000},
+    )
+    assert response.status_code == 200
+    budget = response.json()["state"]["budget"]
+    assert budget["maxTokens"] == 1000
+    assert budget["maxRuns"] == 5
+    assert budget["maxConsecutiveFailures"] == 3
+
+
+def test_budget_accepts_a_numeric_string(dashboard: TestClient) -> None:
+    """表单里的数字是以字符串提交的，要收。"""
+    automation = make_automation()
+    response = dashboard.patch(
+        f"/dashboard/api/schedules/{automation['id']}/budget",
+        json={"maxRuns": "7"},
+    )
+    assert response.status_code == 200
+    assert response.json()["state"]["budget"]["maxRuns"] == 7
+
+
+def test_budget_refuses_an_empty_body(dashboard: TestClient) -> None:
+    """一个上限都没给就拒掉 —— 否则调用方以为改了，其实什么都没发生。"""
+    automation = make_automation()
+    response = dashboard.patch(
+        f"/dashboard/api/schedules/{automation['id']}/budget", json={}
+    )
+    assert response.status_code == 400
+    assert "至少要给一个上限" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("value", [-1, True, 1.5, "abc", None])
+def test_budget_refuses_values_that_are_not_whole_numbers(
+    dashboard: TestClient, value: Any
+) -> None:
+    """负数、布尔、小数、非数字字符串一律拒掉，不静默取整、也不把 true 当成 1。"""
+    automation = make_automation()
+    response = dashboard.patch(
+        f"/dashboard/api/schedules/{automation['id']}/budget",
+        json={"maxRuns": value},
+    )
+    assert response.status_code == 400
+    # 报错要点名是哪个字段，否则表单上三个输入框，用户不知道该改哪个。
+    assert "maxRuns" in response.json()["detail"]
+
+
+def test_raising_the_limit_is_the_way_back_from_a_budget_stop(
+    dashboard: TestClient, dispatched: list[dict[str, Any]]
+) -> None:
+    """因轮数用完而停下的循环，调高上限之后要真的能再跑。
+
+    这是「继续运行」按钮救不了的那一类 —— 界面必须给得出正确的下一步，
+    而不是让用户去点一个只会返回 409 的按钮。
+    """
+    automation = make_automation()
+    set_budget(automation["id"], max_runs=1)
+    record_run(automation["id"], outcome="succeeded")
+
+    assert (
+        dashboard.post(f"/dashboard/api/schedules/{automation['id']}/resume").status_code
+        == 409
+    )
+
+    raised = dashboard.patch(
+        f"/dashboard/api/schedules/{automation['id']}/budget",
+        json={"maxRuns": 5},
+    )
+    assert raised.status_code == 200
+    assert raised.json()["stopped"] is False
+    assert raised.json()["stopSource"] is None
+
+    assert (
+        dashboard.post(f"/dashboard/api/schedules/{automation['id']}/run").status_code
+        == 202
+    )
+    assert len(dispatched) == 1

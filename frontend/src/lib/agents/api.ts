@@ -68,6 +68,16 @@ export interface ScheduleUpdateRequest {
   enabled?: boolean | null
 }
 
+/**
+ * 改预算上限。上限存在循环状态里、不随任务定义走，所以是单独的接口。
+ * 没给的键保持原值；写 0 表示不限制。
+ */
+export interface ScheduleBudgetRequest {
+  maxRuns?: number
+  maxTokens?: number
+  maxConsecutiveFailures?: number
+}
+
 const API_BASE = (import.meta.env.VITE_DASHBOARD_API_BASE_URL ?? "").replace(
   /\/$/,
   ""
@@ -164,6 +174,14 @@ export const agentsApi = {
     agentsRequest<AutomationStateResponse>(
       `/schedules/${encodeURIComponent(scheduleId)}/resume`,
       { method: "POST" }
+    ),
+  updateScheduleBudget: (scheduleId: string, body: ScheduleBudgetRequest) =>
+    agentsRequest<AutomationStateResponse>(
+      `/schedules/${encodeURIComponent(scheduleId)}/budget`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }
     ),
   getThread: (threadId: string) =>
     agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}`),

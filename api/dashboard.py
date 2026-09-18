@@ -39,6 +39,7 @@ from config.automation_state import (
     clear_stopped,
     load_state,
     render_state,
+    set_budget,
     stop_decision,
 )
 from config.env_config import get_env
@@ -417,6 +418,62 @@ def dashboard_resume_schedule(schedule_id: str) -> dict[str, Any]:
         )
 
     clear_stopped(schedule_id)
+    return _schedule_state_payload(schedule_id)
+
+
+@dashboard_router.patch("/schedules/{schedule_id}/budget")
+def dashboard_update_schedule_budget(
+    schedule_id: str, body: dict[str, Any]
+) -> dict[str, Any]:
+    """改一个自动化任务的预算上限。
+
+    预算存在循环状态里、不随任务定义走 —— 它和「已经跑了多少轮 / 用掉多少 token」
+    是一对，必须放在一起才不会算错。所以单独一个接口，不混进 ``PATCH /schedules/{id}``。
+
+    上限写 ``0`` 表示不限制。调高上限也是「因为预算用完而停下的循环」唯一的恢复办法。
+
+    Args:
+        schedule_id: 自动化任务 id。
+        body: 要改的上限，键取 ``maxRuns`` / ``maxTokens`` / ``maxConsecutiveFailures``；
+            没给的键保持原值。
+
+    Returns:
+        与 GET ``/schedules/{id}/state`` 同样的状态结构，前端可直接替换。
+
+    Raises:
+        HTTPException: 任务不存在返回 404；一个上限都没给、或数值不是非负整数返回 400。
+    """
+    if get_automation(schedule_id) is None:
+        raise HTTPException(status_code=404, detail="自动化任务不存在")
+
+    fields = {
+        "maxRuns": "max_runs",
+        "maxTokens": "max_tokens",
+        "maxConsecutiveFailures": "max_consecutive_failures",
+    }
+    provided = [key for key in fields if key in body]
+    if not provided:
+        raise HTTPException(
+            status_code=400,
+            detail="至少要给一个上限：maxRuns / maxTokens / maxConsecutiveFailures",
+        )
+
+    values: dict[str, int] = {}
+    for key in provided:
+        value = body[key]
+        # 布尔也是 int 的子类，`int(True)` 会静默变成 1；小数则会被静默截断。
+        # 这类「看起来能用、其实悄悄改了数值」的输入当场拒掉。
+        if isinstance(value, bool) or not isinstance(value, (int, str)):
+            raise HTTPException(status_code=400, detail=f"{key} 必须是整数")
+        try:
+            number = int(value)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"{key} 必须是整数") from exc
+        if number < 0:
+            raise HTTPException(status_code=400, detail=f"{key} 不能为负数")
+        values[fields[key]] = number
+
+    set_budget(schedule_id, **values)
     return _schedule_state_payload(schedule_id)
 
 

@@ -28,6 +28,7 @@ import {
   useResumeAgentSchedule,
   useRunAgentSchedule,
   useUpdateAgentSchedule,
+  useUpdateAgentScheduleBudget,
 } from "@/lib/agents/queries"
 import type { AgentSchedule, AutomationRunReceipt } from "@/lib/agents/types"
 import { useModelOptions } from "@/lib/agents/useModelOptions"
@@ -410,6 +411,19 @@ function describeLastTriggered(iso: string): string {
   return `上次触发 ${formatRelativeTime(Date.parse(iso))}前`
 }
 
+/** 三个预算上限在表单里是文本，保存时才校验并转成数字。 */
+type BudgetDraft = {
+  maxRuns: string
+  maxTokens: string
+  maxConsecutiveFailures: string
+}
+
+const EMPTY_BUDGET: BudgetDraft = {
+  maxRuns: "0",
+  maxTokens: "0",
+  maxConsecutiveFailures: "0",
+}
+
 function AutomationRow({
   schedule,
   index,
@@ -427,11 +441,53 @@ function AutomationRow({
 }) {
   const runSchedule = useRunAgentSchedule()
   const resumeSchedule = useResumeAgentSchedule()
+  const updateBudget = useUpdateAgentScheduleBudget()
   const [stateOpen, setStateOpen] = useState(false)
   const [receipt, setReceipt] = useState<AutomationRunReceipt | null>(null)
   const [runError, setRunError] = useState<string | null>(null)
   const [resumeError, setResumeError] = useState<string | null>(null)
+  const [budgetDraft, setBudgetDraft] = useState<BudgetDraft>(EMPTY_BUDGET)
+  const [budgetError, setBudgetError] = useState<string | null>(null)
   const loopState = useAgentScheduleState(schedule.id, { enabled: stateOpen })
+
+  // 打开面板、或保存之后状态刷新时，把三个上限同步成服务端的当前值。
+  const budget = loopState.data?.state.budget
+  useEffect(() => {
+    if (!budget) return
+    setBudgetDraft({
+      maxRuns: String(budget.maxRuns),
+      maxTokens: String(budget.maxTokens),
+      maxConsecutiveFailures: String(budget.maxConsecutiveFailures),
+    })
+  }, [budget])
+
+  const saveBudget = () => {
+    setBudgetError(null)
+    const entries = [
+      ["maxRuns", budgetDraft.maxRuns],
+      ["maxTokens", budgetDraft.maxTokens],
+      ["maxConsecutiveFailures", budgetDraft.maxConsecutiveFailures],
+    ] as const
+    const body: Record<string, number> = {}
+    for (const [key, raw] of entries) {
+      const text = raw.trim()
+      // 空串会被 Number() 变成 0（= 不限制），那是「悄悄改了数值」，当场拦下来。
+      if (!/^\d+$/.test(text)) {
+        setBudgetError("三个上限都要填非负整数，写 0 表示不限制。")
+        return
+      }
+      body[key] = Number(text)
+    }
+    updateBudget.mutate(
+      { scheduleId: schedule.id, body },
+      {
+        onError: (reason) =>
+          setBudgetError(
+            reason instanceof Error ? reason.message : "保存失败，请稍后重试。"
+          ),
+      }
+    )
+  }
 
   const run = () => {
     setReceipt(null)
@@ -612,6 +668,76 @@ function AutomationRow({
               <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[0.6875rem] leading-relaxed text-muted-foreground">
                 {loopState.data?.text ?? ""}
               </pre>
+              {loopState.data && (
+                <div className="mt-3 border-t border-border pt-3">
+                  <p className="text-[0.625rem] font-medium">预算上限</p>
+                  <p className="mt-0.5 text-[0.625rem] text-muted-foreground">
+                    写 0 表示不限制。调高上限是「因预算用完而停下」的循环唯一的恢复办法。
+                  </p>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                    <Field label="最多跑几轮" htmlFor={`budget-runs-${schedule.id}`}>
+                      <Input
+                        id={`budget-runs-${schedule.id}`}
+                        inputMode="numeric"
+                        value={budgetDraft.maxRuns}
+                        onChange={(event) =>
+                          setBudgetDraft((draft) => ({
+                            ...draft,
+                            maxRuns: event.target.value,
+                          }))
+                        }
+                      />
+                    </Field>
+                    <Field
+                      label="最多消耗 token"
+                      htmlFor={`budget-tokens-${schedule.id}`}
+                    >
+                      <Input
+                        id={`budget-tokens-${schedule.id}`}
+                        inputMode="numeric"
+                        value={budgetDraft.maxTokens}
+                        onChange={(event) =>
+                          setBudgetDraft((draft) => ({
+                            ...draft,
+                            maxTokens: event.target.value,
+                          }))
+                        }
+                      />
+                    </Field>
+                    <Field
+                      label="连续未通过几次就停"
+                      htmlFor={`budget-failures-${schedule.id}`}
+                    >
+                      <Input
+                        id={`budget-failures-${schedule.id}`}
+                        inputMode="numeric"
+                        value={budgetDraft.maxConsecutiveFailures}
+                        onChange={(event) =>
+                          setBudgetDraft((draft) => ({
+                            ...draft,
+                            maxConsecutiveFailures: event.target.value,
+                          }))
+                        }
+                      />
+                    </Field>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={updateBudget.isPending}
+                      onClick={saveBudget}
+                    >
+                      {updateBudget.isPending ? "正在保存" : "保存上限"}
+                    </Button>
+                    {budgetError && (
+                      <span className="text-[0.625rem] text-destructive">
+                        {budgetError}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>
