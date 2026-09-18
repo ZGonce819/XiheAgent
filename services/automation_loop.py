@@ -85,6 +85,13 @@ class RoundRequest:
     model_id: str = "__builtin__"
     effort: str = "default"
     round_number: int = 1
+    auto_approve: bool = False
+    """这个任务有没有开启「审批交给表决」。
+
+    开启后，需要审批的命令由三个评审表决决定，不需要人在场
+    （见 :mod:`services.approval_vote`）。默认关闭 —— 这是把一处人工闸门交给机器，
+    必须是每个任务各自显式开的。
+    """
 
 
 @dataclass(frozen=True)
@@ -111,6 +118,21 @@ class RoundResult:
     验证结论与目标仓库无关。
     """
 
+    approval_votes: tuple[dict[str, Any], ...] = ()
+    """这一轮里几次「审批交给表决」的过程记录。
+
+    形状见 :meth:`services.approval_vote.VoteOutcome.as_state_dict`。**得不出结论
+    的那几次也要记** —— 「开了全自动表决，但这次没能定」和「表决放行了」是两件
+    不同的事，只记后者会让人以为这一轮没有任何人工介入。
+    """
+
+
+MAX_APPROVAL_VOTES_PER_ROUND = 5
+"""一轮里最多表决几次。
+
+用满之后这一轮就退回等人工 —— 保留原有的 ``awaiting_approval`` 行为作为兜底。
+没有这个上限，模型可以一直换做法、一直撞审批，每撞一次烧三次模型调用。
+"""
 
 RoundRunner = Callable[[RoundRequest], RoundResult]
 
@@ -127,6 +149,8 @@ class CycleResult:
     stopped: bool = False
     stop_reason: str | None = None
     skipped_reason: str | None = None
+    approval_votes: tuple[dict[str, Any], ...] = ()
+    """本轮发生的审批表决，供调度器判断有没有需要写进定义的异常。"""
 
     def as_dict(self) -> dict[str, Any]:
         """转成可以直接返回给前端的字典。
@@ -143,6 +167,7 @@ class CycleResult:
             "stopped": self.stopped,
             "stopReason": self.stop_reason,
             "skippedReason": self.skipped_reason,
+            "approvalVotes": [dict(item) for item in self.approval_votes],
         }
 
 
@@ -324,6 +349,8 @@ def run_cycle(
         model_id=str(automation.get("model") or "__builtin__"),
         effort=str(automation.get("effort") or "default"),
         round_number=round_number,
+        # 开关只在定义里显式为真时才算开；缺字段、字符串 "false" 之类一律按关。
+        auto_approve=automation.get("autoApprove") is True,
     )
 
     try:
@@ -364,6 +391,7 @@ def run_cycle(
         verification=verification.as_state_dict() if verification else None,
         tokens=result.tokens,
         waiting_approval=result.waiting_approval,
+        approval_votes=result.approval_votes,
     )
     set_last_feedback(
         identifier,
@@ -381,4 +409,5 @@ def run_cycle(
         verification=verification.as_state_dict() if verification else None,
         stopped=stopped,
         stop_reason=reason,
+        approval_votes=result.approval_votes,
     )

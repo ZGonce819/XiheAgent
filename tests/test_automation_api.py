@@ -375,3 +375,102 @@ def test_raising_the_limit_is_the_way_back_from_a_budget_stop(
         == 202
     )
     assert len(dispatched) == 1
+
+
+def test_the_switch_must_be_a_real_boolean(dashboard: TestClient) -> None:
+    """``autoApprove`` 传成字符串要当场报错。
+
+    它是唯一一个把人工闸门交出去的开关。``"false"`` 这种写法如果真的被解析成真
+    （非空字符串就是真），任务就会在用户以为「没开」的情况下自己放行命令 ——
+    这种错必须炸在门口，而不是在某个下游分支里被悄悄消化掉。
+    """
+    response = dashboard.post(
+        "/dashboard/api/schedules",
+        json={
+            "name": "每日分诊",
+            "prompt": "分析这个仓库的目录结构",
+            "schedule": "0 9 * * *",
+            "repo": REPO,
+            "autoApprove": "false",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "布尔" in response.json()["detail"]
+
+
+def test_the_switch_is_off_unless_asked_for(dashboard: TestClient) -> None:
+    """不写这个字段就是关着 —— 默认值只能是最保守的那个。"""
+    created = dashboard.post(
+        "/dashboard/api/schedules",
+        json={
+            "name": "每日分诊",
+            "prompt": "分析这个仓库的目录结构",
+            "schedule": "0 9 * * *",
+            "repo": REPO,
+        },
+    ).json()
+
+    assert created["autoApprove"] is False
+
+
+def test_the_switch_can_be_turned_on_and_off(dashboard: TestClient) -> None:
+    """开关能通过创建与局部更新两个入口改，改完要落到定义里。"""
+    created = dashboard.post(
+        "/dashboard/api/schedules",
+        json={
+            "name": "每日分诊",
+            "prompt": "分析这个仓库的目录结构",
+            "schedule": "0 9 * * *",
+            "repo": REPO,
+            "autoApprove": True,
+        },
+    ).json()
+    assert created["autoApprove"] is True
+
+    updated = dashboard.patch(
+        f"/dashboard/api/schedules/{created['id']}", json={"autoApprove": False}
+    ).json()
+    assert updated["autoApprove"] is False
+    assert get_automation(created["id"])["autoApprove"] is False
+
+
+def test_a_round_that_voted_shows_up_in_the_state(dashboard: TestClient) -> None:
+    """表决记录要能从状态接口读到，并在给人看的文本里出现。
+
+    没有这一条，开了全自动的任务自己放行过什么命令就只有日志知道 —— 而这是一处
+    本该由人点头的闸门。
+    """
+    automation = make_automation(autoApprove=True)
+    record_run(
+        automation["id"],
+        outcome="succeeded",
+        approval_votes=[
+            {
+                "commands": ['git commit -m "自动提交"'],
+                "approve": 2,
+                "reject": 1,
+                "decision": "approve",
+                "reason": "2/3 票同意放行",
+                "votes": [
+                    {
+                        "role": "irreversible",
+                        "label": "不可逆损失",
+                        "approve": True,
+                        "reason": "只是本地提交",
+                        "error": "",
+                    }
+                ],
+            }
+        ],
+    )
+
+    payload = dashboard.get(
+        f"/dashboard/api/schedules/{automation['id']}/state"
+    ).json()
+
+    votes = payload["state"]["runs"][0]["approvalVotes"]
+    assert votes[0]["decision"] == "approve"
+    assert votes[0]["approve"] == 2
+    assert "审批表决放行" in payload["text"]
+    assert 'git commit -m "自动提交"' in payload["text"]

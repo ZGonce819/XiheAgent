@@ -145,6 +145,13 @@ export interface AgentSchedule {
   repo: string | null
   model: string
   effort?: string | null
+  /**
+   * 这个任务有没有开启「全流程自动化」：需要审批的命令由三个评审表决决定，
+   * 不再停下来等人在界面上点确认。
+   *
+   * 默认关闭。开启后也不会放行按策略硬拒绝的命令，评审得不出结论时同样交回人工。
+   */
+  autoApprove?: boolean
   enabled: boolean
   cronId?: string | null
   lastThreadId?: string | null

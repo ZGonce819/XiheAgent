@@ -541,6 +541,7 @@ def test_cycle_result_is_json_friendly() -> None:
         "stopped": False,
         "stopReason": None,
         "skippedReason": None,
+        "approvalVotes": [],
     }
 
 
@@ -558,3 +559,57 @@ def test_due_scan_can_be_replayed_for_a_specific_moment(data_dir: Path) -> None:
     monday = datetime(2026, 9, 21, 9, 0, tzinfo=UTC)
     assert len(due_automations(monday).due) == 1
     assert len(due_automations(monday - timedelta(minutes=1)).due) == 0
+
+
+def test_the_switch_reaches_the_round_request(data_dir: Path) -> None:
+    """定义里的开关要传到「跑一轮」手上。
+
+    定义在 ``config`` 层、表决在 ``services`` 层，中间少传一次，界面上的开关就成了
+    一个点了没反应的摆设：任务看起来开了全自动，实际每一轮照旧停下等人。
+    """
+    runner, requests = make_round_runner()
+    run_cycle(make_automation(autoApprove=True), runner, backend_type="local")
+    assert requests[0].auto_approve is True
+
+
+def test_the_switch_is_off_when_it_is_not_exactly_true(data_dir: Path) -> None:
+    """只有显式写真的布尔值才算开。
+
+    缺字段、写成 ``"false"`` 这类字符串都按关处理。这是个把人工闸门交出去的开关，
+    「看着像真」不算数 —— 非空字符串在 Python 里就是真，靠真值判断会把它打开。
+    """
+    for value in (None, "false", "true", 1, {}):
+        runner, requests = make_round_runner()
+        run_cycle(make_automation(autoApprove=value), runner, backend_type="local")
+        assert requests[0].auto_approve is False, value
+
+    runner, requests = make_round_runner()
+    run_cycle(make_automation(), runner, backend_type="local")
+    assert requests[0].auto_approve is False
+
+
+def test_votes_from_the_round_are_recorded_in_the_state(data_dir: Path) -> None:
+    """「跑一轮」交回来的表决记录要落进状态，供界面与追责查看。"""
+    record = {
+        "commands": ['git commit -m "自动提交"'],
+        "approve": 2,
+        "reject": 1,
+        "decision": "approve",
+        "reason": "2/3 票同意放行",
+        "votes": [
+            {
+                "role": "safer_alternative",
+                "label": "更安全的等价做法",
+                "approve": False,
+                "reason": "可以先只暂存",
+                "error": "",
+            }
+        ],
+    }
+    runner, _ = make_round_runner(RoundResult(approval_votes=(record,)))
+
+    run_cycle(make_automation(), runner, backend_type="local")
+
+    stored = load_state(AUTOMATION_ID)["runs"][0]["approvalVotes"]
+    assert stored[0]["decision"] == "approve"
+    assert stored[0]["votes"][0]["reason"] == "可以先只暂存"

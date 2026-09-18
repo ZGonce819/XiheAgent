@@ -338,9 +338,24 @@ def resume_agent_task(
     thread_id: str,
     decision: str,
     approval_id: str,
+    reject_message: str | None = None,
     event_sink: RuntimeEventSink | None = None,
 ) -> dict[str, Any]:
-    """Resume the exact LangGraph checkpoint paused for command approval."""
+    """Resume the exact LangGraph checkpoint paused for command approval.
+
+    Args:
+        thread_id: 会话 id。
+        decision: ``approve`` 或 ``reject``。
+        approval_id: 待审批记录的 id，用于确认恢复的是同一次中断。
+        reject_message: 拒绝时交回给模型的话。不传则用「用户拒绝了这次命令执行。」——
+            这是**人在界面点拒绝**时该说的话。代行的表决必须自己传一份：它得说清
+            是机器投的票、以及否决理由，否则模型会以为有人在看着它，而且拿不到
+            让它换做法的信息。
+        event_sink: 运行时事件接收器。
+
+    Raises:
+        ValueError: 审批决定非法、待审批操作已失效，或会话不存在。
+    """
     if decision not in {"approve", "reject"}:
         raise ValueError("无效的审批决定")
     pending = claim_pending_approval(thread_id, approval_id)
@@ -383,7 +398,10 @@ def resume_agent_task(
         decisions = [
             {"type": "approve"}
             if decision == "approve"
-            else {"type": "reject", "message": "用户拒绝了这次命令执行。"}
+            else {
+                "type": "reject",
+                "message": reject_message or "用户拒绝了这次命令执行。",
+            }
             for _action in actions
         ]
     except Exception:

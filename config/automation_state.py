@@ -43,6 +43,7 @@ import os
 import re
 import threading
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -67,6 +68,25 @@ MAX_ATTEMPTS_KEPT = 20
 
 MAX_CHECKS_KEPT = 20
 """每轮最多保留多少条验证结果。"""
+
+MAX_APPROVAL_VOTES_KEPT = 5
+"""每轮最多保留几次审批表决的记录。
+
+必须不小于 ``services.automation_loop.MAX_APPROVAL_VOTES_PER_ROUND``（一轮最多
+表决几次），否则「用满上限退回人工」的那一轮会被截掉几条 —— 而那一条正是最该被
+看见的。``config`` 不能反向依赖 ``services``，所以这两个值只能各自写死、各自注释。
+"""
+
+VOTE_DECISIONS = ("approve", "reject", "undecided", "refused")
+"""一次审批表决的结论取值。
+
+后两个都表示**没有得出可执行的结论**，这一轮要交回人工：``undecided`` 是评审没能
+给出结论（报错、超时、返回不合法结构），``refused`` 是压根不该表决（例如命令按当前
+策略已属硬拒绝）。
+"""
+
+_VOTER_ROLE_LIMIT = 8
+"""每条表决最多保留几个评审的票。比实际的三个宽 —— 多几个角色也不该被无声截掉。"""
 
 _EXECUTED_CHECK_STATUSES = frozenset({"passed", "failed"})
 """这些状态表示那条检查真的跑出了退出码。
@@ -223,6 +243,71 @@ def _normalize_verification(raw: Any) -> dict[str, Any] | None:
         "summary": _clip(raw.get("summary"), MAX_SUMMARY_CHARS),
         "checks": checks,
     }
+
+
+def _normalize_approval_votes(raw: Any) -> list[dict[str, Any]]:
+    """把一轮里的审批表决记录归一成固定形状。
+
+    形状由 :meth:`services.approval_vote.VoteOutcome.as_state_dict` 产出；这里只做
+    收窄与裁剪，不重新判断对错。认不出来的整条丢掉 —— 表决记录是用来**追责**的，
+    宁少一条，也不要留一条字段残缺、看不出谁投了什么的。
+
+    Note:
+        读取侧不用管这个字段：老状态文件里没有 ``approvalVotes``，缺了就是「那一轮
+        没有表决」，本来就是事实，不需要像 ``executed`` 那样从别的字段推。
+
+    Args:
+        raw: 表决记录，通常是一个列表或元组；``None`` 表示这一轮没有表决。
+
+    Returns:
+        归一后的记录列表，最多 :data:`MAX_APPROVAL_VOTES_KEPT` 条。
+    """
+    # 收列表**和元组**：``automation_loop`` 交过来的是 ``RoundResult.approval_votes``，
+    # 那是个元组。只认 ``list`` 会把真实轮次的表决记录静默丢光。
+    if isinstance(raw, (str, bytes)) or not isinstance(raw, Sequence):
+        return []
+
+    records: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        decision = str(item.get("decision") or "")
+        if decision not in VOTE_DECISIONS:
+            continue
+        votes: list[dict[str, Any]] = []
+        for vote in item.get("votes") or []:
+            if not isinstance(vote, dict):
+                continue
+            votes.append(
+                {
+                    "role": _clip(vote.get("role"), 64),
+                    "label": _clip(vote.get("label"), 32),
+                    "approve": bool(vote.get("approve")),
+                    "reason": _clip(vote.get("reason"), MAX_TEXT_CHARS),
+                    "error": _clip(vote.get("error"), MAX_TEXT_CHARS),
+                }
+            )
+            if len(votes) >= _VOTER_ROLE_LIMIT:
+                break
+        approve_count = 0
+        reject_count = 0
+        with contextlib.suppress(TypeError, ValueError):
+            approve_count = max(0, int(item.get("approve") or 0))
+        with contextlib.suppress(TypeError, ValueError):
+            reject_count = max(0, int(item.get("reject") or 0))
+        records.append(
+            {
+                "commands": _clip_list(item.get("commands"), MAX_TEXT_CHARS),
+                "approve": approve_count,
+                "reject": reject_count,
+                "decision": decision,
+                "reason": _clip(item.get("reason"), MAX_SUMMARY_CHARS),
+                "votes": votes,
+            }
+        )
+        if len(records) >= MAX_APPROVAL_VOTES_KEPT:
+            break
+    return records
 
 
 def state_dir() -> Path:
@@ -430,6 +515,7 @@ def record_run(
     verification: dict[str, Any] | None = None,
     tokens: int = 0,
     waiting_approval: bool = False,
+    approval_votes: Any = None,
     started_at: str | None = None,
     finished_at: str | None = None,
 ) -> dict[str, Any]:
@@ -451,6 +537,10 @@ def record_run(
         waiting_approval: 这一轮是不是停在等人工确认。是的话循环会停下来等人，
             不再把它当成一轮普通的「没做完」—— 无人值守的循环里，没人会去点那个
             确认，下一轮还会卡在同一个地方。
+        approval_votes: 这一轮里几次审批表决的记录，形状见
+            :func:`_normalize_approval_votes`。**得不出结论的那几次也要传进来**：
+            「开了全自动表决但这次没能定」必须看得出来，只记放行的会让人以为
+            这一轮没有任何人工介入。
         started_at: 本轮开始时间；不传则留空。
         finished_at: 本轮结束时间；不传则用当前时间。
 
@@ -477,6 +567,7 @@ def record_run(
             "nextSteps": _clip_list(next_steps, MAX_TEXT_CHARS),
             "verification": _normalize_verification(verification),
             "waitingApproval": bool(waiting_approval),
+            "approvalVotes": _normalize_approval_votes(approval_votes),
         },
     )
     del state["runs"][MAX_RUNS_KEPT:]
@@ -816,6 +907,43 @@ def _verification_mark(verification: dict[str, Any]) -> str:
     return "验证未通过"
 
 
+def _vote_mark(decision: Any) -> str:
+    """给一次审批表决挑一个说法。
+
+    「没定下来」和「否决」必须分开说：写成「否决」会让人以为有人看过并否掉了这条
+    命令，实际该看的是「为什么表决没能得出结论」。与 :func:`_verification_mark`
+    把「未执行」和「未通过」分开是同一条道理。
+
+    Args:
+        decision: 表决结论取值。
+
+    Returns:
+        ``审批表决放行`` / ``审批表决否决`` / ``审批表决未定`` / ``审批表决未进行``。
+    """
+    return {
+        "approve": "审批表决放行",
+        "reject": "审批表决否决",
+        "undecided": "审批表决未定",
+        "refused": "审批表决未进行",
+    }.get(str(decision or ""), "审批表决")
+
+
+def _render_vote(vote: dict[str, Any]) -> str:
+    """把一次表决渲染成一行给人看的文本。
+
+    Args:
+        vote: 归一化之后的表决记录。
+
+    Returns:
+        单行文本，例如 ``审批表决放行：2/3 票同意放行（命令：git push）``。
+    """
+    line = f"    - {_vote_mark(vote.get('decision'))}：{vote.get('reason') or '（无说明）'}"
+    commands = vote.get("commands") or []
+    if commands:
+        line += f"（命令：{'；'.join(commands)}）"
+    return line
+
+
 def render_state(automation_id: Any) -> str:
     """把状态渲染成给人看的纯文本。
 
@@ -883,6 +1011,9 @@ def render_state(automation_id: Any) -> str:
                     f"    - {_verification_mark(verification)}："
                     f"{verification.get('summary') or '（无说明）'}"
                 )
+            for vote in run.get("approvalVotes") or []:
+                if isinstance(vote, dict):
+                    lines.append(_render_vote(vote))
             for item in run.get("changed") or []:
                 lines.append(f"    - 改动：{item}")
             for item in run.get("nextSteps") or []:

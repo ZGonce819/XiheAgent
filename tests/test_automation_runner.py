@@ -558,3 +558,262 @@ def test_missing_token_usage_counts_as_zero() -> None:
     assert _tokens_used([{"usage_metadata": "不是字典"}]) == 0
     assert _tokens_used([{"usage_metadata": {"total_tokens": "坏值"}}]) == 0
     assert _tokens_used([{"usage_metadata": {"total_tokens": -5}}]) == 0
+
+
+APPROVAL_COMMAND = 'git commit -m "自动提交"'
+"""造出来的待审批命令。内容不影响判定 —— 表决在这组用例里是打桩的。"""
+
+
+def _stub_store(statuses: list[str]) -> tuple[Any, list[int]]:
+    """造一个按顺序吐运行状态的 Store。
+
+    每读一次往后走一格，最后一格一直重复：表决恢复之后要能读到新状态，而
+    「一直卡在等审批」正是上限那条用例需要的情形。
+
+    返回的实例**必须被复用**（``agent.graph.graph.get_store`` 本来就是单例）：
+    每次调用都造一个新的，读指针就会各自从头开始，恢复之后读到的还是「等审批」。
+
+    Args:
+        statuses: 依次要返回的 ``latest_run_status``。
+
+    Returns:
+        ``(Store, 读次数)``。
+    """
+    reads = [0]
+
+    class FakeStore:
+        def get_thread(self, thread_id: str) -> dict[str, str]:
+            index = min(reads[0], len(statuses) - 1)
+            reads[0] += 1
+            return {"latest_run_status": statuses[index]}
+
+    return FakeStore(), reads
+
+
+def _stub_vote(
+    monkeypatch: pytest.MonkeyPatch,
+    decisions: list[str],
+    *,
+    tokens: int = 0,
+) -> list[str]:
+    """把表决打桩成固定的结论序列。
+
+    Args:
+        monkeypatch: pytest 的打桩器。
+        decisions: 依次要返回的表决结论；用完之后一直复用最后一个。
+        tokens: 每次表决报出来的用量。
+
+    Returns:
+        记录每次实际用了哪个结论的列表。
+    """
+    from services.approval_vote import VoteCast, VoteOutcome
+
+    calls: list[str] = []
+
+    def fake_vote(pending: dict[str, Any], **kwargs: Any) -> Any:
+        decision = decisions[min(len(calls), len(decisions) - 1)]
+        calls.append(decision)
+        return VoteOutcome(
+            commands=(APPROVAL_COMMAND,),
+            votes=(
+                VoteCast(
+                    role="irreversible",
+                    label="不可逆损失",
+                    approve=decision == "approve",
+                    reason="会把改动推到远端",
+                ),
+            ),
+            decision=decision,  # type: ignore[arg-type]
+            reason=f"表决结论：{decision}；会把改动推到远端",
+            tokens=tokens,
+        )
+
+    monkeypatch.setattr("services.approval_vote.vote_on_approval", fake_vote)
+    return calls
+
+
+def _run_approval_round(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    auto_approve: bool,
+    statuses: list[str],
+    resume_error: Exception | None = None,
+) -> tuple[Any, dict[str, Any]]:
+    """跑一轮「停在等审批」的轮次，线路全部打桩。
+
+    Args:
+        monkeypatch: pytest 的打桩器。
+        auto_approve: 这一轮的任务开没开表决。
+        statuses: Store 依次返回的运行状态。
+        resume_error: 让恢复调用抛出的异常；``None`` 表示恢复成功。
+
+    Returns:
+        ``(RoundResult, 调用痕迹)``；痕迹里 ``resume`` 是恢复调用、
+        ``pending`` 是读待审批内容的次数。
+    """
+    traces: dict[str, Any] = {"resume": [], "pending": 0}
+
+    def fake_run_agent_task(**kwargs: Any) -> dict[str, Any]:
+        return {"messages": []}
+
+    def fake_resume(**kwargs: Any) -> dict[str, Any]:
+        traces["resume"].append((kwargs["decision"], kwargs.get("reject_message")))
+        if resume_error is not None:
+            raise resume_error
+        return {"messages": []}
+
+    def fake_pending(thread_id: str) -> dict[str, Any]:
+        traces["pending"] += 1
+        return {
+            "id": "approval-1",
+            "threadId": thread_id,
+            "backendType": "local",
+            "actions": [{"name": "execute", "command": APPROVAL_COMMAND}],
+        }
+
+    store, _reads = _stub_store(statuses)
+    monkeypatch.setattr("agent.runtime.task_router.run_agent_task", fake_run_agent_task)
+    monkeypatch.setattr("agent.runtime.task_router.resume_agent_task", fake_resume)
+    monkeypatch.setattr(
+        "agent.runtime.task_router.initialize_task_record",
+        lambda **kwargs: kwargs["thread_id"],
+    )
+    monkeypatch.setattr("agent.graph.graph.get_store", lambda: store)
+    monkeypatch.setattr("config.approval_runtime.get_pending_approval", fake_pending)
+    monkeypatch.setattr(
+        "utils.message_utils.extract_final_assistant_text", lambda messages: ""
+    )
+    monkeypatch.setattr("services.automation_runner.resolve_workspace", lambda *a, **k: None)
+    _stub_kind(monkeypatch, "analysis")
+
+    result = make_agent_round_runner(thread_id="t1")(
+        RoundRequest(
+            automation_id="a1",
+            name="每日分诊",
+            prompt="读一遍仓库概况",
+            instruction="读一遍仓库概况",
+            repo="https://github.com/owner/repo.git",
+            auto_approve=auto_approve,
+        )
+    )
+    return result, traces
+
+
+def test_a_task_without_the_switch_never_votes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """没开表决的任务，一次表决都不该发。
+
+    这是默认路径，也是最要紧的一条：开关没开还去问评审，等于把人工闸门默认交出去。
+    """
+
+    def boom(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("没开表决却调了表决")
+
+    monkeypatch.setattr("services.approval_vote.vote_on_approval", boom)
+
+    result, traces = _run_approval_round(
+        monkeypatch, auto_approve=False, statuses=["awaiting_approval"]
+    )
+
+    assert result.waiting_approval is True
+    assert "等待人工审批" in result.summary
+    assert result.approval_votes == ()
+    assert traces["resume"] == []
+    # 读过一次待审批内容，那是给**人**看的那句说明用的（`_awaiting_approval_summary`），
+    # 不是表决。这条一并钉住，是因为「读了一次」和「问过评审」很容易被混为一谈。
+    assert traces["pending"] == 1
+
+
+def test_the_switch_settles_the_approval_and_keeps_the_round_going(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """开着表决时，审批就地处理掉，这一轮接着跑完。"""
+    _stub_vote(monkeypatch, ["approve"], tokens=42)
+
+    result, traces = _run_approval_round(
+        monkeypatch, auto_approve=True, statuses=["awaiting_approval", "completed"]
+    )
+
+    assert result.outcome == "succeeded"
+    assert result.waiting_approval is False
+    assert [item["decision"] for item in result.approval_votes] == ["approve"]
+    assert traces["resume"] == [("approve", None)]
+    # 自己放行了一条需审批的命令，摘要里要说清是哪一条 —— 只在状态文件里留着，
+    # 看列表的人不会知道有人（或机器）替他把闸门开了。
+    assert "本轮审批表决：1 次放行" in result.summary
+    assert APPROVAL_COMMAND in result.summary
+    # 表决是这一轮为了继续跑额外花的，得算进这一轮的用量。
+    assert result.tokens == 42
+
+
+def test_a_rejection_is_explained_to_the_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """表决否决时，交回模型的话必须说明是机器投的票、以及否决理由。
+
+    人工点拒绝说的是「用户拒绝了这次命令执行」。表决沿用那句有两个问题：模型会
+    以为有人在看着它，而且拿不到让它换做法的信息，于是原样重试同一条命令、
+    再撞上同一次否决。
+    """
+    _stub_vote(monkeypatch, ["reject"])
+
+    _result, traces = _run_approval_round(
+        monkeypatch, auto_approve=True, statuses=["awaiting_approval", "completed"]
+    )
+
+    decision, message = traces["resume"][0]
+    assert decision == "reject"
+    assert "评审表决" in message
+    assert "会把改动推到远端" in message
+    assert "用户拒绝" not in message
+
+
+def test_a_vote_that_cannot_decide_hands_the_round_back_to_the_human(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """表决没能得出结论时，这一轮仍然停下等人工，并且要说清为什么。"""
+    _stub_vote(monkeypatch, ["undecided"])
+
+    result, traces = _run_approval_round(
+        monkeypatch, auto_approve=True, statuses=["awaiting_approval"]
+    )
+
+    assert result.waiting_approval is True
+    # 没能得出结论就**不能**恢复会话 —— 那不是否决，模型不该据此改东西。
+    assert traces["resume"] == []
+    assert "没能得出结论" in result.summary
+    assert "表决结论：undecided" in result.summary
+
+
+def test_the_round_stops_after_the_vote_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """用满表决次数还在撞审批就停手，退回等人工。"""
+    from services.automation_loop import MAX_APPROVAL_VOTES_PER_ROUND
+
+    calls = _stub_vote(monkeypatch, ["approve"])
+
+    result, _traces = _run_approval_round(
+        monkeypatch, auto_approve=True, statuses=["awaiting_approval"]
+    )
+
+    assert len(calls) == MAX_APPROVAL_VOTES_PER_ROUND
+    assert result.waiting_approval is True
+    assert len(result.approval_votes) == MAX_APPROVAL_VOTES_PER_ROUND
+    assert "还在撞审批" in result.summary
+
+
+def test_a_failing_resume_hands_the_round_back_to_the_human(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """表决之后的恢复失败时，这一轮记成等人工而不是把异常抛出去。
+
+    待审批记录还在，人还能接手；把异常抛出去会让这一轮变成失败，还会顶掉
+    「其实是卡在审批上」这个真正的原因。
+    """
+    _stub_vote(monkeypatch, ["approve"])
+
+    result, _traces = _run_approval_round(
+        monkeypatch,
+        auto_approve=True,
+        statuses=["awaiting_approval"],
+        resume_error=RuntimeError("checkpoint 读不到"),
+    )
+
+    assert result.waiting_approval is True
+    assert "checkpoint 读不到" in result.summary

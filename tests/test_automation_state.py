@@ -686,3 +686,171 @@ def test_record_run_defaults_to_not_waiting(data_dir: Path) -> None:
     record_run(AUTOMATION_ID, outcome="succeeded")
     assert load_state(AUTOMATION_ID)["runs"][0]["waitingApproval"] is False
     assert stop_decision(AUTOMATION_ID) == (None, None)
+
+
+APPROVAL_COMMAND = 'git commit -m "自动提交"'
+"""造出来的待审批命令。"""
+
+
+def vote(
+    decision: str,
+    *,
+    reason: str = "2/3 票同意放行",
+    commands: list[str] | None = None,
+    approve: int = 2,
+    reject: int = 1,
+) -> dict[str, Any]:
+    """造一条表决记录。
+
+    Args:
+        decision: 表决结论。
+        reason: 给人看的结论说明。
+        commands: 这次表决涉及的命令。
+        approve: 同意票数。
+        reject: 反对票数。
+
+    Returns:
+        与 ``services.approval_vote.VoteOutcome.as_state_dict()`` 同构的字典。
+    """
+    return {
+        "commands": [APPROVAL_COMMAND] if commands is None else commands,
+        "approve": approve,
+        "reject": reject,
+        "decision": decision,
+        "reason": reason,
+        "votes": [
+            {
+                "role": "irreversible",
+                "label": "不可逆损失",
+                "approve": True,
+                "reason": "只是本地提交",
+                "error": "",
+            },
+            {
+                "role": "safer_alternative",
+                "label": "更安全的等价做法",
+                "approve": False,
+                "reason": "可以先只暂存再提交",
+                "error": "",
+            },
+        ],
+    }
+
+
+def test_a_vote_is_recorded_with_every_reason(data_dir: Path) -> None:
+    """表决记录要连理由一起留下 —— 它决定的是「要不要执行一条命令」，事后必须能追。"""
+    record_run(
+        AUTOMATION_ID,
+        outcome="succeeded",
+        approval_votes=[vote("approve")],
+    )
+
+    stored = load_state(AUTOMATION_ID)["runs"][0]["approvalVotes"]
+    assert len(stored) == 1
+    assert stored[0]["decision"] == "approve"
+    assert stored[0]["approve"] == 2
+    assert stored[0]["reject"] == 1
+    assert [item["label"] for item in stored[0]["votes"]] == [
+        "不可逆损失",
+        "更安全的等价做法",
+    ]
+    assert stored[0]["votes"][1]["reason"] == "可以先只暂存再提交"
+
+
+def test_rendered_state_shows_the_vote_and_the_command(data_dir: Path) -> None:
+    """给人看的文本里要有这次表决的结论、说明与放行的命令。"""
+    record_run(
+        AUTOMATION_ID,
+        outcome="succeeded",
+        approval_votes=[vote("approve")],
+    )
+
+    text = render_state(AUTOMATION_ID)
+    assert "审批表决放行" in text
+    assert "2/3 票同意放行" in text
+    assert APPROVAL_COMMAND in text
+
+
+def test_a_vote_that_could_not_decide_is_not_rendered_as_a_rejection(
+    data_dir: Path,
+) -> None:
+    """没能得出结论的表决不能渲染成「否决」。
+
+    写成「否决」会让人以为有人看过并且否掉了这条命令，实际该看的是「为什么表决
+    没能得出结论」—— 和「没跑成验证」不能写成「验证没通过」是同一条道理。
+    """
+    record_run(
+        AUTOMATION_ID,
+        outcome="blocked",
+        approval_votes=[
+            vote("undecided", reason="有评审没能给出结论，交给人工：任务意图：超时"),
+            vote("refused", reason="按当前策略属于硬拒绝，不能表决放行"),
+        ],
+    )
+
+    text = render_state(AUTOMATION_ID)
+    assert "审批表决未定" in text
+    assert "审批表决未进行" in text
+    assert "审批表决否决" not in text
+
+
+def test_unrecognized_vote_records_are_dropped(data_dir: Path) -> None:
+    """认不出来的记录整条丢掉，别留一条字段残缺的。
+
+    表决记录是用来追责的，一条看不出谁投了什么的记录比没有更糟。
+    """
+    record_run(
+        AUTOMATION_ID,
+        outcome="succeeded",
+        approval_votes=[
+            "不是字典",
+            {"decision": "maybe"},
+            {"commands": [APPROVAL_COMMAND]},
+            vote("reject"),
+        ],
+    )
+
+    stored = load_state(AUTOMATION_ID)["runs"][0]["approvalVotes"]
+    assert len(stored) == 1
+    assert stored[0]["decision"] == "reject"
+
+
+def test_votes_are_capped_per_round(data_dir: Path) -> None:
+    """一轮里保留的表决条数有上限，状态文件不能无边界膨胀。"""
+    from config.automation_state import MAX_APPROVAL_VOTES_KEPT
+
+    record_run(
+        AUTOMATION_ID,
+        outcome="succeeded",
+        approval_votes=[vote("approve") for _ in range(MAX_APPROVAL_VOTES_KEPT + 3)],
+    )
+
+    stored = load_state(AUTOMATION_ID)["runs"][0]["approvalVotes"]
+    assert len(stored) == MAX_APPROVAL_VOTES_KEPT
+
+
+def test_a_vote_with_a_broken_shape_does_not_break_anything(data_dir: Path) -> None:
+    """表压根不是列表、或者是 ``None`` 时按「没有表决」处理。"""
+    for broken in (None, "坏了", 3, {"decision": "approve"}):
+        record_run(AUTOMATION_ID, outcome="succeeded", approval_votes=broken)
+        assert load_state(AUTOMATION_ID)["runs"][0]["approvalVotes"] == []
+
+
+def test_an_old_state_file_without_votes_still_reads_and_renders(
+    data_dir: Path,
+) -> None:
+    """老状态文件里没有 ``approvalVotes``，读回与渲染都要照常工作。
+
+    ``runs`` 在读侧是**原样透传**的（不经过归一化），所以这里不能假设字段存在。
+    缺了就是「那一轮没有表决」，本来就是事实，不需要像 ``executed`` 那样推。
+    """
+    record_run(AUTOMATION_ID, outcome="succeeded", summary="旧的一轮")
+    path = state_path(AUTOMATION_ID)
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    for run in raw["runs"]:
+        run.pop("approvalVotes", None)
+    path.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+
+    state = load_state(AUTOMATION_ID)
+    assert "approvalVotes" not in state["runs"][0]
+    assert "旧的一轮" in render_state(AUTOMATION_ID)

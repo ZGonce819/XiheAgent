@@ -100,6 +100,10 @@ def _validate_automation_payload(body: dict[str, Any], partial: bool = False) ->
     # 因为 api 层不该替验证门决定它能接受什么。
     if body.get("checks") is not None and not isinstance(body["checks"], list):
         raise HTTPException(status_code=400, detail="检查项必须是列表")
+    # 「审批交给表决」是唯一一个把人工闸门交出去的开关，只认真正的布尔值：
+    # 前端传成 "false" 字符串这种写法必须当场报错，不能让它在别处静默解析。
+    if body.get("autoApprove") is not None and not isinstance(body["autoApprove"], bool):
+        raise HTTPException(status_code=400, detail="审批表决开关必须是布尔值")
 
 
 def _skill_summary(skill_file: Path) -> dict[str, Any]:

@@ -61,6 +61,21 @@ def _normalize_checks(value: Any) -> list[Any]:
     return list(value) if isinstance(value, list) else []
 
 
+def _normalize_flag(value: Any) -> bool:
+    """收下开关类配置。
+
+    只认真正的布尔值：``"false"`` 这样的字符串是**真的**，传成字符串就是配置写错了。
+    一个把人工闸门交出去的开关，宁可关着，也不能因为解析宽松而意外打开。
+
+    Args:
+        value: 原始配置。
+
+    Returns:
+        布尔值；不是布尔时返回 ``False``。
+    """
+    return value if isinstance(value, bool) else False
+
+
 def get_automation(automation_id: str) -> dict[str, Any] | None:
     """按 id 取一个自动化定义。
 
@@ -87,6 +102,7 @@ def create_automation(payload: dict[str, Any]) -> dict[str, Any]:
         "checks": _normalize_checks(payload.get("checks")),
         "model": payload.get("model_id") or "__builtin__",
         "effort": payload.get("effort") or "default",
+        "autoApprove": _normalize_flag(payload.get("autoApprove")),
         "enabled": True,
         "cronId": None,
         "lastThreadId": None,
@@ -108,7 +124,17 @@ def update_automation(
 ) -> dict[str, Any] | None:
     automations = _load_automations()
     aliases = {"model_id": "model"}
-    allowed = {"name", "prompt", "schedule", "repo", "checks", "model_id", "effort", "enabled"}
+    allowed = {
+        "name",
+        "prompt",
+        "schedule",
+        "repo",
+        "checks",
+        "model_id",
+        "effort",
+        "enabled",
+        "autoApprove",
+    }
     for automation in automations:
         if automation.get("id") != automation_id:
             continue
@@ -120,6 +146,7 @@ def update_automation(
             automation[target] = value.strip() if isinstance(value, str) else value
         automation["repo"] = automation.get("repo") or None
         automation["checks"] = _normalize_checks(automation.get("checks"))
+        automation["autoApprove"] = _normalize_flag(automation.get("autoApprove"))
         automation["updatedAt"] = datetime.now(UTC).isoformat()
         _save_automations(automations)
         return automation

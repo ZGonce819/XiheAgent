@@ -47,6 +47,7 @@ type FormState = {
   repo: string
   modelId: string
   effort: string
+  autoApprove: boolean
 }
 
 const EMPTY_FORM: FormState = {
@@ -57,6 +58,7 @@ const EMPTY_FORM: FormState = {
   repo: "",
   modelId: "",
   effort: "default",
+  autoApprove: false,
 }
 
 function AutomationsPage() {
@@ -122,6 +124,7 @@ function AutomationManager() {
       repo: schedule.repo ?? "",
       modelId: schedule.model,
       effort: schedule.effort ?? "default",
+      autoApprove: schedule.autoApprove === true,
     })
     setError(null)
     setFormOpen(true)
@@ -144,6 +147,7 @@ function AutomationManager() {
       repo: form.repo.trim() || null,
       model_id: form.modelId || null,
       effort: form.effort || null,
+      autoApprove: form.autoApprove,
     }
     try {
       if (editing) {
@@ -359,6 +363,27 @@ function AutomationManager() {
                   </select>
                 </Field>
               )}
+              <Field
+                label="全流程自动化（审批交给表决）"
+                htmlFor="automation-auto-approve"
+              >
+                <div className="flex items-start gap-2 pt-0.5">
+                  <Switch
+                    id="automation-auto-approve"
+                    checked={form.autoApprove}
+                    onCheckedChange={(checked) =>
+                      setForm({ ...form, autoApprove: checked })
+                    }
+                  />
+                  <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
+                    开启后，需要审批的命令由三个评审各自从不同角度表决（多数决），
+                    不再停下来等人点确认。
+                    <br />
+                    任一评审出错或拿不准就不表决、交回人工；按策略硬拒绝的命令永远
+                    不放行；一轮最多表决 5 次，用满仍卡住也会退回等人工。
+                  </p>
+                </div>
+              </Field>
               {error && (
                 <p role="alert" className="text-xs text-destructive">
                   {error}
