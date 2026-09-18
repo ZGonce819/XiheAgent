@@ -991,10 +991,12 @@ function ThinkingSpinner({
   isStreaming,
   liveStatus,
   runElapsedMs,
+  runStatus,
 }: {
   isStreaming: boolean;
   liveStatus?: string | null;
   runElapsedMs?: number;
+  runStatus?: string;
 }) {
   const [textIdx, setTextIdx] = useState(0);
   const [done, setDone] = useState<{ past: string; elapsed: string } | null>(null);
@@ -1010,12 +1012,17 @@ function ThinkingSpinner({
       setTextIdx(Math.floor(Math.random() * BUSY_TEXTS.length));
       setDone(null);
     } else if (wasStreamingRef.current) {
-      setDone({
-        past: BUSY_TEXTS[textIdxRef.current].past,
-        elapsed: formatElapsed(runElapsedMs ?? (Date.now() - startTimeRef.current)),
-      });
+      // 运行失败时不展示“已收到智能体输出”，由外层错误提示负责
+      if (runStatus === "error") {
+        setDone(null);
+      } else {
+        setDone({
+          past: BUSY_TEXTS[textIdxRef.current].past,
+          elapsed: formatElapsed(runElapsedMs ?? (Date.now() - startTimeRef.current)),
+        });
+      }
     }
-  }, [isStreaming, runElapsedMs]);
+  }, [isStreaming, runElapsedMs, runStatus]);
 
   useEffect(() => {
     if (!isStreaming) return;
@@ -1363,7 +1370,7 @@ export const MessageView = memo(function MessageView({
                   versionNavigation={versionNavigations?.[message.id] ?? (message.id === versionAnchorId ? versionNavigation : undefined)}
                 />
           ))}
-          <ThinkingSpinner isStreaming={isStreaming} liveStatus={liveStatus} runElapsedMs={streamElapsedMs || completedConversationElapsedMs} />
+          <ThinkingSpinner isStreaming={isStreaming} liveStatus={liveStatus} runElapsedMs={streamElapsedMs || completedConversationElapsedMs} runStatus={runStatus} />
         </div>
       </div>
 

@@ -128,7 +128,12 @@ def run_agent_task(
 
     if is_workspace_listing_task(prompt):
         record_event(thread_id, "intent", "已识别任务类型：工作区查看", status="completed")
-        return run_workspace_listing_task(repo_url=repo_url, prompt=prompt, thread_id=thread_id)
+        return run_workspace_listing_task(
+            repo_url=repo_url,
+            prompt=prompt,
+            thread_id=thread_id,
+            backend_type=backend_type,
+        )
 
     if is_pull_only_task(prompt):
         record_event(thread_id, "intent", "已识别任务类型：仓库同步", status="completed")

@@ -29,7 +29,11 @@ logger = logging.getLogger(__name__)
 
 
 def run_workspace_listing_task(
-    *, repo_url: str, prompt: str, thread_id: str | None = None,
+    *,
+    repo_url: str,
+    prompt: str,
+    thread_id: str | None = None,
+    backend_type: str | None = None,
 ) -> dict[str, Any]:
     """直接列出本地工作区项目，不调用模型。
 
@@ -40,6 +44,7 @@ def run_workspace_listing_task(
         repo_url: 仓库完整地址。
         prompt: 用户输入文本。
         thread_id: 线程 ID；为 ``None`` 时自动创建。
+        backend_type: 当前会话的执行环境，透传到线程记录。
 
     Returns:
         包含 thread_id、run_id、status、projects 的结果字典。
@@ -53,6 +58,7 @@ def run_workspace_listing_task(
         prompt=prompt,
         thread_id=thread_id,
         record_user_message=should_record_user_message,
+        backend_type=backend_type,
     )
     store = get_store()
     store.clear_run_events(thread_id)

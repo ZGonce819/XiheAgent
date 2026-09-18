@@ -206,6 +206,21 @@ function ProjectGroup({
   const hasMore = threads.length > MAX_VISIBLE_PER_PROJECT
   const visibleThreads = expanded || !hasMore ? threads : threads.slice(0, MAX_VISIBLE_PER_PROJECT)
 
+  // 记录需要动画的线程 ID（仅在展开时新出现的线程）
+  const [animatingIds, setAnimatingIds] = useState(new Set<string>())
+
+  const handleExpand = () => {
+    if (!expanded && hasMore) {
+      // 展开时，标记超出初始可见范围的线程为需要动画
+      const newIds = new Set<string>()
+      threads.slice(MAX_VISIBLE_PER_PROJECT).forEach((t) => newIds.add(t.id))
+      setAnimatingIds(newIds)
+    } else {
+      setAnimatingIds(new Set())
+    }
+    setExpanded((v) => !v)
+  }
+
   const navigate = useNavigate()
   const renameProject = useRenameProject()
   const [renameOpen, setRenameOpen] = useState(false)
@@ -259,27 +274,37 @@ function ProjectGroup({
           <PlusIcon className="size-3" />
         </button>
       </div>
-      {visibleThreads.map((thread) => (
-        <ThreadRow
-          key={thread.id}
-          thread={thread}
-          isActive={thread.id === activeThreadId}
-          onNavigate={onNavigate}
-        />
-      ))}
+      {visibleThreads.map((thread, idx) => {
+        const animate = animatingIds.has(thread.id)
+        return (
+          <ThreadRow
+            key={thread.id}
+            thread={thread}
+            isActive={thread.id === activeThreadId}
+            onNavigate={onNavigate}
+            animate={animate}
+            animateDelay={animate ? (idx - MAX_VISIBLE_PER_PROJECT) * 40 : undefined}
+          />
+        )
+      })}
       {hasMore && (
         <button
           type="button"
-          onClick={() => setExpanded((v) => !v)}
-          className="mx-2 mt-0.5 flex w-[calc(100%-1rem)] items-center justify-center gap-1 rounded-md px-2 py-1 text-[0.6875rem] text-[var(--ui-text-dim)] transition-colors hover:bg-[var(--ui-sidebar-hover)] hover:text-[var(--ui-text-muted)]"
+          onClick={handleExpand}
+          className="group/expand mx-2 mt-0.5 flex w-[calc(100%-1rem)] items-center justify-center gap-1 rounded-md px-2 py-1 text-[0.6875rem] text-[var(--ui-text-dim)] transition-all duration-200 ease-out hover:bg-[var(--ui-sidebar-hover)] hover:text-[var(--ui-text-muted)] active:scale-[0.97]"
         >
           <CaretDownIcon
             className={cn(
-              "size-3 transition-transform duration-200",
+              "size-3 transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)]",
               expanded && "rotate-180"
             )}
           />
-          {expanded ? "收起" : `查看更多 (${threads.length - MAX_VISIBLE_PER_PROJECT})`}
+          <span
+            key={expanded ? "collapse" : "expand"}
+            className="inline-block animate-[sidebar-expand-text_200ms_ease-out]"
+          >
+            {expanded ? "收起" : `查看更多 (${threads.length - MAX_VISIBLE_PER_PROJECT})`}
+          </span>
         </button>
       )}
 
@@ -365,25 +390,33 @@ function ThreadRow({
   thread,
   isActive,
   onNavigate,
+  animate,
+  animateDelay,
 }: {
   thread: AgentThread
   isActive: boolean
   onNavigate?: () => void
+  animate?: boolean
+  animateDelay?: number
 }) {
   const deleteThread = useDeleteAgentThread()
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [exiting, setExiting] = useState(false)
   const badge =
     thread.diffStats && thread.diffStats.additions > 0
       ? `+${thread.diffStats.additions}`
       : null
-  const isDeleting =
-    deleteThread.isPending && deleteThread.variables === thread.id
 
   const onDelete = (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    if (isDeleting) return
+    if (exiting) return
     setDeleteOpen(true)
+  }
+
+  const confirmDelete = () => {
+    setDeleteOpen(false)
+    setExiting(true)
   }
 
   const source =
@@ -416,12 +449,34 @@ function ThreadRow({
         params={{ threadId: thread.id }}
         onClick={onNavigate}
         className={cn(
-          "group mb-0.5 flex flex-col gap-0.5 rounded-lg px-2.5 py-1.5 transition-colors",
+          "group mb-0.5 flex flex-col gap-0.5 rounded-lg px-2.5 py-1.5",
           isActive
             ? "bg-[var(--ui-accent-bubble)] text-[var(--ui-text)]"
             : "text-[var(--ui-text-muted)] hover:bg-[var(--ui-sidebar-hover)]",
-          isDeleting && "opacity-50"
+          animate && !exiting && "sidebar-thread-reveal",
+          exiting && "sidebar-thread-exit"
         )}
+        style={
+          exiting
+            ? {
+                height: 0,
+                marginBottom: 0,
+                marginTop: 0,
+                paddingTop: 0,
+                paddingBottom: 0,
+                overflow: "hidden",
+                opacity: 0,
+                transition: "height 200ms ease-in, margin 200ms ease-in, padding 200ms ease-in, opacity 200ms ease-in",
+              }
+            : animateDelay !== undefined
+              ? { animationDelay: `${animateDelay}ms` }
+              : undefined
+        }
+        onAnimationEnd={() => {
+          if (exiting) {
+            deleteThread.mutate(thread.id)
+          }
+        }}
       >
         <div className="flex items-center gap-2">
           <span
@@ -457,7 +512,7 @@ function ThreadRow({
                 type="button"
                 aria-label="删除会话"
                 onClick={onDelete}
-                disabled={isDeleting}
+                disabled={exiting}
                 className="hidden size-4 shrink-0 items-center justify-center rounded text-[var(--ui-text-dim)] group-hover:flex hover:bg-[var(--ui-panel-2)] hover:text-destructive"
               >
                 <XIcon className="size-3" weight="bold" />
@@ -495,16 +550,11 @@ function ThreadRow({
       <ConfirmDialog
         open={deleteOpen}
         title="删除会话"
-        description={`将永久删除“${thread.title}”及其历史记录，此操作无法撤销。`}
+        description={`将永久删除"${thread.title}"及其历史记录，此操作无法撤销。`}
         confirmText="删除"
         destructive
-        busy={isDeleting}
         onOpenChange={setDeleteOpen}
-        onConfirm={() =>
-          deleteThread.mutate(thread.id, {
-            onSuccess: () => setDeleteOpen(false),
-          })
-        }
+        onConfirm={confirmDelete}
       />
     </>
   )

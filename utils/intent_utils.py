@@ -109,7 +109,9 @@ def is_pull_only_task(prompt: str) -> bool:
 def is_workspace_listing_task(prompt: str) -> bool:
     """判断用户是否只是询问本地工作区有哪些项目。
 
-    仅包含项目列表类关键词且不包含修改类关键词时判定为是。
+    只有明确要求列出项目时才走本地直达分支。单独询问“工作目录在哪里”
+    需要交给 Agent 回答，因为它可能是在询问当前会话绑定的项目目录，不能
+    被误判成全局工作区项目列表。
 
     Args:
         prompt: 用户原始输入。
@@ -119,7 +121,10 @@ def is_workspace_listing_task(prompt: str) -> bool:
     """
 
     normalized = _normalize_prompt(prompt)
-    list_keywords = ["有哪些项目", "工作目录", "本地工作", "workspace", "项目列表"]
+    list_keywords = [
+        "有哪些项目", "项目列表", "列出项目", "列一下项目", "查看项目目录",
+        "list projects", "list project",
+    ]
     change_keywords = ["修改", "修复", "创建", "提交", "push", "pr", "实现", "开发"]
     return _contains_any(normalized, list_keywords) and not _contains_any(normalized, change_keywords)
 

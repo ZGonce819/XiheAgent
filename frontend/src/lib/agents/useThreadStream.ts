@@ -59,6 +59,8 @@ interface ThreadMetaPayload {
   conversationVersions?: AgentThread["conversationVersions"]
   localWorkDir?: string | null
   localWorkDirFull?: string | null
+  backendType?: string
+  projectName?: string | null
 }
 
 interface TextDeltaPayload {
@@ -345,6 +347,8 @@ function applyThreadMeta(
       data.conversationVersions ?? thread.conversationVersions,
     localWorkDir: data.localWorkDir ?? thread.localWorkDir,
     localWorkDirFull: data.localWorkDirFull ?? thread.localWorkDirFull,
+    backendType: data.backendType ?? thread.backendType,
+    projectName: data.projectName ?? thread.projectName,
   }
 }
 
@@ -858,9 +862,12 @@ export function handleStreamPart(
   }
 
   if (event === "error") {
+    const errorMessage =
+      typeof data.message === "string" ? data.message : ""
     updateThread(threadId, queryClient, (thread) => ({
       ...thread,
       status: "error",
+      runError: errorMessage || thread.runError,
     }))
   }
 }

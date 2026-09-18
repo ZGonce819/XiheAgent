@@ -17,6 +17,7 @@ import { agentsApi } from "@/lib/agents/api";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { CommandApprovalDialog } from "@/components/agents/CommandApprovalDialog";
 import { useDecideCommandApproval, useExplainCommandApproval } from "@/lib/agents/queries";
+import { cn } from "@/lib/utils";
 
 interface AgentThreadViewProps {
   user: SessionUser;
@@ -385,7 +386,10 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   return (
     <AgentsShell user={user} activeThreadId={thread.id}>
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex min-h-14 shrink-0 items-center justify-between border-b border-[var(--ui-border)] px-6 py-2 max-md:pl-14">
+        <header className={cn(
+          "flex min-h-14 shrink-0 items-center justify-between border-b border-[var(--ui-border)] px-6 py-2 max-md:pl-14",
+          newThreadHandoff && "new-thread-header-reveal"
+        )}>
           <div className="min-w-0 flex-1">
             {editingTitle ? (
               <input
@@ -467,7 +471,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
                 <div className="mx-auto w-full min-w-0 max-w-4xl">
                   {runFailed ? (
                     <p className="mb-3 text-sm text-[color:var(--ui-danger)]">
-                      运行失败。请查看后端控制台日志。
+                      {thread.runError || "运行失败。请查看后端控制台日志。"}
                     </p>
                   ) : null}
                   {sendError ? (
@@ -531,7 +535,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
               <p className="text-sm text-[var(--ui-text-dim)]">当前线程还没有消息。</p>
               {runFailed ? (
                 <p className="text-sm text-[color:var(--ui-danger)]">
-                  运行失败。请查看后端控制台日志。
+                  {thread.runError || "运行失败。请查看后端控制台日志。"}
                 </p>
               ) : null}
               {sendError ? (

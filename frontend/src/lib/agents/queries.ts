@@ -17,6 +17,11 @@ export const agentThreadKeys = {
   detail: (threadId: string) => ["agent-threads", threadId] as const,
 }
 
+// A stream can finish while a delete request is in flight and invalidate the
+// list with an older server response. Keep a short-lived client tombstone so
+// those late responses cannot make a deleted thread flash back into the UI.
+const deletedThreadIds = new Set<string>()
+
 export const agentScheduleKeys = {
   all: ["agent-schedules"] as const,
 }
@@ -35,7 +40,10 @@ function invalidateThreadList(queryClient: ReturnType<typeof useQueryClient>) {
 export function useAgentThreads() {
   return useQuery({
     queryKey: agentThreadKeys.all,
-    queryFn: () => agentsApi.listThreads(),
+    queryFn: async () => {
+      const threads = await agentsApi.listThreads()
+      return threads.filter((thread) => !deletedThreadIds.has(thread.id))
+    },
   })
 }
 
@@ -391,6 +399,30 @@ export function useDeleteAgentThread() {
 
   return useMutation({
     mutationFn: (threadId: string) => agentsApi.deleteThread(threadId),
+    onMutate: async (threadId) => {
+      deletedThreadIds.add(threadId)
+      await queryClient.cancelQueries({
+        queryKey: agentThreadKeys.all,
+        exact: true,
+      })
+      const previousThreads = queryClient.getQueryData<Array<AgentThread>>(
+        agentThreadKeys.all
+      )
+      queryClient.setQueryData<Array<AgentThread>>(
+        agentThreadKeys.all,
+        (threads) => threads?.filter((thread) => thread.id !== threadId)
+      )
+      return { previousThreads }
+    },
+    onError: (_error, threadId, context) => {
+      deletedThreadIds.delete(threadId)
+      if (context?.previousThreads) {
+        queryClient.setQueryData(
+          agentThreadKeys.all,
+          context.previousThreads
+        )
+      }
+    },
     onSuccess: (_, threadId) => {
       queryClient.removeQueries({ queryKey: agentThreadKeys.detail(threadId) })
       invalidateThreadList(queryClient)

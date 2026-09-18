@@ -224,6 +224,8 @@ export interface AgentThread {
     patch?: string
   }>
   pendingApproval?: PendingCommandApproval | null
+  /** 运行时错误消息（仅前端 SSE 接收时使用，不持久化） */
+  runError?: string
 }
 
 export interface PendingCommandApproval {
