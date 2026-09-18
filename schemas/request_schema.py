@@ -87,3 +87,48 @@ class TaskCreateRequest(BaseModel):
     repo_url: str = Field(min_length=1, description="Gitee 仓库完整 URL")
     prompt: str = Field(min_length=1, max_length=20000, description="任务描述")
     thread_id: str | None = Field(default=None, description="指定会话 ID，不传则自动生成")
+
+
+class DashboardSkillCreateRequest(BaseModel):
+    """创建技能的请求体。
+
+    支持两种方式：直接提供 ``name`` + ``description`` + ``body`` 粘贴创建；
+    或提供完整的 ``content``（含 frontmatter 的 SKILL.md 全文）由后端校验。
+
+    Attributes:
+        name: 技能标识，留空时从 ``content`` 的 frontmatter 推导。
+        description: 技能说明，留空时从 ``content`` 的 frontmatter 推导。
+        body: 技能正文（不含 frontmatter）。
+        content: 完整的 SKILL.md 文本，与 ``body`` 二选一。
+        scope: 目标作用域，``global`` / ``project_set`` / ``local``。
+        project_name: 项目集合名或项目名。
+    """
+
+    name: str | None = Field(default=None, max_length=128, description="技能标识")
+    description: str | None = Field(default=None, max_length=1024, description="技能说明")
+    body: str | None = Field(default=None, max_length=200000, description="技能正文")
+    content: str | None = Field(default=None, max_length=512000, description="完整 SKILL.md 文本")
+    scope: str = Field(default="global", description="作用域：global / project_set / local")
+    project_name: str | None = Field(default=None, max_length=256, description="项目集合名或项目名")
+
+
+class DashboardSkillUpdateRequest(BaseModel):
+    """更新技能的请求体。
+
+    未提供的字段沿用原值，正文与 frontmatter 由后端重新组装。
+
+    Attributes:
+        name: 新的技能标识。
+        description: 新的技能说明。
+        body: 新的正文。
+        content: 完整 SKILL.md 文本，提供时覆盖 name / description / body。
+        scope: 目标作用域。
+        project_name: 项目级技能所属项目名。
+    """
+
+    name: str | None = Field(default=None, max_length=128, description="技能标识")
+    description: str | None = Field(default=None, max_length=1024, description="技能说明")
+    body: str | None = Field(default=None, max_length=200000, description="技能正文")
+    content: str | None = Field(default=None, max_length=512000, description="完整 SKILL.md 文本")
+    scope: str = Field(default="global", description="作用域：global / project_set / local")
+    project_name: str | None = Field(default=None, max_length=256, description="项目集合名或项目名")

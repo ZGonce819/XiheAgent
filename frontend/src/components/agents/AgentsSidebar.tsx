@@ -12,7 +12,15 @@ import {
 import { IoLogoGithub, IoLogoSlack } from "react-icons/io5"
 import { SiLinear } from "react-icons/si"
 import { Dialog } from "@base-ui/react/dialog"
-import { useEffect, useState, useMemo, type ComponentType, type SVGProps } from "react"
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useMemo,
+  type ComponentType,
+  type SVGProps,
+} from "react"
 
 import type { SessionUser } from "@/lib/api"
 import type { AgentSource, AgentThread } from "@/lib/agents/types"
@@ -248,7 +256,10 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
 
 const MAX_VISIBLE_PER_PROJECT = 5
 
-function ProjectGroup({
+/** 项目子菜单收起过渡时长，需与 CSS 中的 height 过渡保持一致。 */
+const SIDEBAR_PROJECT_COLLAPSE_MS = 220
+
+export function ProjectGroup({
   projectName,
   threads,
   activeThreadId,
@@ -264,6 +275,57 @@ function ProjectGroup({
   const [expanded, setExpanded] = useState(false)
   const hasMore = threads.length > MAX_VISIBLE_PER_PROJECT
   const visibleThreads = expanded || !hasMore ? threads : threads.slice(0, MAX_VISIBLE_PER_PROJECT)
+
+  // 项目子菜单整体收起/展开，默认展开
+  const [collapsed, setCollapsed] = useState(false)
+  // 收起时先播放退场动画，动画结束后再卸载内容
+  const [collapseExiting, setCollapseExiting] = useState(false)
+  // 仅用户主动点开的展开才播放入场动画：
+  // 侧边栏在「新任务 / 自动化任务 / 技能接口 / 设置」等路由间切换时会重新挂载，
+  // 若入场动画无条件跟随挂载，这些跳转都会让项目下的对话导航项无故动一次。
+  const [revealOnExpand, setRevealOnExpand] = useState(false)
+  const groupContentRef = useRef<HTMLDivElement>(null)
+  const collapseTimerRef = useRef<number | null>(null)
+
+  const clearCollapseTimer = () => {
+    if (collapseTimerRef.current === null) return
+    window.clearTimeout(collapseTimerRef.current)
+    collapseTimerRef.current = null
+  }
+
+  useEffect(() => clearCollapseTimer, [])
+
+  const toggleCollapsed = () => {
+    if (collapsed) {
+      // 展开：内容挂回，并标记为「用户主动展开」以播放入场动画
+      clearCollapseTimer()
+      setCollapseExiting(false)
+      setRevealOnExpand(true)
+      setCollapsed(false)
+      return
+    }
+    // 收起：先进入退场过渡，过渡结束后再卸载，避免内容瞬间消失
+    clearCollapseTimer()
+    setRevealOnExpand(false)
+    setCollapseExiting(true)
+    setCollapsed(true)
+    collapseTimerRef.current = window.setTimeout(() => {
+      setCollapseExiting(false)
+      collapseTimerRef.current = null
+    }, SIDEBAR_PROJECT_COLLAPSE_MS)
+  }
+
+  // 收起动画：从当前高度过渡到 0，让高度变化平滑而不突兀
+  useLayoutEffect(() => {
+    if (!collapseExiting) return
+    const el = groupContentRef.current
+    if (!el) return
+    el.style.height = `${el.scrollHeight}px`
+    // 强制回流，保证起始高度被应用后再过渡到 0
+    void el.offsetHeight
+    el.style.height = "0px"
+    el.style.opacity = "0"
+  }, [collapseExiting])
 
   // 记录需要动画的线程 ID（仅在展开时新出现的线程）
   const [animatingIds, setAnimatingIds] = useState(new Set<string>())
@@ -312,8 +374,24 @@ function ProjectGroup({
     <div className="mb-3">
       {/* 固定行高：避免悬停显示 size-4 操作按钮时撑高标题行，导致上下间距跳动 */}
       <div className="group/proj flex h-6 items-center gap-1.5 px-2 text-[0.625rem] font-semibold tracking-wide text-[var(--ui-text-dim)]">
-        <FolderOpen className="size-3 shrink-0" />
-        <span className="min-w-0 flex-1 truncate">{projectName}</span>
+        {/* 点击项目名称行：收起/展开该项目的对话列表 */}
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          aria-expanded={!collapsed}
+          aria-label={collapsed ? `展开项目 ${projectName}` : `收起项目 ${projectName}`}
+          title={collapsed ? "展开项目" : "收起项目"}
+          className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-0.5 py-0.5 text-left transition-colors hover:text-[var(--ui-text-muted)]"
+        >
+          <CaretDownIcon
+            className={cn(
+              "size-2.5 shrink-0 transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)]",
+              collapsed && "-rotate-90"
+            )}
+          />
+          <FolderOpen className="size-3 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{projectName}</span>
+        </button>
         <button
           type="button"
           aria-label="重命名项目"
@@ -333,39 +411,58 @@ function ProjectGroup({
           <PlusIcon className="size-3" />
         </button>
       </div>
-      {visibleThreads.map((thread, idx) => {
-        const animate = animatingIds.has(thread.id)
-        return (
-          <ThreadRow
-            key={thread.id}
-            thread={thread}
-            isActive={thread.id === activeThreadId}
-            onNavigate={onNavigate}
-            animate={animate}
-            animateDelay={animate ? (idx - MAX_VISIBLE_PER_PROJECT) * 40 : undefined}
-            revealKey={revealKey}
-          />
-        )
-      })}
-      {hasMore && (
-        <button
-          type="button"
-          onClick={handleExpand}
-          className="group/expand mx-2 mt-0.5 flex w-[calc(100%-1rem)] items-center justify-center gap-1 rounded-md px-2 py-1 text-[0.6875rem] text-[var(--ui-text-dim)] transition-all duration-200 ease-out hover:bg-[var(--ui-sidebar-hover)] hover:text-[var(--ui-text-muted)] active:scale-[0.97]"
+      {(!collapsed || collapseExiting) && (
+        <div
+          ref={groupContentRef}
+          className={cn(
+            // 仅在用户主动展开时播放入场动画，路由切换导致的重新挂载不播
+            revealOnExpand && !collapseExiting && "sidebar-project-collapse",
+            collapseExiting && "overflow-hidden"
+          )}
+          style={
+            collapseExiting
+              ? {
+                  transition:
+                    "height 220ms cubic-bezier(0.4, 0, 1, 1), opacity 180ms ease-in",
+                }
+              : undefined
+          }
         >
-          <CaretDownIcon
-            className={cn(
-              "size-3 transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)]",
-              expanded && "rotate-180"
-            )}
-          />
-          <span
-            key={expanded ? "collapse" : "expand"}
-            className="inline-block animate-[sidebar-expand-text_200ms_ease-out]"
-          >
-            {expanded ? "收起" : `查看更多 (${threads.length - MAX_VISIBLE_PER_PROJECT})`}
-          </span>
-        </button>
+          {visibleThreads.map((thread, idx) => {
+            const animate = animatingIds.has(thread.id)
+            return (
+              <ThreadRow
+                key={thread.id}
+                thread={thread}
+                isActive={thread.id === activeThreadId}
+                onNavigate={onNavigate}
+                animate={animate}
+                animateDelay={animate ? (idx - MAX_VISIBLE_PER_PROJECT) * 40 : undefined}
+                revealKey={revealKey}
+              />
+            )
+          })}
+          {hasMore && (
+            <button
+              type="button"
+              onClick={handleExpand}
+              className="group/expand mx-2 mt-0.5 flex w-[calc(100%-1rem)] items-center justify-center gap-1 rounded-md px-2 py-1 text-[0.6875rem] text-[var(--ui-text-dim)] transition-all duration-200 ease-out hover:bg-[var(--ui-sidebar-hover)] hover:text-[var(--ui-text-muted)] active:scale-[0.97]"
+            >
+              <CaretDownIcon
+                className={cn(
+                  "size-3 transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)]",
+                  expanded && "rotate-180"
+                )}
+              />
+              <span
+                key={expanded ? "collapse" : "expand"}
+                className="inline-block animate-[sidebar-expand-text_200ms_ease-out]"
+              >
+                {expanded ? "收起" : `查看更多 (${threads.length - MAX_VISIBLE_PER_PROJECT})`}
+              </span>
+            </button>
+          )}
+        </div>
       )}
 
       {/* 重命名项目弹窗 */}

@@ -17,7 +17,7 @@
 - 🔒 **会话环境隔离** - 自动追踪会话创建环境（local/sandbox），防止跨环境继续对话
 - 📁 **本地文件夹绑定** - 项目可绑定本地文件夹作为工作根目录，Agent 直接在用户项目中工作
 - ⏰ **自动化任务编排** - 支持定时任务和周期性自动化工作流
-- 🧩 **技能系统** - 内置可复用技能（代码审查、仓库引导等），支持技能安装与扩展
+- 🧩 **四层技能系统** - 内置 / 全局 / 项目集合 / 本地四层作用域，同名逐层覆盖；支持网页上传与 Agent 自动沉淀
 - 🖥️ **现代化前端** - React + Vite + TanStack Router，响应式设计，支持深色模式
 
 ## 技术栈
@@ -46,6 +46,7 @@
 | HTTP 客户端 | Fetch API |
 | Markdown 渲染 | markdown-it + DOMPurify |
 | 构建工具 | Vite 8 |
+| 组件与测试 | base-ui + Phosphor Icons + Vitest / Testing Library |
 
 ## 快速开始
 
@@ -361,14 +362,14 @@ xihe-agent/
 │       ├── repo_mapping.py     # 仓库目录映射
 │       └── _helpers.py         # 内部辅助函数
 │
-├── agent/skills/          # 内置技能定义
+├── agent/skills/          # 内置技能（仅作模板源，不直接挂载）
 │   ├── code-review/       # 代码审查技能
 │   ├── repo-bootstrap-analysis/ # 仓库引导分析技能
 │   └── ai-coding-implementation/ # AI 编码实现技能
 │
 ├── api/                   # HTTP 接口层
 │   ├── routes.py          # 基础路由（/health）
-│   └── dashboard.py       # Dashboard 前端接口（SSE 流式输出）
+│   └── dashboard.py       # Dashboard 前端接口（含技能管理、SSE 流式输出）
 │
 ├── backends/              # Backend 实现
 │   ├── workspace.py       # 工作区操作
@@ -383,7 +384,8 @@ xihe-agent/
 │   ├── codeup_tools.py    # Codeup 工作流工具
 │   ├── web_search.py      # 网络搜索
 │   ├── fetch_url_tools.py # URL 内容抓取
-│   └── reviewer_tools.py  # 代码审查工具
+│   ├── reviewer_tools.py  # 代码审查工具
+│   └── skill_tools.py     # 技能工具（create_skill / list_skills）
 │
 ├── utils/                 # 通用工具函数
 │   ├── platform_router.py # SCM 平台检测与工具路由
@@ -436,7 +438,8 @@ xihe-agent/
 │   ├── thread_service.py  # Thread DTO 组装 + 状态映射
 │   ├── streaming_service.py # SSE 流式编排（asyncio.Queue / Redis Stream 双模式）
 │   ├── redis_stream.py      # Redis Stream 事件总线（USE_REDIS_STREAM=true 启用）
-│   ├── skill_installer.py   # 技能安装器
+│   ├── skill_registry.py    # 技能注册表（四层作用域的唯一事实来源）
+│   ├── skill_installer.py   # 技能安装器（薄封装 skill_registry）
 │   └── __init__.py        # 服务导出
 │
 ├── scripts/               # CLI 脚本
@@ -447,15 +450,19 @@ xihe-agent/
 │   ├── src/
 │   │   ├── components/    # React 组件
 │   │   │   ├── agents/    # Agent 相关组件
-│   │   │   │   ├── AgentThreadView.tsx    # 会话线程视图
+│   │   │   │   ├── AgentThreadView.tsx    # 会话线程视图（含顶部技能入口）
 │   │   │   │   ├── AgentsHome.tsx         # Agent 首页
-│   │   │   │   ├── AgentsSidebar.tsx      # Agent 侧边栏
+│   │   │   │   ├── AgentsSidebar.tsx      # Agent 侧边栏（项目分组可折叠）
 │   │   │   │   ├── RepoSelector.tsx       # 仓库选择器
 │   │   │   │   ├── ProjectSelector.tsx    # 项目选择器
 │   │   │   │   ├── CommandApprovalDialog.tsx # 命令审批面板
 │   │   │   │   └── ported/              # 移植组件
 │   │   │   │       ├── CloudPromptBar.tsx # 输入框组件
 │   │   │   │       └── MessageView.tsx    # 消息渲染组件
+│   │   │   ├── skills/    # 技能相关组件
+│   │   │   │   ├── SkillPanel.tsx         # 对话内技能面板（查看 + 上传）
+│   │   │   │   ├── SkillPanel.test.tsx    # 面板行为矩阵回归测试
+│   │   │   │   └── SkillRow.tsx           # 技能行
 │   │   │   └── ui/        # 通用 UI 组件
 │   │   │       └── select.tsx             # 下拉选择组件
 │   │   ├── lib/           # API 客户端与数据层
@@ -463,22 +470,21 @@ xihe-agent/
 │   │   │   │   ├── api.ts               # API 调用
 │   │   │   │   ├── queries.ts           # TanStack Query
 │   │   │   │   ├── types.ts             # 类型定义
+│   │   │   │   ├── threadReveal.ts      # 发送消息后的即时出现动画信号
 │   │   │   │   └── useThreadStream.ts   # SSE 流钩子
 │   │   │   ├── api.ts     # 通用 API 客户端
 │   │   │   └── utils.ts   # 前端工具函数
 │   │   ├── routes/        # TanStack Router 路由
 │   │   │   ├── automations.tsx          # 自动化任务页面
-│   │   │   ├── skills.tsx               # 技能管理页面
+│   │   │   ├── skills.tsx               # 技能管理页面（作用域概览 + 创建/上传）
 │   │   │   └── my-settings.tsx          # 个人设置页面
 │   │   └── styles/        # 样式文件
-│   │       └── agents.css               # Agent 相关样式
+│   │       └── agents.css               # Agent 相关样式与统一动画类
 │   ├── package.json       # 前端依赖
 │   └── vite.config.ts     # Vite 配置（代理到后端）
 │
-├── tests/                 # 测试文件
-│   ├── test_command_policy.py # 命令策略引擎测试
-│   ├── test_stream_approvals.py # 流式审批测试
-│   └── test_runtime_events.py # 运行时事件测试
+├── docs/                  # 补充文档
+│   └── COMMAND_APPROVAL.md # 命令审批机制说明
 │
 └── reviewer_rules/        # 代码审查规则
     └── default_review_rules.md
@@ -531,6 +537,8 @@ xihe-agent/
 
 当前端检测到会话环境与当前模式不匹配时，会显示只读提示并禁用输入，防止跨环境继续对话导致的问题。
 
+两个环境的**技能目录语义不同**：本地环境按项目分层（全局 / 项目集合 / 本地三层，见下节「技能系统」）；沙箱环境只有一个技能目录，等价于本地环境的全局层，`project_set` 与 `local` 两层在沙箱下不可用。技能面板会据此只展示「全局」工作域。
+
 ### 本地文件夹模式
 
 项目可以绑定一个本地文件夹作为工作根目录，绑定后 Agent 直接在该文件夹中工作：
@@ -540,8 +548,9 @@ xihe-agent/
 - **双根沙箱**：本地文件夹为可写区域，全局工作区（`.secrets`、运行时配置等）保持只读，无需修改 Workspace 权限模型。
 - **持久绑定**：`local_folder` 按项目名持久化到 MySQL（`project_local_folders` 表），同一项目的所有会话共享同一工作根目录。
 - **虚拟路径映射**：绑定后 `/skills/`、`/reviews/` 等虚拟路径自动映射到 `.xihe-agent/` 下的对应子目录。
+- **本地技能落点**：`.xihe-agent/skills/` 即为「本地」作用域技能的存放位置，与全局、项目集合两层共同构成技能的四层加载顺序。
 
-未绑定本地文件夹的项目继续使用传统的全局工作区模式。
+未绑定本地文件夹的项目继续使用传统的全局工作区模式，「本地」作用域技能不可用（此时可在技能接口页把技能存到全局或项目集合作用域）。沙箱环境下也没有本地文件夹，「本地」作用域同样不可用。
 
 ### 自动化任务 (`config/automation_config.py`)
 
@@ -553,19 +562,76 @@ xihe-agent/
 
 自动化配置存储在 `data/automations.json`，通过 Dashboard API 管理。
 
-### 技能系统 (`agent/skills/`)
+### 技能系统
 
-技能是可复用的 Agent 能力模块，每个技能包含：
+技能是可复用的 Agent 能力模块，每个技能是一个目录，至少包含一个 `SKILL.md`（YAML frontmatter + 正文说明），可附带脚本、参考资料等附属文件。
 
-- `SKILL.md`: 技能描述和使用说明
-- 可选的工具集和提示词模板
+#### 四层作用域
 
-内置技能：
-- **code-review**: 代码审查，自动检测代码质量问题
-- **repo-bootstrap-analysis**: 仓库引导分析，帮助理解项目结构
-- **ai-coding-implementation**: AI 编码实现，辅助代码生成
+技能按「越贴近具体工作的层优先级越高」组织，**同名时后写的层覆盖先写的层**：
 
-技能安装器 (`services/skill_installer.py`) 支持从外部源安装新技能。
+| 作用域 | 物理落点 | 虚拟路径 | 可写性 |
+|--------|----------|----------|--------|
+| `builtin` | `agent/skills/` | 不挂载 | 仅开发者，只作模板源 |
+| `global` | `<全局技能目录>/`（`Settings.skills_dir`，默认 `E:/ai_workspace/skills`） | `/skills-global/` | 网页 + Agent |
+| `project_set` | `<全局技能目录>/.project-set/<project-set-name>/` | `/skills-set/` | 网页 + Agent |
+| `local` | `<项目本地文件夹>/.xihe-agent/skills/` | `/skills/` | 网页 + Agent |
+
+其中 `<project-set-name>` 是当前项目的项目集合名（即对话里选定的项目名）。以项目名 `Xihe`、全局技能目录 `E:/ai_workspace/skills` 为例：
+
+```
+E:/ai_workspace/skills/                          ← global
+E:/ai_workspace/skills/.project-set/Xihe/        ← project_set（项目名 Xihe）
+E:/my_project/Xihe/.xihe-agent/skills/           ← local（项目文件夹已绑定到 E:/my_project/Xihe）
+```
+
+> **项目集合（`project_set`）与本地（`local`）是两个不同的层。** 项目集合落在全局技能目录的 `.project-set` 子目录下，因此**不要求项目绑定本地文件夹**；本地层才要求绑定。
+
+**沙箱环境（`USE_SANDBOX=true`）下只有全局层。** 沙箱容器内不存在项目本地文件夹，容器初始化时也只把全局技能目录上传到 `/workspace/skills`；`server._resolve_skill_sources` 在 `backend_type == "sandbox"` 时直接跳过项目反查。因此沙箱会话的技能源恒为 `['/skills-global/']`、可写工作域恒为 `['global']`，行为与本地环境「未指定项目」完全一致 —— 即便这次对话在界面上选了项目，`project_set` / `local` 两层也不会加载。
+
+设计要点：
+
+- **项目集合目录名保留用户输入的原始大小写**（`Xihe` 就是 `Xihe`，不会被折成小写）。注意这与**技能名**不同 —— 技能名受 Agent Skills 规范约束，必须是小写字母/数字/连字符。
+- **`local` 是按项目名反查绑定文件夹定位的**，接口不接受直接传路径；绑定关系通过 `POST /dashboard/api/workspace/projects/bind-folder` 建立，并持久化在 MySQL 的 `project_local_folders` 表。
+- 技能加载顺序为 `[/skills-global/, /skills-set/, /skills/]`，由 DeepAgents `SkillsMiddleware` 的 `sources` 语义保证覆盖关系，无需自行实现合并逻辑。
+
+#### 作用域选项的展示规则
+
+界面上三处下拉的可见选项并不相同，这是有意设计。分界条件是「该会话能不能加载到项目 / 本地两层」：
+
+| 位置 | 未指定项目 | 已指定项目 |
+|------|-----------|-----------|
+| 对话内技能面板 · 顶部筛选 | 只有「全局」 | 全局 / 项目 / 本地 |
+| 对话内技能面板 · 上传对话框工作域 | 只有「全局」 | 全局 / 项目（项目已绑文件夹时含本地） |
+| 技能接口页 · 新建技能作用域 | 全局 / 项目 / 本地 | 全局 / 项目 / 本地 |
+
+- 前两者由 `SkillPanel` 的 `globalOnly = !projectName || backendType === "sandbox"` 统一判定：**未指定项目**与**沙箱会话**都只给「全局」。沙箱下即便选了项目，两层技能也不会加载，列出它们是死选项。
+- 技能接口页可在页内自由切换项目，且作用域是独立的意图表达，因此始终列全；选到当前不可用的层时，由下方的归属项目 / 本地目录字段引导补齐条件。
+
+#### 两个创建入口
+
+- **网页入口**：技能接口页与对话内技能面板，支持粘贴创建与文件上传（`.md` 或 `.zip` 技能包）。
+- **Agent 入口**：`create_skill` 工具，让智能体把可复用流程沉淀为技能。技能目录本身是只读资产，`create_skill` 是唯一合法的写入通道 —— 模型不能通过 shell 或文件工具直接改技能文件。
+
+技能来源记录在技能目录下的 `.origin` 标记文件中（`builtin` / `user` / `agent`）；界面只对 `agent` 来源显示「智能体创建」徽章。
+
+#### 校验规则
+
+校验口径与 `SkillsMiddleware` 完全一致，否则会出现「接口说成功、加载器静默丢弃」的幽灵技能：
+
+- 必须有以 `---` 起始的 YAML frontmatter，且为映射；
+- `name` 非空、≤64 字符、匹配 `^[a-z0-9]+(?:-[a-z0-9]+)*$`；
+- `description` 非空、≤1024 字符；
+- 单文件 ≤512KB，整包 ≤8MB / 200 个文件；
+- ZIP 上传拒绝路径穿越（`..`、绝对路径、盘符）。
+
+内置技能（`agent/skills/`，仅作模板源）：
+
+- **code-review**：代码审查，检测代码质量问题并记录结构化 finding
+- **repo-bootstrap-analysis**：仓库引导分析，帮助理解项目结构、启动与测试方式
+- **ai-coding-implementation**：AI 编码实现，辅助代码生成并控制实施节奏
+
+> ⚠️ 技能改动**下一次构建智能体时**才会生效（`SkillsMiddleware` 在建图时读取技能目录），当前会话内无法立即加载。
 
 ### 命令审批与安全边界
 
@@ -633,10 +699,25 @@ POST   /dashboard/api/automations/{id}/run       # 立即执行自动化任务
 ### 技能管理
 
 ```
-GET    /dashboard/api/skills                     # 获取已安装技能列表
-POST   /dashboard/api/skills/install             # 安装新技能
-DELETE /dashboard/api/skills/{name}              # 卸载技能
+GET    /dashboard/api/skills                     # 列出可见技能 + 三层作用域配置 + 当前可写作用域
+GET    /dashboard/api/skills/{skill_id}          # 读取技能详情（含 SKILL.md 全文）
+POST   /dashboard/api/skills                     # 创建技能（JSON：name/description/body/scope/project_name）
+PUT    /dashboard/api/skills/{skill_id}          # 更新技能
+DELETE /dashboard/api/skills/{skill_id}          # 删除技能及其附属文件
+POST   /dashboard/api/skills/upload              # 上传技能（.md 或 .zip，支持附属文件与覆盖）
 ```
+
+**作用域参数**（`scope`，创建/更新/删除时必填）：
+
+| 值 | 说明 | 是否要求 `project_name` |
+|----|------|------------------------|
+| `global` | 全局技能 | 否 |
+| `project_set` | 项目集合技能 | 是 |
+| `local` | 项目文件夹内的技能 | 是，且该项目须已绑定本地文件夹 |
+
+> 旧参数值 `project` 会自动折叠为 `local`，保持向后兼容。
+
+`GET /dashboard/api/skills` 返回的 `scopes` 始终包含三项（未指定项目时后两项标 `available: false`），`writableScopes` 则按当前项目实际可写性动态给出。
 
 ### 工作目录管理
 
@@ -683,21 +764,38 @@ DELETE /dashboard/api/workspace/projects/{project_name}/unbind-folder  # 解除�
 
 ## 开发命令
 
-```bash
-# 代码格式化
-black xihe-agent/
-isort xihe-agent/
+### 后端
 
-# 代码检查
-ruff check xihe-agent/
-ruff check --fix xihe-agent/
+```bash
+# 代码检查（ruff 配置见 pyproject.toml，line-length=100）
+ruff check .
+ruff check --fix .
+
+# 代码格式化
+ruff format .
 
 # 类型检查
-mypy xihe-agent/
-
-# 运行测试
-pytest tests/ -v
+mypy .
 ```
+
+### 前端
+
+```bash
+cd frontend
+
+npm run dev            # 启动开发服务器（端口 3000）
+npm run build          # 生产构建
+npx tsc --noEmit       # 类型检查
+npx vitest run         # 运行全部单元测试（watch 模式用 npx vitest）
+```
+
+### 测试约定
+
+前端测试使用 Vitest + Testing Library，测试文件与被测组件同目录（`*.test.tsx`）。
+
+> ⚠️ **`src/routes/` 下不要放测试文件**：TanStack Router 会把该目录下每个文件当作路由，测试文件会触发 `does not export a Route` 警告。组件应抽到 `src/components/` 后再测试。
+>
+> `Dialog.Portal` 会把内容渲染到 `document.body`，不在 `render()` 返回的 `container` 里 —— 断言门户内容需用 `document.querySelector`。
 
 ## 日志
 

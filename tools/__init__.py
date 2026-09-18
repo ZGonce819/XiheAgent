@@ -48,18 +48,23 @@ from .reviewer_tools import (
     validate_review_finding_location,
 )
 
+# 技能工具：让智能体通过受控通道沉淀可复用流程，而不是直接改技能目录。
+from .skill_tools import create_skill, list_skills
+
 # 联网搜索工具：用于在本地上下文不足时补充外部公开资料。
 from .web_search import web_search
 
 # 明确声明对外工具列表，避免调用方依赖模块内的临时变量或辅助函数。
 __all__ = [
     "add_review_finding",
+    "create_skill",
     "fetch_url",
     "get_codeup_merge_request_context",
     "get_gitee_pull_request_context",
     "get_github_pull_request_context",
     "get_review_diff_summary",
     "list_review_findings",
+    "list_skills",
     "load_default_review_rules",
     "open_codeup_merge_request",
     "open_gitee_pull_request",

@@ -268,18 +268,56 @@ export interface Repository {
   private: boolean
 }
 
+export type SkillScope = "global" | "project_set" | "local"
+export type SkillOrigin = "builtin" | "user" | "agent"
+
 export interface AgentSkill {
   id: string
   name: string
   description: string
   virtualPath: string
   updatedAt: string
+  scope: SkillScope
+  scopeLabel: string
+  projectName: string | null
+  origin: SkillOrigin
+  extraFiles: Array<string>
+  sourcePath: string
+}
+
+export interface SkillScopeInfo {
+  scope: SkillScope
+  label: string
+  description: string
+  projectName: string | null
+  directory: string | null
+  available: boolean
 }
 
 export interface SkillsPayload {
   items: Array<AgentSkill>
+  scopes: Array<SkillScopeInfo>
+  writableScopes: Array<SkillScope>
   virtualRoot: string
   available: boolean
+}
+
+export interface SkillDetail extends AgentSkill {
+  content: string
+}
+
+export interface SkillCreateBody {
+  name?: string
+  description?: string
+  body?: string
+  content?: string
+  scope?: SkillScope
+  project_name?: string | null
+}
+
+export interface SkillUploadResult {
+  created: Array<AgentSkill>
+  failed: Array<{ path: string; reason: string }>
 }
 
 export interface Installation {
@@ -320,7 +358,77 @@ export const api = {
   saveProfile: (body: ProfileUpdate) =>
     request<Profile>("/profile", { method: "PUT", body: JSON.stringify(body) }),
   repos: () => request<ReposPayload>("/repos"),
-  skills: () => request<SkillsPayload>("/skills"),
+  skills: (projectName?: string | null) =>
+    request<SkillsPayload>(
+      `/skills${projectName ? `?project_name=${encodeURIComponent(projectName)}` : ""}`
+    ),
+  skillDetail: (skillId: string, scope: string, projectName?: string | null) => {
+    const params = new URLSearchParams({ scope })
+    if (projectName) params.set("project_name", projectName)
+    return request<SkillDetail>(
+      `/skills/${encodeURIComponent(skillId)}?${params.toString()}`
+    )
+  },
+  createSkill: (body: SkillCreateBody) =>
+    request<AgentSkill>("/skills", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  updateSkill: (skillId: string, body: SkillCreateBody) =>
+    request<AgentSkill>(`/skills/${encodeURIComponent(skillId)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteSkill: (
+    skillId: string,
+    scope: string,
+    projectName?: string | null
+  ) => {
+    const params = new URLSearchParams({ scope })
+    if (projectName) params.set("project_name", projectName)
+    return request<void>(
+      `/skills/${encodeURIComponent(skillId)}?${params.toString()}`,
+      { method: "DELETE" }
+    )
+  },
+  uploadSkill: async (
+    file: File,
+    options: {
+      scope?: SkillScope
+      projectName?: string | null
+      name?: string
+      overwrite?: boolean
+    } = {}
+  ): Promise<SkillUploadResult> => {
+    const form = new FormData()
+    form.append("file", file)
+    form.append("scope", options.scope ?? "global")
+    if (options.projectName) form.append("project_name", options.projectName)
+    if (options.name) form.append("name", options.name)
+    form.append("overwrite", String(options.overwrite ?? false))
+
+    const res = await fetch(`${API_BASE}/dashboard/api/skills/upload`, {
+      method: "POST",
+      credentials: "include",
+      body: form,
+    })
+    if (!res.ok) {
+      let message = res.statusText
+      try {
+        const payload = await res.json()
+        if (payload?.detail) {
+          message =
+            typeof payload.detail === "string"
+              ? payload.detail
+              : JSON.stringify(payload.detail)
+        }
+      } catch {
+        /* ignore */
+      }
+      throw new ApiError(res.status, message)
+    }
+    return (await res.json()) as SkillUploadResult
+  },
   listReviewStyles: () => request<Array<ReviewStyle>>("/review-styles"),
   createReviewStyle: (full_name: string) =>
     request<ReviewStyle>("/review-styles", {

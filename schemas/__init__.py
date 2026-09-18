@@ -4,7 +4,12 @@
 """
 
 from schemas.options_schema import ModelOption, OptionsResponse
-from schemas.request_schema import DashboardThreadMessageRequest, TaskCreateRequest
+from schemas.request_schema import (
+    DashboardSkillCreateRequest,
+    DashboardSkillUpdateRequest,
+    DashboardThreadMessageRequest,
+    TaskCreateRequest,
+)
 from schemas.thread_schema import (
     MessageChunk,
     MessageResponse,
@@ -15,6 +20,8 @@ from schemas.thread_schema import (
 from schemas.user_schema import UserInfoResponse
 
 __all__ = [
+    "DashboardSkillCreateRequest",
+    "DashboardSkillUpdateRequest",
     "DashboardThreadMessageRequest",
     "MessageChunk",
     "MessageResponse",

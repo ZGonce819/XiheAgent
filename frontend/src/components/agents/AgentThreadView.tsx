@@ -17,6 +17,8 @@ import { agentsApi } from "@/lib/agents/api";
 import { markThreadReveal } from "@/lib/agents/threadReveal";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { CommandApprovalDialog } from "@/components/agents/CommandApprovalDialog";
+import { SkillPanel } from "@/components/skills/SkillPanel";
+import { LightningIcon } from "@phosphor-icons/react";
 import { useDecideCommandApproval, useExplainCommandApproval } from "@/lib/agents/queries";
 import { cn } from "@/lib/utils";
 
@@ -136,6 +138,7 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   const headerRef = useRef<HTMLElement>(null);
   const [editingTitle, setEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
+  const [skillPanelOpen, setSkillPanelOpen] = useState(false);
   const updateTitle = useUpdateAgentThreadTitle(thread.id);
   const [newThreadHandoff, setNewThreadHandoff] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -471,7 +474,19 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
               </p>
             ) : <p className="text-[0.6875rem] text-[color:var(--ui-text-dim)]">未指定仓库</p>}
           </div>
-          <span className="shrink-0 rounded-full bg-[var(--ui-accent-bubble)] px-2.5 py-1 text-[0.6875rem] text-[color:var(--ui-text-muted)]">{thread.status === "running" ? "运行中" : thread.status === "interrupted" ? "等待审批" : thread.status === "error" ? "失败" : "已完成"}</span>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              className="flex items-center gap-1.5 rounded-full bg-[var(--ui-accent-bubble)] px-2.5 py-1 text-[0.6875rem] text-[color:var(--ui-text-muted)] transition-colors hover:text-[color:var(--ui-text)]"
+              aria-label="查看技能"
+              title="查看与上传技能"
+              onClick={() => setSkillPanelOpen(true)}
+            >
+              <LightningIcon className="size-3.5" />
+              技能
+            </button>
+            <span className="shrink-0 rounded-full bg-[var(--ui-accent-bubble)] px-2.5 py-1 text-[0.6875rem] text-[color:var(--ui-text-muted)]">{thread.status === "running" ? "运行中" : thread.status === "interrupted" ? "等待审批" : thread.status === "error" ? "失败" : "已完成"}</span>
+          </div>
         </header>
         <div className="flex min-h-0 flex-1 flex-col">
           {hasMessages ? (
@@ -626,6 +641,12 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
           if (!open) setRepoWarning(false);
         }}
         onConfirm={() => setRepoWarning(false)}
+      />
+      <SkillPanel
+        open={skillPanelOpen}
+        projectName={thread.projectName ?? null}
+        backendType={thread.backendType}
+        onOpenChange={setSkillPanelOpen}
       />
     </AgentsShell>
   );

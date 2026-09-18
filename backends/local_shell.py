@@ -72,17 +72,27 @@ _DEFAULT_WORKSPACE_ROOT = Path(
 # 这里定义所有虚拟路径的映射关系。
 VIRTUAL_PROJECTS = "/projects"
 VIRTUAL_SKILLS = "/skills"
+# 全局技能目录的专用虚拟路径。本地区「本地文件夹模式」下 /skills 指向项目内的
+# .xihe-agent/skills，全局技能需要一个独立路径才能同时挂载，让项目层与全局层
+# 并存并按顺序覆盖。
+VIRTUAL_GLOBAL_SKILLS = "/skills-global"
+# 项目集合技能目录的虚拟路径。项目集合存放在全局技能目录下的 .project-set
+# 容器里，与全局技能目录同级但需要在模型视角区分开，故单列一个前缀。
+VIRTUAL_PROJECT_SET_SKILLS = "/skills-set"
 VIRTUAL_POLICIES = "/policies"
 VIRTUAL_REVIEWS = "/reviews"
 VIRTUAL_RUNTIMES = "/runtimes"
 VIRTUAL_TMP = "/tmp"
 VIRTUAL_LOGS = "/logs"
 
+# 项目集合在全局技能目录下的容器目录名，与 services.skill_registry 保持一致。
+PROJECT_SET_DIR_NAME = ".project-set"
+
 # 匹配命令中的 Windows 绝对路径（如 D:\xxx）
 _DRIVE_PATH_RE = re.compile(r"(?<![A-Za-z0-9])([A-Za-z]:[\\/][^\s\"';&|<>]*)")
 # 匹配命令中的虚拟路径（如 /projects/my-repo），用于自动转换为真实路径
 _VIRTUAL_PATH_RE = re.compile(
-    r"(?<![A-Za-z0-9])/(projects|skills|policies|reviews|runtimes|tmp|logs)(/[^\s\"';&|<>]*)?"
+    r"(?<![A-Za-z0-9])/(skills-global|skills-set|projects|skills|policies|reviews|runtimes|tmp|logs)(/[^\s\"';&|<>]*)?"
 )
 _RELATIVE_PROJECTS_PATH_RE = re.compile(
     r"(?<![A-Za-z0-9_./\\-])projects[\\/](?=[^\s\"';&|<>]+)"
@@ -203,6 +213,12 @@ class LocalShellBackend(BaseSandbox):
             self.agent_dir: Path | None = self.root / ".xihe-agent"
             self.projects_dir = self.root
             self.skills_dir = self.agent_dir / "skills"
+            # 全局技能目录：本地文件夹模式下 /skills 被项目目录占用，全局技能
+            # 通过 /skills-global 暴露，使两层技能可以同时挂载。
+            self.global_skills_dir = self.global_workspace_root / "skills"
+            # 项目集合：全局技能目录下的 .project-set/<集合名>，通过 /skills-set
+            # 暴露，让「随项目走但不落在项目文件夹里」的技能也有归属。
+            self.project_set_skills_dir = self.global_skills_dir / PROJECT_SET_DIR_NAME
             self.reviews_dir = self.agent_dir / "reviews"
             self.policies_dir = self.global_workspace_root / "policies"
             self.runtimes_dir = self.global_workspace_root / "runtimes"
@@ -221,6 +237,10 @@ class LocalShellBackend(BaseSandbox):
                 "LOCAL_SHELL_PROJECTS_DIR", "projects"
             )
             self.skills_dir = self.root / "skills"
+            # 非本地文件夹模式下 /skills 本身就是全局技能目录，别无第二层。
+            self.global_skills_dir = self.skills_dir
+            # 项目集合仍挂在全局技能目录下，两种模式保持一致。
+            self.project_set_skills_dir = self.global_skills_dir / PROJECT_SET_DIR_NAME
             self.policies_dir = self.root / "policies"
             self.reviews_dir = self.root / "reviews"
             self.runtimes_dir = self.root / "runtimes"
@@ -805,6 +825,8 @@ class LocalShellBackend(BaseSandbox):
             "virtual_dirs": [
                 VIRTUAL_PROJECTS,
                 VIRTUAL_SKILLS,
+                VIRTUAL_GLOBAL_SKILLS,
+                VIRTUAL_PROJECT_SET_SKILLS,
                 VIRTUAL_POLICIES,
                 VIRTUAL_REVIEWS,
                 VIRTUAL_RUNTIMES,
@@ -826,7 +848,9 @@ class LocalShellBackend(BaseSandbox):
             "workspace.md": (
                 "# 工作区目录说明\n\n"
                 "- /projects：Gitee 项目源码目录。\n"
-                "- /skills：DeepAgents 技能目录。\n"
+                "- /skills：当前项目专属的技能目录。\n"
+                "- /skills-global：跨项目共享的全局技能目录（只读）。\n"
+                "- /skills-set：当前项目集合的技能目录（只读）。\n"
                 "- /runtimes：本机运行环境目录。\n"
                 "- /reviews：审查结果目录。\n"
                 "- /tmp：临时文件目录。\n"
@@ -974,6 +998,8 @@ class LocalShellBackend(BaseSandbox):
         roots = {
             "projects": self.root,
             "skills": self.skills_dir,
+            "skills-global": self.global_skills_dir,
+            "skills-set": self.project_set_skills_dir,
             "reviews": self.reviews_dir,
             "policies": self.policies_dir,
             "runtimes": self.runtimes_dir,
@@ -1032,15 +1058,32 @@ class LocalShellBackend(BaseSandbox):
             return self._to_virtual_path_local(resolved)
         if not self._is_under_root(resolved):
             raise PermissionError(f"path outside local workspace is denied: {path}")
+        # 非本地文件夹模式下 .project-set 就在 skills 目录内，若不先拦下来会被
+        # 报成 /skills/.project-set/...，与挂载用的 /skills-set 前缀不一致。
+        if self._is_under(resolved, self.project_set_skills_dir):
+            rel = resolved.relative_to(self.project_set_skills_dir).as_posix()
+            return f"/skills-set/{rel}" if rel else "/skills-set"
         rel = resolved.relative_to(self.root).as_posix()
         return "/" + rel if rel else "/"
 
     def _to_virtual_path_local(self, resolved: Path) -> str:
         """本地文件夹模式下把真实路径转回虚拟路径。
 
-        ``.xihe-agent`` 子目录优先映射为 ``/skills``、``/memories``、``/reviews``；
-        root 下其余路径映射为 ``/projects/...``；全局工作区路径按其相对全局根的
-        形式返回（如 ``/policies/...``）。
+        匹配顺序有意设计为「项目本地技能 → 项目集合 → 全局技能 → 项目文件
+        → 全局工作区」：
+
+        * ``.xihe-agent/skills`` 映射为 ``/skills``；
+        * ``.project-set`` 映射为 ``/skills-set``；
+        * 全局技能目录映射为 ``/skills-global``；
+        * root 下其余路径映射为 ``/projects/...``；
+        * 全局工作区其余路径按其相对全局根的形式返回（如 ``/policies/...``）。
+
+        顺序不能随意调整，两处都是「子目录必须先于父目录」：
+
+        * 项目本地技能先于全局技能匹配，否则当全局工作区恰好是项目文件夹的
+          父目录时，项目内技能会被误判为全局技能；
+        * 项目集合先于全局技能匹配，因为 ``.project-set`` 就在全局技能目录
+          内部，否则集合技能会被误判为全局技能。
 
         Args:
             resolved: 已解析的真实路径。
@@ -1051,13 +1094,18 @@ class LocalShellBackend(BaseSandbox):
         Raises:
             PermissionError: 路径既不在 root 也不在全局工作区内。
         """
-        for name, base in (
-            ("skills", self.skills_dir),
-            ("reviews", self.reviews_dir),
-        ):
-            if base is not None and self._is_under(resolved, base):
-                rel = resolved.relative_to(base).as_posix()
-                return f"/{name}/{rel}" if rel else f"/{name}"
+        if self._is_under(resolved, self.skills_dir):
+            rel = resolved.relative_to(self.skills_dir).as_posix()
+            return f"/skills/{rel}" if rel else "/skills"
+        if self._is_under(resolved, self.project_set_skills_dir):
+            rel = resolved.relative_to(self.project_set_skills_dir).as_posix()
+            return f"/skills-set/{rel}" if rel else "/skills-set"
+        if self._is_under(resolved, self.global_skills_dir):
+            rel = resolved.relative_to(self.global_skills_dir).as_posix()
+            return f"/skills-global/{rel}" if rel else "/skills-global"
+        if self._is_under(resolved, self.reviews_dir):
+            rel = resolved.relative_to(self.reviews_dir).as_posix()
+            return f"/reviews/{rel}" if rel else "/reviews"
         if self._is_under_root(resolved):
             rel = resolved.relative_to(self.root).as_posix()
             return f"/projects/{rel}" if rel else "/projects"
@@ -1137,6 +1185,10 @@ class LocalShellBackend(BaseSandbox):
         if self._is_under(path, self.policies_dir):
             return "write denied: policies are read-only"
         if self._is_under(path, self.skills_dir):
+            return "write denied: skills are read-only"
+        if self._is_under(path, self.global_skills_dir):
+            return "write denied: skills are read-only"
+        if self._is_under(path, self.project_set_skills_dir):
             return "write denied: skills are read-only"
         if self._is_under(path, self.runtimes_dir):
             return "write denied: runtimes are read-only"
@@ -1306,6 +1358,8 @@ class LocalShellBackend(BaseSandbox):
         roots = self._local_virtual_roots() if self.local_folder_mode else {
             "projects": self.projects_dir,
             "skills": self.skills_dir,
+            "skills-global": self.global_skills_dir,
+            "skills-set": self.project_set_skills_dir,
             "policies": self.policies_dir,
             "reviews": self.reviews_dir,
             "runtimes": self.runtimes_dir,

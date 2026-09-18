@@ -47,12 +47,14 @@ from config.constants import (
 from prompt import get_system_prompt
 from tools import (
     add_review_finding,
+    create_skill,
     fetch_url,
     get_codeup_merge_request_context,
     get_gitee_pull_request_context,
     get_github_pull_request_context,
     get_review_diff_summary,
     list_review_findings,
+    list_skills,
     load_default_review_rules,
     open_codeup_merge_request,
     open_gitee_pull_request,
@@ -129,7 +131,45 @@ def ensure_backend_for_thread(thread_id: str, backend_type: str | None = None) -
     return backend
 
 
-def _general_purpose_subagent(model: BaseChatModel) -> SubAgent:
+def _resolve_skill_sources(thread_id: str, backend_type: str | None) -> list[str]:
+    """按会话所属项目解析要挂载的技能源列表。
+
+    技能分四层：内置层（``PROJECT_ROOT/agent/skills``，仅作模板源不挂载）、
+    全局层（``Settings.skills_dir``）、项目集合层
+    （``<全局技能目录>/.project-set/<项目名>``）与本地层
+    （``<项目本地文件夹>/.xihe-agent/skills``）。``SkillsMiddleware`` 按传入
+    顺序加载且**后写的源覆盖先写的同名技能**，因此越贴近具体工作的层排在越
+    后面，让仓库专属约定优先于个人全局偏好。
+
+    Args:
+        thread_id: 会话唯一标识。
+        backend_type: 运行环境类型，沙箱模式不参与本地文件夹反查。
+
+    Returns:
+        虚拟路径列表，例如 ``["/skills-global/", "/skills-set/", "/skills/"]``。
+    """
+    from services.skill_registry import agent_skill_sources
+
+    project_name: str | None = None
+    if backend_type != "sandbox":
+        try:
+            # 复用运行时既有的项目反查入口，避免在 server 层重复实现 DB 访问。
+            from agent.graph.graph import get_store
+            from agent.runtime._helpers import resolve_project_local_folder
+
+            if resolve_project_local_folder(thread_id):
+                thread = get_store().get_thread(thread_id)
+                raw_name = thread.get("project_name") if thread else None
+                if isinstance(raw_name, str) and raw_name.strip():
+                    project_name = raw_name.strip()
+        except Exception:
+            logger.warning("解析会话所属项目失败：thread_id=%s", thread_id, exc_info=True)
+
+    sources = agent_skill_sources(project_name)
+    return sources or []
+
+
+def _general_purpose_subagent(model: BaseChatModel, skill_sources: list[str]) -> SubAgent:
     """构建通用分析子 Agent。
 
     子 Agent 只负责阅读、分析、总结和给主 Agent 提供建议，
@@ -137,6 +177,7 @@ def _general_purpose_subagent(model: BaseChatModel) -> SubAgent:
 
     Args:
         model: 子 Agent 使用的语言模型实例。
+        skill_sources: 要挂载的技能源虚拟路径列表，与主 Agent 保持一致。
 
     Returns:
         配置完成的通用子 Agent 字典，包含名称、描述、系统提示词、
@@ -147,11 +188,11 @@ def _general_purpose_subagent(model: BaseChatModel) -> SubAgent:
         "description": GENERAL_PURPOSE_SUBAGENT["description"],
         "system_prompt": GENERAL_PURPOSE_SUBAGENT["system_prompt"],
         "model": model,
-        "skills": ["/skills/"],
+        "skills": skill_sources,
     }
 
 
-def _code_reviewer_subagent(model: BaseChatModel) -> SubAgent:
+def _code_reviewer_subagent(model: BaseChatModel, skill_sources: list[str]) -> SubAgent:
     """构建只读代码审查子 Agent。
 
     职责：读取规则、读取 SCM PR/MR 上下文、分析 diff、记录结构化 finding，
@@ -159,6 +200,7 @@ def _code_reviewer_subagent(model: BaseChatModel) -> SubAgent:
 
     Args:
         model: 子 Agent 使用的语言模型实例。
+        skill_sources: 要挂载的技能源虚拟路径列表，与主 Agent 保持一致。
 
     Returns:
         配置完成的代码审查子 Agent 字典，包含名称、描述、系统提示词、
@@ -201,7 +243,7 @@ def _code_reviewer_subagent(model: BaseChatModel) -> SubAgent:
             add_review_finding,
             list_review_findings,
         ],
-        "skills": ["/skills/"],
+        "skills": skill_sources,
     }
 
 
@@ -351,10 +393,13 @@ def get_agent(config: RunnableConfig):
     main_model = make_main_model(configurable.get("model_id"))
     subagent_model = make_main_model(configurable.get("model_id"))
 
+    skill_sources = _resolve_skill_sources(thread_id, backend_type)
+
     logger.info(
-        "返回带 Backend 的 Agent：thread_id=%s task_kind=%s",
+        "返回带 Backend 的 Agent：thread_id=%s task_kind=%s skills=%s",
         thread_id,
         task_kind,
+        skill_sources,
     )
 
     effective_backend_type = "sandbox" if backend_type == "sandbox" else "local"
@@ -387,11 +432,13 @@ def get_agent(config: RunnableConfig):
             validate_review_finding_location,
             add_review_finding,
             list_review_findings,
+            list_skills,
+            create_skill,
         ],
         system_prompt=get_system_prompt(task_kind),
         subagents=[
-            _general_purpose_subagent(subagent_model),
-            _code_reviewer_subagent(subagent_model),
+            _general_purpose_subagent(subagent_model, skill_sources),
+            _code_reviewer_subagent(subagent_model, skill_sources),
         ],
         backend=agent_backend,
         middleware=[
@@ -407,7 +454,7 @@ def get_agent(config: RunnableConfig):
             ),
             ToolErrorMiddleware(backend=backend),
         ],
-        skills=["/skills/"],
+        skills=skill_sources,
         memory=memory_paths,
         checkpointer=get_checkpointer(),
         store=langgraph_store,
