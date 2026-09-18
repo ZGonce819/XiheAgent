@@ -26,7 +26,14 @@ const config = defineConfig({
     devtools(),
     nitro(),
     tailwindcss(),
-    tanstackStart({ spa: { enabled: true } }),
+    // 路由目录里和页面同放测试文件（跟 components/ 下的做法一致），它们不导出 Route。
+    // 不忽略的话，生成路由树时会给每个测试文件刷一条「does not export a Route」，
+    // 而那条警告的两种建议（加 "-" 前缀改名 / 配 routeFileIgnorePattern）里，改名会让
+    // 路由目录下的测试文件命名与仓库其它地方分叉，所以走配置。
+    tanstackStart({
+      spa: { enabled: true },
+      router: { routeFileIgnorePattern: "\\.(test|spec)\\.[jt]sx?$" },
+    }),
     VitePWA({
       injectRegister: false,
       registerType: "prompt",
