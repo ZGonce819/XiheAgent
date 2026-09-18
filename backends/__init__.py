@@ -27,6 +27,7 @@ def create_backend(
     backend_type: str | None = None,
     local_folder: str | None = None,
     global_workspace_root: str | None = None,
+    project_name: str | None = None,
 ) -> BaseSandbox:
     """根据配置创建对应的 Backend 实例。
 
@@ -46,6 +47,8 @@ def create_backend(
             为 ``None`` 时根据全局 ``USE_SANDBOX`` 配置决定。
         local_folder: 可选的项目本地文件夹绝对路径；非空且非沙箱时启用本地文件夹模式。
         global_workspace_root: 本地文件夹模式下使用的只读全局工作区根目录。
+        project_name: 可选的会话所属项目集合名。沙箱模式下决定把哪几层技能
+            同步进容器；本地模式不使用（本地模式的技能源在挂载时按项目名解析）。
 
     Returns:
         符合 DeepAgents ``BaseSandbox`` 协议的 backend 实例。
@@ -63,7 +66,9 @@ def create_backend(
             from backends.opensandbox import create_opensandbox_backend
 
             logger.info("backend_type=sandbox，使用 OpenSandbox 远程沙盒")
-            return create_opensandbox_backend(thread_id=thread_id)
+            return create_opensandbox_backend(
+                thread_id=thread_id, project_name=project_name
+            )
         except Exception:
             logger.exception("OpenSandbox 创建失败，回退到 LocalShellBackend")
 

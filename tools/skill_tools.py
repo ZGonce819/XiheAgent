@@ -16,11 +16,14 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from langchain_core.tools import tool
 
 from utils.context_utils import get_runtime_thread_id
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_scope(scope: str, thread_id: str | None) -> tuple[str, str | None]:
@@ -33,9 +36,14 @@ def _resolve_scope(scope: str, thread_id: str | None) -> tuple[str, str | None]:
       项目已绑定本地文件夹；未绑定时自动降级为 ``project_set``，再不行降为
       ``global``，避免工具因环境缺失而直接失败。
 
+    沙箱会话额外把 ``local`` 降级为 ``project_set``：容器里没有项目本地文件夹，
+    本地层技能即使写进主机也永远同步不进容器，写进去却加载不了比直接降级更让人
+    困惑。项目集合层落在全局技能目录下、会被同步进沙箱，是沙箱下项目专属技能
+    的正确归属。
+
     Args:
         scope: 模型传入的作用域，``global`` / ``project_set`` / ``local``。
-        thread_id: 当前会话 ID，用于反查项目。
+        thread_id: 当前会话 ID，用于反查项目与环境类型。
 
     Returns:
         ``(scope, project_name)`` 二元组。
@@ -52,21 +60,25 @@ def _resolve_scope(scope: str, thread_id: str | None) -> tuple[str, str | None]:
         return GLOBAL_SCOPE, None
 
     project_name: str | None = None
+    sandbox_session = False
     try:
         from agent.graph.graph import get_store
 
         thread = get_store().get_thread(thread_id)
-        raw = thread.get("project_name") if thread else None
-        if isinstance(raw, str) and raw.strip():
-            project_name = raw.strip()
+        if thread:
+            raw = thread.get("project_name")
+            if isinstance(raw, str) and raw.strip():
+                project_name = raw.strip()
+            sandbox_session = str(thread.get("backend_type") or "") == "sandbox"
     except Exception:
         project_name = None
 
     if not project_name:
         return GLOBAL_SCOPE, None
     if normalized == LOCAL_SCOPE:
-        if resolve_project_folder(project_name) is None:
-            # 本地层要求真实磁盘目录，缺失时退到项目集合，仍保留项目归属。
+        if sandbox_session or resolve_project_folder(project_name) is None:
+            # 沙箱下没有本地层；本地层也要求真实磁盘目录。两种情况都退到项目集合，
+            # 仍保留项目归属。
             return PROJECT_SET_SCOPE, project_name
         return LOCAL_SCOPE, project_name
     return PROJECT_SET_SCOPE, project_name
@@ -94,7 +106,8 @@ def create_skill(
             注意事项，而不是笼统的建议。
         scope: ``global`` 跨项目共享（默认）；``project_set`` 仅当前项目可见，
             存在全局目录下的项目集合里；``local`` 仅当前项目可见，存在项目
-            文件夹内，要求项目已绑定本地文件夹。越靠后的层同名时覆盖前面的层。
+            文件夹内，要求项目已绑定本地文件夹且会话不在沙箱中。越靠后的层
+            同名时覆盖前面的层。
 
     Returns:
         包含 ``created``、``skill_id``、``scope``、``virtual_path`` 与 ``message``
@@ -136,10 +149,24 @@ def create_skill(
 
     directory = scope_dir(resolved_scope, project_name) / record.id
 
+    # 沙箱会话读的是容器里的技能副本，这里主动推一次；当前会话正在执行，会被
+    # 记为延迟同步，在下一次构建智能体前补上。
+    try:
+        from services.sandbox_skill_sync import refresh_sandbox_skills
+
+        refresh_sandbox_skills(scope=resolved_scope, project_name=project_name)
+    except Exception:
+        logger.warning(
+            "技能已创建，但同步到沙箱失败：scope=%s project=%s",
+            resolved_scope,
+            project_name,
+            exc_info=True,
+        )
+
     message = f"已创建技能「{record.name}」（{record.scope} 作用域），将在下一次构建智能体时自动加载。"
     if downgraded:
         message += (
-            "当前项目未绑定本地文件夹或未指定项目，已自动保存为"
+            "当前项目未绑定本地文件夹、会话运行在沙箱中，或未指定项目，已自动保存为"
             f"{record.scope}技能。"
         )
 

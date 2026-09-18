@@ -90,6 +90,11 @@ known-first-party = [
 ]
 section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
 
+[tool.ruff.lint.per-file-ignores]
+# 测试里的假对象必须照抄真实签名（哪怕某个参数用不到），夹具也常只依赖副作用，
+# 因此对 tests/ 放开「未使用参数」这一类规则。
+"tests/**" = ["ARG001", "ARG005"]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"

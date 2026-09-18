@@ -367,16 +367,51 @@ SCOPE_LABELS_CN = {
 }
 
 
+def _refresh_sandbox_skills(scope: str, project_name: str | None) -> None:
+    """技能落盘后把最新技能集同步进活跃沙箱。
+
+    技能在主机上是唯一副本，沙箱会话读的却是容器里的拷贝，因此网页或 Agent
+    改动技能后必须主动推一次，否则沙箱里加载的仍是旧技能。会话正在执行时由
+    :mod:`services.sandbox_skill_sync` 转为延迟同步，不会打断对话。
+
+    Args:
+        scope: 发生变更的作用域。
+        project_name: 变更所属项目集合名（``global`` 时为 ``None``）。
+
+    Note:
+        同步失败只记录日志，绝不影响技能本身的写入结果——技能已经落盘成功，
+        沙箱同步属于尽力而为的副本维护。
+    """
+    try:
+        from services.sandbox_skill_sync import refresh_sandbox_skills
+
+        refresh_sandbox_skills(scope=scope, project_name=project_name)
+    except Exception:
+        logger.warning(
+            "技能已保存，但同步到沙箱失败：scope=%s project=%s",
+            scope,
+            project_name,
+            exc_info=True,
+        )
+
+
 @dashboard_router.get("/skills")
-def dashboard_skills(project_name: str | None = None) -> dict[str, Any]:
+def dashboard_skills(
+    project_name: str | None = None, backend_type: str | None = None
+) -> dict[str, Any]:
     """列出可见的 DeepAgents 技能，并标注作用域与来源。
 
     技能分四层：内置层（仅模板源）、全局层、项目集合层与本地层。返回值同时
     携带当前作用域配置信息，供前端渲染筛选与创建入口。
 
+    沙箱会话（``backend_type=sandbox``）少一层：容器里没有项目本地文件夹，
+    ``local`` 技能既加载不到也同步不进容器，因此这里把该层标为不可用、从列表
+    和可写作用域中剔除，避免出现「看得见但用不上」的死选项。
+
     Args:
         project_name: 可选的项目名，提供时会一并列出该项目的项目集合技能与
             本地技能。
+        backend_type: 可选的会话运行环境，``"sandbox"`` 时隐藏本地层。
 
     Returns:
         包含 ``items``、``scopes``、``virtualRoot`` 与 ``available`` 的字典。
@@ -391,16 +426,19 @@ def dashboard_skills(project_name: str | None = None) -> dict[str, Any]:
         writable_scopes,
     )
 
+    sandbox_session = (backend_type or "").strip().lower() == "sandbox"
+
     skill_items: list[dict[str, Any]] = []
     for record in list_skills(GLOBAL_SCOPE):
         skill_items.append(record.to_payload())
 
     has_project = bool(project_name and project_name.strip())
     project_dir = resolve_project_folder(project_name) if has_project else None
+    local_available = project_dir is not None and not sandbox_session
     if has_project:
         for record in list_skills(PROJECT_SET_SCOPE, project_name):
             skill_items.append(record.to_payload())
-        if project_dir is not None:
+        if local_available:
             for record in list_skills(LOCAL_SCOPE, project_name):
                 skill_items.append(record.to_payload())
 
@@ -435,19 +473,29 @@ def dashboard_skills(project_name: str | None = None) -> dict[str, Any]:
         {
             "scope": LOCAL_SCOPE,
             "label": "本地",
-            "description": "仅该项目可见，存放在项目文件夹内，同名时覆盖项目技能。",
+            "description": (
+                "沙箱会话没有项目本地文件夹，该层不参与加载。"
+                if sandbox_session
+                else "仅该项目可见，存放在项目文件夹内，同名时覆盖项目技能。"
+            ),
             "projectName": project_name if has_project else None,
             "directory": (
                 str(project_dir / ".xihe-agent" / "skills") if project_dir else None
             ),
-            "available": project_dir is not None,
+            "available": local_available,
         }
     )
+
+    available_scopes = [
+        scope
+        for scope in writable_scopes(project_name)
+        if not (sandbox_session and scope == LOCAL_SCOPE)
+    ]
 
     return {
         "items": skill_items,
         "scopes": scopes,
-        "writableScopes": writable_scopes(project_name),
+        "writableScopes": available_scopes,
         "virtualRoot": "/skills",
         "available": any(item["available"] for item in scopes),
     }
@@ -568,6 +616,7 @@ def dashboard_create_skill(body: DashboardSkillCreateRequest) -> dict[str, Any]:
     logger.info(
         "已创建技能：scope=%s project=%s id=%s", scope, project_name, record.id
     )
+    _refresh_sandbox_skills(scope, project_name)
     return record.to_payload()
 
 
@@ -622,6 +671,7 @@ def dashboard_update_skill(
         raise HTTPException(status_code=500, detail=f"技能更新失败：{e}")
 
     logger.info("已更新技能：scope=%s id=%s", scope, record.id)
+    _refresh_sandbox_skills(scope, project_name)
     return record.to_payload()
 
 
@@ -650,6 +700,7 @@ def dashboard_delete_skill(
         raise HTTPException(status_code=500, detail=f"技能删除失败：{e}")
     if not removed:
         raise HTTPException(status_code=404, detail=f"技能「{skill_id}」不存在")
+    _refresh_sandbox_skills(normalized, name)
 
 
 @dashboard_router.post("/skills/upload", status_code=201)
@@ -882,6 +933,7 @@ def dashboard_upload_skill(
         len(created),
         len(failed),
     )
+    _refresh_sandbox_skills(normalized, project)
     return {"created": created, "failed": failed}
 
 

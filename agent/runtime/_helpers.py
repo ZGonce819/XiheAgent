@@ -46,6 +46,30 @@ def resolve_project_local_folder(thread_id: str) -> str | None:
         return None
 
 
+def resolve_thread_project_name(thread_id: str) -> str | None:
+    """按 thread 反查其所属项目名（项目集合名）。
+
+    与 :func:`resolve_project_local_folder` 的区别：这里**不要求**项目已绑定
+    本地文件夹。项目集合层（``.project-set/<项目名>``）落在全局技能目录下，
+    不依赖磁盘绑定，因此只要 thread 记录了项目名就应该能解析出来。
+
+    Args:
+        thread_id: 会话唯一标识。
+
+    Returns:
+        项目名字符串；thread 未关联项目或查询失败时返回 ``None``。
+    """
+    try:
+        thread = get_store().get_thread(thread_id)
+    except Exception:
+        logger.warning("解析会话所属项目失败：thread_id=%s", thread_id, exc_info=True)
+        return None
+    raw_name = thread.get("project_name") if thread else None
+    if isinstance(raw_name, str) and raw_name.strip():
+        return raw_name.strip()
+    return None
+
+
 def _get_visible_messages(thread_id: str) -> list[dict[str, Any]]:
     """按 thread_id 获取 checkpoint 中的可见消息列表。
 

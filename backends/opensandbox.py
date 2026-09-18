@@ -18,6 +18,7 @@ import logging
 import os
 from collections.abc import Callable
 from datetime import timedelta
+from pathlib import PurePosixPath
 from typing import cast
 
 import httpx
@@ -50,6 +51,26 @@ PollingStrategy = Callable[[float], float]
 DEFAULT_SANDBOX_IMAGE = (
     "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:v1.0.2"
 )
+
+
+def _to_text(content: bytes | str) -> str:
+    """把待写入沙盒的内容统一转成字符串。
+
+    OpenSandbox 的文件写入接口按文本编码传输，非 UTF-8 字节无法还原时退化为
+    字节字面量，宁可写入不可读内容也不要让整批上传失败。
+
+    Args:
+        content: 待写入内容。
+
+    Returns:
+        UTF-8 文本。
+    """
+    if not isinstance(content, bytes):
+        return str(content)
+    try:
+        return content.decode("utf-8")
+    except UnicodeDecodeError:
+        return str(content)
 
 
 class OpenSandboxBackend(BaseSandbox):
@@ -303,16 +324,7 @@ class OpenSandboxBackend(BaseSandbox):
                 continue
 
             try:
-                if isinstance(content, bytes):
-                    try:
-                        content_str = content.decode("utf-8")
-                        logger.debug("已按 UTF-8 解码字节内容，长度：%d 字符", len(content_str))
-                    except UnicodeDecodeError as decode_error:
-                        logger.warning("UTF-8 解码失败，将以字符串形式存储：%s", decode_error)
-                        content_str = str(content)
-                else:
-                    content_str = str(content)
-
+                content_str = _to_text(content)
                 upload_entries.append(WriteEntry(path=path, data=content_str, mode=0o644))
                 responses.append(FileUploadResponse(path=path, error=None))
                 logger.debug("文件已加入上传队列：%s", path)
@@ -343,6 +355,49 @@ class OpenSandboxBackend(BaseSandbox):
         logger.info("文件上传完成，成功 %d 个，失败 %d 个", success_count, error_count)
 
         return responses
+
+    def sync_skills(self, files: list[tuple[str, bytes]], *, roots: list[str]) -> int:
+        """把技能同步进沙箱：先清空技能根目录，再写入最新内容。
+
+        与 :meth:`upload_files` 的关键区别是这是一次**幂等同步**而非增量追加：
+        主机上删掉的技能必须从容器里消失，否则沙箱会话会继续加载已经不存在的
+        技能。清空与建目录都走 OpenSandbox 的文件系统接口，不经过命令策略——
+        技能同步是运行时基础设施行为，不是 Agent 发起的命令，不应被审批规则
+        拦下（``rm`` 在沙箱下是需要审批的类别）。
+
+        Args:
+            files: ``(沙箱内绝对路径, 字节内容)`` 列表，可以为空。
+            roots: 需要先清空再重建的技能根目录，即使 ``files`` 为空也会建出来，
+                避免 ``SkillsMiddleware`` 对着不存在的目录刷 ``path_not_found``。
+
+        Returns:
+            实际写入的文件数。
+
+        Raises:
+            Exception: 建目录或写入失败时向上抛出，由调用方决定如何降级。
+        """
+        for root in roots:
+            try:
+                self._sandbox.files.delete_directories([root])
+            except Exception as exc:
+                # 首次同步时目录不存在属于正常情况。这里不中断：后续写入会覆盖
+                # 同名文件，最坏结果是主机上已删除的旧技能残留在容器里。
+                logger.debug("清空技能目录跳过：%s（%s）", root, exc)
+
+        directories = set(roots)
+        directories.update(str(PurePosixPath(path).parent) for path, _ in files)
+        self._sandbox.files.create_directories(
+            [WriteEntry(path=path, mode=0o755) for path in sorted(directories)]
+        )
+
+        entries = [
+            WriteEntry(path=path, data=_to_text(content), mode=0o644)
+            for path, content in files
+        ]
+        if entries:
+            self._sandbox.files.write_files(entries)
+        logger.info("技能同步写入 %d 个文件，根目录：%s", len(entries), roots)
+        return len(entries)
 
 
 # ── 沙盒管理工具函数 ────────────────────────────────────────
@@ -507,34 +562,44 @@ def _register_sandbox(thread_id: str, sandbox_id: str) -> None:
         logger.warning("沙箱注册或清理失败（不影响沙箱使用）", exc_info=True)
 
 
-def _init_sandbox_skills(backend: OpenSandboxBackend) -> None:
-    """将默认 skills 上传到沙盒。
+def sync_sandbox_skills(
+    backend: OpenSandboxBackend, project_name: str | None = None
+) -> int:
+    """把主机上的技能同步进沙箱容器。
 
-    从工作区 skills 目录读取所有已安装的 skills，在沙盒创建后自动上传
-    到 ``/workspace/skills/<skill_name>/SKILL.md``。
+    同步范围由会话所属项目决定：属于某个项目集合时同步「全局层 + 该项目集合
+    层」，否则只同步全局层。落点与 ``services.skill_registry.sandbox_skill_sources``
+    给出的挂载路径完全一致，保证「同步了什么就挂载什么」。
 
     Args:
-        backend: 刚创建的 OpenSandboxBackend 实例。
+        backend: 目标 OpenSandboxBackend 实例。
+        project_name: 会话所属项目集合名；为空时只同步全局层。
+
+    Returns:
+        实际写入沙箱的文件数。
+
+    Raises:
+        Exception: 读取技能或写入沙箱失败时向上抛出。这里刻意不吞异常——调用方
+            有的是「不能阻断沙盒使用」（构建 backend），有的是「必须让运维看得见」
+            （技能变更后的主动同步），降级策略应由调用方决定。
 
     Note:
-        - 只在沙盒首次创建时调用（由 create_opensandbox_backend 触发）。
-        - 如果工作区没有 skills，静默跳过。
-        - 上传失败仅记录警告，不阻断沙盒使用。
+        技能目录为空时也会建出技能根目录，避免加载器报 ``path_not_found``。
     """
-    try:
-        from services.skill_installer import get_default_skills
+    from services.skill_installer import get_default_skills
+    from services.skill_registry import sandbox_skill_roots
 
-        upload_files = get_default_skills()
-        if not upload_files:
-            logger.debug("工作区没有 skills，跳过沙盒初始化")
-            return
-
-        logger.info("正在向沙盒 %s 上传 %d 个 skills", backend.id, len(upload_files))
-        backend.upload_files(upload_files)
-        logger.info("沙盒 skills 初始化完成：%s", backend.id)
-
-    except Exception:
-        logger.warning("沙盒 skills 初始化失败（不影响沙箱使用）", exc_info=True)
+    upload_files = get_default_skills(project_name)
+    roots = sandbox_skill_roots(project_name)
+    written = backend.sync_skills(upload_files, roots=roots)
+    logger.info(
+        "沙盒技能同步完成：%s project=%s files=%d roots=%s",
+        backend.id,
+        project_name or "-",
+        written,
+        roots,
+    )
+    return written
 
 
 def list_running_sandboxes(config: ConnectionConfigSync) -> list:
@@ -581,6 +646,7 @@ def create_opensandbox_backend(
     thread_id: str | None = None,
     sandbox_id: str | None = None,
     image: str | None = None,
+    project_name: str | None = None,
 ) -> OpenSandboxBackend:
     """DeepAgents 工厂函数：创建 OpenSandbox backend 实例。
 
@@ -588,6 +654,7 @@ def create_opensandbox_backend(
         thread_id: 可选的会话 ID，用于沙箱复用和注册。
         sandbox_id: 可选的，直接连接的现有沙箱 ID。
         image: 可选的，创建新沙箱时使用的镜像。
+        project_name: 可选的会话所属项目集合名，决定同步哪几层技能到容器。
 
     Returns:
         OpenSandboxBackend 实例。
@@ -598,7 +665,12 @@ def create_opensandbox_backend(
     )
     backend = OpenSandboxBackend(sandbox=sandbox)
 
-    # 初始化沙盒 skills（从工作区上传）
-    _init_sandbox_skills(backend)
+    # 同步技能到容器（全局层 + 会话所属项目集合层）。同步失败不影响沙盒使用，
+    # 但绝不能把异常抛给上层——create_backend 捕获异常后会误判成「沙箱创建失败」
+    # 并静默回退到本地 Shell。
+    try:
+        sync_sandbox_skills(backend, project_name)
+    except Exception:
+        logger.warning("沙盒技能同步失败（不影响沙箱使用）", exc_info=True)
 
     return backend

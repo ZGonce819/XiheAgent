@@ -25,6 +25,10 @@
 ``local`` 作用域只在项目绑定了本地文件夹（``project_local_folders`` 表）
 时才存在，指向磁盘上该项目文件夹内的 ``.xihe-agent/skills``。
 
+沙箱会话（``backend_type == "sandbox"``）可用层数少一层：容器里没有项目本地
+文件夹，``local`` 不可用；但全局层与项目集合层都会同步进容器，落点由
+:data:`SANDBOX_SKILL_ROOT` 决定，见 :func:`sandbox_skill_sources`。
+
 历史兼容：``project`` 是 ``local`` 的旧称，:func:`normalize_scope` 会把它们
 统一折叠到 ``local``，避免旧数据与旧调用方失效。
 
@@ -84,6 +88,15 @@ ORIGIN_MARKER_NAME = ".origin"
 VIRTUAL_LOCAL_SKILLS = "/skills/"
 VIRTUAL_GLOBAL_SKILLS = "/skills-global/"
 VIRTUAL_PROJECT_SET_SKILLS = "/skills-set/"
+
+# 沙箱容器内的技能根目录。
+#
+# 沙箱 backend 不做虚拟路径映射（``OpenSandboxBackend`` 直接把路径当容器内真实
+# 路径使用），因此沙箱会话的技能源必须写成容器内真实路径。``/workspace`` 是
+# OpenSandbox 的默认工作目录，容器内布局刻意与主机保持一致：全局层直接放在
+# ``/workspace/skills``，项目集合层放在 ``/workspace/skills/.project-set/<集合名>``，
+# 这样两层的覆盖关系与目录语义和本地环境完全相同。
+SANDBOX_SKILL_ROOT = "/workspace/skills"
 
 # 与 deepagents.middleware.skills 对齐的硬约束。
 NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -575,6 +588,46 @@ def agent_skill_sources(project_name: str | None = None) -> list[str]:
     return [VIRTUAL_GLOBAL_SKILLS, VIRTUAL_PROJECT_SET_SKILLS]
 
 
+def sandbox_skill_sources(project_name: str | None = None) -> list[str]:
+    """返回沙箱会话传给 ``SkillsMiddleware`` 的技能源列表。
+
+    沙箱 backend 不做虚拟路径映射，路径即容器内真实路径，因此这里返回的是
+    :data:`SANDBOX_SKILL_ROOT` 下的绝对路径。
+
+    可用层级比本地环境少一层：沙箱容器里没有项目本地文件夹，``local`` 层不
+    存在。但只要会话属于某个项目集合，就与全局层一起挂载项目集合层——项目
+    专属技能不再因为「跑在沙箱里」而失效。
+
+    Args:
+        project_name: 当前会话所属项目集合名；为空时只挂全局层。
+
+    Returns:
+        容器内技能源路径列表，按「全局 → 项目集合」的覆盖顺序排列。
+    """
+    sources = [f"{SANDBOX_SKILL_ROOT}/"]
+    if project_name and project_name.strip():
+        sources.append(f"{sandbox_project_set_root(project_name)}/")
+    return sources
+
+
+def sandbox_project_set_root(project_name: str) -> str:
+    """返回沙箱内某个项目集合的技能根目录。
+
+    Args:
+        project_name: 项目集合名。
+
+    Returns:
+        形如 ``/workspace/skills/.project-set/Xihe`` 的容器内路径。
+
+    Raises:
+        SkillValidationError: 集合名为空时。
+    """
+    slug = sanitize_dir_name(project_name)
+    if not slug:
+        raise SkillValidationError("项目集合名不能为空")
+    return f"{SANDBOX_SKILL_ROOT}/{PROJECT_SET_DIR_NAME}/{slug}"
+
+
 # ── 列举 ────────────────────────────────────────────────────────────────────
 
 
@@ -1047,28 +1100,81 @@ def install_builtin_skills(origin: str = "builtin") -> list[str]:
     return installed
 
 
-def load_skill_documents(scope: str = GLOBAL_SCOPE, project_name: str | None = None) -> list[tuple[str, bytes]]:
-    """读取技能文件内容，供沙盒上传使用。
+def load_skill_documents(
+    scope: str = GLOBAL_SCOPE,
+    project_name: str | None = None,
+    *,
+    root: str = SANDBOX_SKILL_ROOT,
+) -> list[tuple[str, bytes]]:
+    """读取某个作用域的技能文件内容，供沙盒上传使用。
 
     Args:
         scope: 目标作用域。
         project_name: 项目集合名或项目名。
+        root: 该作用域在沙箱内的技能根目录，默认全局层根目录
+            :data:`SANDBOX_SKILL_ROOT`。
 
     Returns:
         ``(沙盒内目标路径, 字节内容)`` 列表，路径形如
-        ``/workspace/skills/<skill>/SKILL.md``，并包含附属文件。
+        ``<root>/<skill>/SKILL.md``，并包含附属文件。
     """
+    prefix = root.rstrip("/")
     uploads: list[tuple[str, bytes]] = []
     for record in list_skills(scope, project_name):
         try:
             content = (record.directory / SKILL_FILE_NAME).read_bytes()
         except OSError:
             continue
-        uploads.append((f"/workspace/skills/{record.id}/{SKILL_FILE_NAME}", content))
+        uploads.append((f"{prefix}/{record.id}/{SKILL_FILE_NAME}", content))
         for relative in record.extra_files:
             try:
                 payload = (record.directory / relative).read_bytes()
             except OSError:
                 continue
-            uploads.append((f"/workspace/skills/{record.id}/{relative}", payload))
+            uploads.append((f"{prefix}/{record.id}/{relative}", payload))
     return uploads
+
+
+def load_sandbox_skill_documents(project_name: str | None = None) -> list[tuple[str, bytes]]:
+    """组装要同步进沙箱的技能文件清单。
+
+    顺序为「全局层 → 项目集合层」，与 :func:`sandbox_skill_sources` 的挂载顺序
+    一致。``SkillsMiddleware`` 以「后写的源覆盖先写的源」处理同名技能，因此这里
+    让项目集合层排在后面，同名时覆盖全局层。
+
+    会话不属于任何项目集合时只返回全局层，与 :func:`sandbox_skill_sources` 的
+    口径完全对齐——上传什么就挂载什么，不会出现「传了没挂」或「挂了没传」的错位。
+
+    Args:
+        project_name: 当前会话所属项目集合名；为空时只同步全局层。
+
+    Returns:
+        ``(沙盒内目标路径, 字节内容)`` 列表。
+    """
+    uploads = load_skill_documents(GLOBAL_SCOPE)
+    if project_name and project_name.strip():
+        uploads += load_skill_documents(
+            PROJECT_SET_SCOPE,
+            project_name,
+            root=sandbox_project_set_root(project_name),
+        )
+    return uploads
+
+
+def sandbox_skill_roots(project_name: str | None = None) -> list[str]:
+    """返回沙箱内需要维护的技能根目录列表。
+
+    同步时先清空这些目录再写入，保证主机上删掉的技能不会残留在沙箱里。即使
+    当前一个技能都没有，也要把它们建出来，否则 ``SkillsMiddleware`` 会对着
+    不存在的目录刷 ``path_not_found`` 警告。
+
+    Args:
+        project_name: 当前会话所属项目集合名；为空时只返回全局层根目录。
+
+    Returns:
+        沙箱内目录路径列表。
+    """
+    roots = [SANDBOX_SKILL_ROOT]
+    if project_name and project_name.strip():
+        roots.append(sandbox_project_set_root(project_name))
+    return roots

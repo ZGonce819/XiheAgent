@@ -440,6 +440,7 @@ xihe-agent/
 │   ├── redis_stream.py      # Redis Stream 事件总线（USE_REDIS_STREAM=true 启用）
 │   ├── skill_registry.py    # 技能注册表（四层作用域的唯一事实来源）
 │   ├── skill_installer.py   # 技能安装器（薄封装 skill_registry）
+│   ├── sandbox_skill_sync.py # 技能变更后同步进沙箱（运行中的会话延迟同步）
 │   └── __init__.py        # 服务导出
 │
 ├── scripts/               # CLI 脚本
@@ -482,6 +483,11 @@ xihe-agent/
 │   │       └── agents.css               # Agent 相关样式与统一动画类
 │   ├── package.json       # 前端依赖
 │   └── vite.config.ts     # Vite 配置（代理到后端）
+│
+├── tests/                 # 后端 pytest 测试
+│   ├── conftest.py        # 夹具：临时技能目录 + 技能写入工厂
+│   ├── test_sandbox_skill_paths.py # 技能分层 → 沙箱落点的路径契约
+│   └── test_sandbox_skill_sync.py  # 幂等同步与刷新调度
 │
 ├── docs/                  # 补充文档
 │   └── COMMAND_APPROVAL.md # 命令审批机制说明
@@ -537,7 +543,7 @@ xihe-agent/
 
 当前端检测到会话环境与当前模式不匹配时，会显示只读提示并禁用输入，防止跨环境继续对话导致的问题。
 
-两个环境的**技能目录语义不同**：本地环境按项目分层（全局 / 项目集合 / 本地三层，见下节「技能系统」）；沙箱环境只有一个技能目录，等价于本地环境的全局层，`project_set` 与 `local` 两层在沙箱下不可用。技能面板会据此只展示「全局」工作域。
+两个环境的**技能目录语义不同**：本地环境按项目分层（全局 / 项目集合 / 本地三层，见下节「技能系统」）；沙箱环境少一层「本地」——容器里没有项目本地文件夹，全局层与项目集合层都会同步进容器。因此技能面板在两种环境下都能看到「全局」与「项目」，只有「本地」在沙箱下不可用。
 
 ### 本地文件夹模式
 
@@ -570,12 +576,12 @@ xihe-agent/
 
 技能按「越贴近具体工作的层优先级越高」组织，**同名时后写的层覆盖先写的层**：
 
-| 作用域 | 物理落点 | 虚拟路径 | 可写性 |
-|--------|----------|----------|--------|
-| `builtin` | `agent/skills/` | 不挂载 | 仅开发者，只作模板源 |
-| `global` | `<全局技能目录>/`（`Settings.skills_dir`，默认 `E:/ai_workspace/skills`） | `/skills-global/` | 网页 + Agent |
-| `project_set` | `<全局技能目录>/.project-set/<project-set-name>/` | `/skills-set/` | 网页 + Agent |
-| `local` | `<项目本地文件夹>/.xihe-agent/skills/` | `/skills/` | 网页 + Agent |
+| 作用域 | 物理落点 | 虚拟路径（本地） | 沙箱内路径 | 可写性 |
+|--------|----------|------------------|-----------|--------|
+| `builtin` | `agent/skills/` | 不挂载 | 不挂载 | 仅开发者，只作模板源 |
+| `global` | `<全局技能目录>/`（`Settings.skills_dir`，默认 `E:/ai_workspace/skills`） | `/skills-global/` | `/workspace/skills/` | 网页 + Agent |
+| `project_set` | `<全局技能目录>/.project-set/<project-set-name>/` | `/skills-set/` | `/workspace/skills/.project-set/<project-set-name>/` | 网页 + Agent |
+| `local` | `<项目本地文件夹>/.xihe-agent/skills/` | `/skills/` | 不同步 | 网页 + Agent |
 
 其中 `<project-set-name>` 是当前项目的项目集合名（即对话里选定的项目名）。以项目名 `Xihe`、全局技能目录 `E:/ai_workspace/skills` 为例：
 
@@ -587,25 +593,43 @@ E:/my_project/Xihe/.xihe-agent/skills/           ← local（项目文件夹已�
 
 > **项目集合（`project_set`）与本地（`local`）是两个不同的层。** 项目集合落在全局技能目录的 `.project-set` 子目录下，因此**不要求项目绑定本地文件夹**；本地层才要求绑定。
 
-**沙箱环境（`USE_SANDBOX=true`）下只有全局层。** 沙箱容器内不存在项目本地文件夹，容器初始化时也只把全局技能目录上传到 `/workspace/skills`；`server._resolve_skill_sources` 在 `backend_type == "sandbox"` 时直接跳过项目反查。因此沙箱会话的技能源恒为 `['/skills-global/']`、可写工作域恒为 `['global']`，行为与本地环境「未指定项目」完全一致 —— 即便这次对话在界面上选了项目，`project_set` / `local` 两层也不会加载。
+**沙箱环境（`USE_SANDBOX=true`）下只少本地层。** 容器里没有项目本地文件夹，`local` 既不加载也不同步；全局层与项目集合层都会在构建 backend 时同步进容器。落点刻意与主机目录结构保持一致，`SkillsMiddleware` 拿到的就是容器内真实路径（沙箱 backend 不做虚拟路径映射）：
+
+```
+沙箱容器内
+/workspace/skills/                               ← global
+/workspace/skills/.project-set/Xihe/             ← project_set（会话所属项目集合）
+```
+
+会话不属于任何项目集合时只同步全局层。同步口径与挂载口径由同一组函数产出（`services.skill_registry.sandbox_skill_sources` / `load_sandbox_skill_documents`），不会出现「传了没挂」或「挂了没传」。
 
 设计要点：
 
 - **项目集合目录名保留用户输入的原始大小写**（`Xihe` 就是 `Xihe`，不会被折成小写）。注意这与**技能名**不同 —— 技能名受 Agent Skills 规范约束，必须是小写字母/数字/连字符。
 - **`local` 是按项目名反查绑定文件夹定位的**，接口不接受直接传路径；绑定关系通过 `POST /dashboard/api/workspace/projects/bind-folder` 建立，并持久化在 MySQL 的 `project_local_folders` 表。
-- 技能加载顺序为 `[/skills-global/, /skills-set/, /skills/]`，由 DeepAgents `SkillsMiddleware` 的 `sources` 语义保证覆盖关系，无需自行实现合并逻辑。
+- 本地环境技能加载顺序为 `[/skills-global/, /skills-set/, /skills/]`，沙箱环境为 `[/workspace/skills/, /workspace/skills/.project-set/<项目集合名>/]`，由 DeepAgents `SkillsMiddleware` 的 `sources` 语义保证覆盖关系，无需自行实现合并逻辑。
+- **项目名不再按 backend 类型跳过反查**：项目集合层落在全局技能目录下，不依赖磁盘绑定，本地与沙箱两种环境都会挂载它。
+
+#### 技能变更后的沙箱同步
+
+技能在主机上是唯一副本，沙箱会话读的是容器里的拷贝，因此网页或 Agent 改动技能后会立即推一次（`services/sandbox_skill_sync.py`）：
+
+- **同步范围**：`global` 变更推给所有沙箱会话；`project_set` 变更只推给该项目集合下的沙箱会话；`local` 与沙箱无关，直接跳过。
+- **只在对话跑完时动容器**：会话处于 `running` / `awaiting_approval` 时正在使用容器，中途换掉技能目录会让同一轮回答前后依据不一致，此时只登记「待同步」标记，在下一次构建智能体前补上（`server._apply_pending_skill_refresh`）。
+- **幂等同步**：先清空技能根目录再写入（`OpenSandboxBackend.sync_skills`），因此主机上删掉的技能也会从容器里消失。清空与建目录走沙箱文件系统接口而非 shell，不受命令审批策略影响。
+- **缓存淘汰不需要额外处理**：不在 backend 缓存里的会话，其沙箱会在下一次构建时重新同步。
 
 #### 作用域选项的展示规则
 
 界面上三处下拉的可见选项并不相同，这是有意设计。分界条件是「该会话能不能加载到项目 / 本地两层」：
 
-| 位置 | 未指定项目 | 已指定项目 |
-|------|-----------|-----------|
-| 对话内技能面板 · 顶部筛选 | 只有「全局」 | 全局 / 项目 / 本地 |
-| 对话内技能面板 · 上传对话框工作域 | 只有「全局」 | 全局 / 项目（项目已绑文件夹时含本地） |
-| 技能接口页 · 新建技能作用域 | 全局 / 项目 / 本地 | 全局 / 项目 / 本地 |
+| 位置 | 未指定项目 | 已指定项目（本地） | 已指定项目（沙箱） |
+|------|-----------|-------------------|-------------------|
+| 对话内技能面板 · 顶部筛选 | 只有「全局」 | 全局 / 项目 / 本地 | 全局 / 项目 |
+| 对话内技能面板 · 上传对话框工作域 | 只有「全局」 | 全局 / 项目（项目已绑文件夹时含本地） | 全局 / 项目 |
+| 技能接口页 · 新建技能作用域 | 全局 / 项目 / 本地 | 全局 / 项目 / 本地 | — |
 
-- 前两者由 `SkillPanel` 的 `globalOnly = !projectName || backendType === "sandbox"` 统一判定：**未指定项目**与**沙箱会话**都只给「全局」。沙箱下即便选了项目，两层技能也不会加载，列出它们是死选项。
+- 两个下拉判定的是不同问题：**顶部筛选**是「这个会话所在环境有哪些技能层」，由 `SkillPanel` 按项目名与 `backendType` 判定；**上传工作域**是「这个会话能写到哪」，以后端 `GET /dashboard/api/skills` 的 `writableScopes` 为准——面板会把当前会话的 `backendType` 一并传给接口，后端据此把沙箱下的「本地」剔除。
 - 技能接口页可在页内自由切换项目，且作用域是独立的意图表达，因此始终列全；选到当前不可用的层时，由下方的归属项目 / 本地目录字段引导补齐条件。
 
 #### 两个创建入口
@@ -631,7 +655,7 @@ E:/my_project/Xihe/.xihe-agent/skills/           ← local（项目文件夹已�
 - **repo-bootstrap-analysis**：仓库引导分析，帮助理解项目结构、启动与测试方式
 - **ai-coding-implementation**：AI 编码实现，辅助代码生成并控制实施节奏
 
-> ⚠️ 技能改动**下一次构建智能体时**才会生效（`SkillsMiddleware` 在建图时读取技能目录），当前会话内无法立即加载。
+> ⚠️ 技能改动**下一次构建智能体时**才会生效（`SkillsMiddleware` 在建图时读取技能目录），当前会话内无法立即加载。沙箱会话下一次构建时会重新同步技能到容器，因此上传完技能后发下一条消息即可看到。
 
 ### 命令审批与安全边界
 
@@ -776,6 +800,13 @@ ruff format .
 
 # 类型检查
 mypy .
+
+# 分层依赖契约（utils 禁止反向依赖上层业务包）
+lint-imports
+
+# 单元测试
+pytest                 # 收集 tests/ 下的全部用例
+pytest tests/test_sandbox_skill_sync.py -q
 ```
 
 ### 前端
@@ -790,6 +821,11 @@ npx vitest run         # 运行全部单元测试（watch 模式用 npx vitest�
 ```
 
 ### 测试约定
+
+后端测试使用 pytest，统一放在仓库根的 `tests/`（`pyproject.toml` 里 `testpaths = ["tests"]`）。
+
+- `tests/conftest.py` 会把 `Settings.skills_dir` 指向临时目录，用例不会读写开发机上真实的技能目录；新增涉及技能落盘的测试请复用 `skills_root` / `make_skill` 夹具。
+- 沙箱相关测试不需要真实容器：`OpenSandboxBackend` 只用到底层沙箱的 `id` 与 `files` 两个接口，用记录调用的假对象即可覆盖同步行为（见 `tests/test_sandbox_skill_sync.py`）。
 
 前端测试使用 Vitest + Testing Library，测试文件与被测组件同目录（`*.test.tsx`）。
 

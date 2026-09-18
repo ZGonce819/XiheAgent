@@ -37,21 +37,21 @@ const SCOPE_OPTIONS: Record<SkillScope, string> = {
 }
 
 /**
- * 筛选下拉里可选的工作域。
+ * 筛选下拉里可选的工作域上限，按覆盖优先级排序。
  *
- * 但这是**上限**，实际列表还要按上下文收缩（见组件内的 `filterScopes`）：
- * 会话没有指定本地工作目录时，列表里只可能来自全局层，把「项目」「本地」
- * 摆在筛选里会让用户以为有得选。
+ * 实际列表由组件内的 `filterScopes` 按会话环境收缩：没指定项目时只有全局层，
+ * 沙箱会话还会少一层「本地」。把当前环境里根本不存在的层摆在筛选里，会让用户
+ * 以为有得选，点了却永远是空结果。
  */
-const FILTER_SCOPES = ["global", "project_set", "local"] as const
+const ALL_SCOPE_ORDER = ["global", "project_set", "local"] as const
 
 interface SkillPanelProps {
   open: boolean
   /** 当前会话所属项目名，决定「项目」「本地」两个工作域是否可用。 */
   projectName: string | null
   /**
-   * 当前会话的运行环境。沙箱环境下技能目录就是全局目录，不随项目绑定而分层，
-   * 因此要与「没指定项目」走同一条分支。
+   * 当前会话的运行环境。沙箱下技能同样按项目分层（全局 + 项目集合会一起同步
+   * 进容器），只少「本地」一层——容器里没有项目本地文件夹。
    */
   backendType?: string
   onOpenChange: (open: boolean) => void
@@ -73,16 +73,21 @@ export function SkillPanel({
   /**
    * 当前会话是否只能看到全局技能。
    *
-   * 两种情况等价：没有项目名；或者项目跑在沙箱里——沙箱容器内只有一个技能
-   * 目录（对应全局层），`_resolve_skill_sources` 在 `backend_type == "sandbox"`
-   * 时也不会反查项目，所以「项目」「本地」两层在沙箱下根本不会加载。
+   * 只有一种情况：会话没有指定项目。沙箱会话不再并入这个分支——项目集合层
+   * 落在全局技能目录下，不依赖项目绑定本地文件夹，沙箱里同样会同步加载。
    */
-  const globalOnly = !projectName || backendType === "sandbox"
+  const globalOnly = !projectName
+
+  /**
+   * 当前会话是否运行在沙箱里。沙箱只少「本地」一层：容器里没有项目本地文件夹，
+   * 该层既不加载也不同步。
+   */
+  const sandboxSession = backendType === "sandbox"
 
   const queryClient = useQueryClient()
   const skills = useQuery({
-    queryKey: ["skills", projectName ?? "*"],
-    queryFn: () => api.skills(projectName),
+    queryKey: ["skills", projectName ?? "*", backendType ?? "*"],
+    queryFn: () => api.skills(projectName, backendType),
     enabled: open,
   })
 
@@ -108,21 +113,27 @@ export function SkillPanel({
   /**
    * 筛选下拉里实际可选的项。
    *
-   * 未指定本地工作目录（或会话跑在沙箱里）时后端只会返回全局技能，列表里不
-   * 存在「项目」「本地」，筛选里也就只留「全局」——多列的选项点了永远是空
-   * 结果，是死选项。其余情况恢复成完整三项。
+   * 判定的是「这个会话所在环境有哪些技能层」，与项目是否绑定文件夹无关：
+   * 筛选是「看什么」，本地技能可能来自该项目的文件夹，只是本会话看不到，所以
+   * 选了项目的本地会话一律给全三项；沙箱环境连目录都没有，直接不给「本地」。
    */
-  const filterScopes: readonly SkillScope[] = globalOnly ? ["global"] : FILTER_SCOPES
+  const filterScopes: readonly SkillScope[] = globalOnly
+    ? ["global"]
+    : sandboxSession
+      ? ["global", "project_set"]
+      : ALL_SCOPE_ORDER
 
   /**
    * 上传对话框里可选的工作域。
    *
-   * 与筛选下拉**同源**，都由上面 `globalOnly` 这一个条件决定：只能看到全局
-   * 时只给「全局」，否则跟随后端 `writableScopes`。前端不叠加额外判断，否则
-   * 两处条件稍有不一致就会出现「明明选了项目却只给全局」。
+   * 判定的是「这个会话能写到哪」，因此以后端 `writableScopes` 为准（后端已经
+   * 按项目绑定情况与运行环境过滤过，沙箱下不含「本地」）。前端只补一个条件：
+   * 没指定项目时只有全局层可写。
    */
   const writableScopes = skills.data?.writableScopes ?? ["global"]
-  const uploadScopes = globalOnly ? (["global"] as SkillScope[]) : writableScopes
+  const uploadScopes = globalOnly
+    ? (["global"] as SkillScope[])
+    : writableScopes
 
   return (
     <>
@@ -137,7 +148,7 @@ export function SkillPanel({
                 </Dialog.Title>
                 <Dialog.Description className="mt-1 text-xs text-muted-foreground">
                   {globalOnly
-                    ? "当前会话未指定本地工作目录，仅展示全局技能。"
+                    ? "当前会话未指定项目，仅展示全局技能。"
                     : `当前项目「${projectName}」可加载的技能，可在此直接上传。`}
                 </Dialog.Description>
               </div>
@@ -162,7 +173,9 @@ export function SkillPanel({
               </div>
               <Select
                 value={scopeFilter}
-                onValueChange={(next) => setScopeFilter(next as "all" | SkillScope)}
+                onValueChange={(next) =>
+                  setScopeFilter(next as "all" | SkillScope)
+                }
               >
                 <SelectTrigger size="sm" className="w-[5.5rem] bg-background">
                   <span className="flex flex-1 text-left">
@@ -201,14 +214,18 @@ export function SkillPanel({
                 </p>
               ) : (
                 <ul
-                  key={filtered.map((skill) => `${skill.scope}:${skill.id}`).join(":")}
+                  key={filtered
+                    .map((skill) => `${skill.scope}:${skill.id}`)
+                    .join(":")}
                   className="skill-results divide-y divide-border"
                 >
                   {filtered.map((skill, index) => (
                     <li
                       key={`${skill.scope}:${skill.id}`}
                       className="skill-row px-5 py-3"
-                      style={{ animationDelay: `${Math.min(index * 30, 150)}ms` }}
+                      style={{
+                        animationDelay: `${Math.min(index * 30, 150)}ms`,
+                      }}
                     >
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-xs font-medium">{skill.name}</p>
@@ -344,7 +361,9 @@ function SkillUploadDialog({
         <Dialog.Popup className="fixed top-1/2 left-1/2 z-[60] w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-popover p-5 text-popover-foreground shadow-xl outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <Dialog.Title className="text-sm font-medium">上传技能</Dialog.Title>
+              <Dialog.Title className="text-sm font-medium">
+                上传技能
+              </Dialog.Title>
               <Dialog.Description className="mt-1 text-xs text-muted-foreground">
                 内容会按技能规范校验，不合格会被拒绝。
               </Dialog.Description>
@@ -401,12 +420,12 @@ function SkillUploadDialog({
               </Select>
               {writableScopes.length === 1 && (
                 <p className="text-[0.625rem] text-muted-foreground">
-                  当前会话未指定本地工作目录，只能保存到全局工作域。
+                  当前会话未指定项目，只能保存到全局工作域。
                 </p>
               )}
               {writableScopes.length === 2 && (
                 <p className="text-[0.625rem] text-muted-foreground">
-                  项目尚未绑定本地文件夹，暂无「本地」工作域。
+                  当前环境下暂无「本地」工作域（项目未绑定本地文件夹，或会话运行在沙箱中）。
                 </p>
               )}
             </div>

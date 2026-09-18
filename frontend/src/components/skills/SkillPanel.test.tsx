@@ -21,49 +21,80 @@ vi.mock("@/lib/api", async () => {
     ...actual,
     api: {
       ...actual.api,
-      skills: vi.fn(async (projectName?: string | null) => ({
-        items: [
-          {
-            id: "code-review",
-            name: "code-review",
-            description: "代码审查",
-            virtualPath: "/skills-global/code-review/SKILL.md",
-            updatedAt: "2026-09-16T00:00:00+00:00",
-            scope: "global" as const,
-            scopeLabel: "全局",
-            projectName: null,
-            origin: "user" as const,
-            extraFiles: [],
-            sourcePath: "/tmp/code-review/SKILL.md",
-          },
-          ...(projectName
-            ? [
-                {
-                  id: "repo-flow",
-                  name: "repo-flow",
-                  description: "本仓库专属流程",
-                  virtualPath: "/skills-set/xihe/repo-flow/SKILL.md",
-                  updatedAt: "2026-09-16T00:00:00+00:00",
-                  scope: "project_set" as const,
-                  scopeLabel: "项目",
-                  projectName: "xihe",
-                  origin: "user" as const,
-                  extraFiles: [],
-                  sourcePath: "/tmp/repo-flow/SKILL.md",
-                },
-              ]
-            : []),
-        ],
-        scopes: [],
-        // 未指定本地工作目录时后端只返回 global，面板据此只列一个工作域。
-        writableScopes:
+      skills: vi.fn(async (projectName?: string | null) => {
+        const hasProject = Boolean(projectName)
+        // 默认按「项目未绑定本地文件夹」建模：后端只给「全局 / 项目」。
+        // 「本地」可写的情况由用例通过 mockWritableScopes 显式指定。
+        // 沙箱会话的可写作用域与「未绑文件夹」相同，因此这里不需要读 backendType。
+        const writable =
           mockWritableScopes ??
-          (projectName
+          (hasProject
             ? (["global", "project_set"] as const)
-            : (["global"] as const)),
-        virtualRoot: "/skills",
-        available: true,
-      })),
+            : (["global"] as const))
+        return {
+          items: [
+            {
+              id: "code-review",
+              name: "code-review",
+              description: "代码审查",
+              virtualPath: "/skills-global/code-review/SKILL.md",
+              updatedAt: "2026-09-16T00:00:00+00:00",
+              scope: "global" as const,
+              scopeLabel: "全局",
+              projectName: null,
+              origin: "user" as const,
+              extraFiles: [],
+              sourcePath: "/tmp/code-review/SKILL.md",
+            },
+            ...(hasProject
+              ? [
+                  {
+                    id: "repo-flow",
+                    name: "repo-flow",
+                    description: "本仓库专属流程",
+                    virtualPath: "/skills-set/xihe/repo-flow/SKILL.md",
+                    updatedAt: "2026-09-16T00:00:00+00:00",
+                    scope: "project_set" as const,
+                    scopeLabel: "项目",
+                    projectName: "xihe",
+                    origin: "user" as const,
+                    extraFiles: [],
+                    sourcePath: "/tmp/repo-flow/SKILL.md",
+                  },
+                ]
+              : []),
+          ],
+          scopes: [
+            {
+              scope: "global" as const,
+              label: "全局",
+              description: "",
+              projectName: null,
+              directory: null,
+              available: true,
+            },
+            {
+              scope: "project_set" as const,
+              label: "项目",
+              description: "",
+              projectName: projectName ?? null,
+              directory: null,
+              available: hasProject,
+            },
+            {
+              scope: "local" as const,
+              label: "本地",
+              description: "",
+              projectName: projectName ?? null,
+              directory: null,
+              available: false,
+            },
+          ],
+          writableScopes: [...writable],
+          virtualRoot: "/skills",
+          available: true,
+        }
+      }),
     },
   }
 })
@@ -105,15 +136,15 @@ describe("SkillPanel", () => {
     ).toBeDefined()
   })
 
-  it("未指定本地工作目录时说明只能保存到全局工作域", async () => {
+  it("未指定项目时说明只能保存到全局工作域", async () => {
     renderPanel(null)
     expect(
-      await screen.findByText(/当前会话未指定本地工作目录，仅展示全局技能/)
+      await screen.findByText(/当前会话未指定项目，仅展示全局技能/)
     ).toBeDefined()
     // 工作域提示在上传对话框内，需先打开它
     fireEvent.click(screen.getByText("上传技能"))
     expect(
-      await screen.findByText(/当前会话未指定本地工作目录，只能保存到全局工作域/)
+      await screen.findByText(/当前会话未指定项目，只能保存到全局工作域/)
     ).toBeDefined()
   })
 
@@ -123,21 +154,19 @@ describe("SkillPanel", () => {
   })
 
   /**
-   * 面板的两个下拉按同一个条件收缩：**会话是否只能看到全局技能**
-   * （本组件里就是 `globalOnly`：没项目名，或项目跑在沙箱里）。完整矩阵：
+   * 面板的两个下拉判定的是不同问题，因此分界条件也不同：
    *
-   * | 会话状态 | 顶部筛选 | 上传对话框工作域 |
+   * | 会话状态 | 顶部筛选（有哪些层） | 上传对话框工作域（能写到哪） |
    * |---|---|---|
    * | 没选项目 | 只有「全局」 | 只有「全局」 |
-   * | 沙箱环境 | 只有「全局」 | 只有「全局」 |
-   * | 选了项目、未绑本地文件夹 | 全局/项目/本地 | 全局/项目 |
-   * | 选了项目、已绑本地文件夹 | 全局/项目/本地 | 全局/项目/本地 |
+   * | 沙箱 + 选了项目 | 全局 / 项目 | 全局 / 项目 |
+   * | 本地 + 选了项目、未绑文件夹 | 全局 / 项目 / 本地 | 全局 / 项目 |
+   * | 本地 + 选了项目、已绑文件夹 | 全局 / 项目 / 本地 | 全局 / 项目 / 本地 |
    *
-   * 注意分界是「能不能看到项目/本地两层」，不是「绑没绑文件夹」：
-   * 筛选是「看什么」，项目选定后本地技能本来就可能有（换个会话绑过文件夹就有），
-   * 所以筛选一律给全三项；工作域是「能写到哪」，未绑文件夹时写不了本地。
-   * 沙箱则两层都加载不到——沙箱容器内只有一个技能目录（对应全局层），
-   * 后端 `_resolve_skill_sources` 在 sandbox 下也不反查项目。
+   * 筛选是「看什么」：本地技能可能来自该项目的文件夹，只是本会话看不到，所以
+   * 选了项目的本地会话一律给全三项。沙箱下连目录都没有，两层都会同步加载但
+   * 「本地」不参与，所以只给「全局 / 项目」。
+   * 工作域是「能写到哪」：以后端 `writableScopes` 为准，沙箱下不含「本地」。
    */
   it("没选项目：筛选下拉与上传工作域都只有「全局」", async () => {
     renderPanel(null)
@@ -157,25 +186,26 @@ describe("SkillPanel", () => {
     expect(screen.queryByRole("option", { name: /^本地（/ })).toBeNull()
   })
 
-  it("沙箱环境：即使选了项目也与没选项目一致，只给「全局」", async () => {
-    // 项目名有值、后端也宣称可写三项，但沙箱下两层都加载不到
-    renderPanel("xihe", ["global", "project_set", "local"], "sandbox")
+  it("沙箱环境：选了项目则加载全局与项目两层，没有「本地」", async () => {
+    // 项目集合层不依赖本地文件夹，沙箱里同样会同步进容器
+    renderPanel("xihe", undefined, "sandbox")
     await screen.findByText("code-review")
-
-    expect(
-      await screen.findByText(/当前会话未指定本地工作目录，仅展示全局技能/)
-    ).toBeDefined()
+    expect(screen.getByText("repo-flow")).toBeDefined()
 
     fireEvent.click(screen.getByText("全部"))
     expect(await screen.findByRole("option", { name: "全局" })).toBeDefined()
-    expect(screen.queryByRole("option", { name: "项目" })).toBeNull()
+    expect(screen.getByRole("option", { name: "项目" })).toBeDefined()
     expect(screen.queryByRole("option", { name: "本地" })).toBeNull()
 
     fireEvent.click(screen.getByText("上传技能"))
     fireEvent.click(await screen.findByLabelText("工作域"))
-    const options = await screen.findAllByRole("option")
-    expect(options.length).toBe(1)
-    expect(options[0]?.textContent).toContain("全局")
+    expect(
+      await screen.findByRole("option", { name: /^全局（跨项目共享）/ })
+    ).toBeDefined()
+    expect(
+      screen.getByRole("option", { name: /^项目（仅当前项目/ })
+    ).toBeDefined()
+    expect(screen.queryByRole("option", { name: /^本地（/ })).toBeNull()
   })
 
   it("选了项目但未绑本地文件夹：筛选三项，工作域只有「全局/项目」", async () => {

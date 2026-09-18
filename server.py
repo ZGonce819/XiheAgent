@@ -111,8 +111,12 @@ def ensure_backend_for_thread(thread_id: str, backend_type: str | None = None) -
             _BACKENDS.pop(oldest_key)
         # 项目若绑定了本地文件夹，则以该文件夹为项目根构建「本地文件夹模式」backend；
         # 沙箱模式不涉及本地文件夹，直接跳过反查。
-        from agent.runtime._helpers import resolve_project_local_folder
+        from agent.runtime._helpers import (
+            resolve_project_local_folder,
+            resolve_thread_project_name,
+        )
 
+        project_name = resolve_thread_project_name(thread_id)
         local_folder = (
             None if backend_type == "sandbox" else resolve_project_local_folder(thread_id)
         )
@@ -120,15 +124,68 @@ def ensure_backend_for_thread(thread_id: str, backend_type: str | None = None) -
             thread_id=thread_id,
             backend_type=backend_type,
             local_folder=local_folder,
+            project_name=project_name,
         )
         logger.info(
-            "为 thread 创建 %s（backend_type=%s, local_folder=%s）：%s",
-            type(backend).__name__, backend_type, local_folder, thread_id,
+            "为 thread 创建 %s（backend_type=%s, project=%s, local_folder=%s）：%s",
+            type(backend).__name__, backend_type, project_name, local_folder, thread_id,
         )
         _BACKENDS[thread_id] = backend
+        # 新建的 backend 已经同步过最新技能，清掉可能残留的欠账标记，
+        # 避免下次复用这个 backend 时重复同步一遍。
+        _clear_pending_skill_refresh(thread_id)
     else:
         logger.info("复用 thread 的 %s：%s", type(backend).__name__, thread_id)
+        # 复用的 backend 不会重新同步技能，这里补上「运行期间发生技能变更」的欠账。
+        _apply_pending_skill_refresh(thread_id, backend)
     return backend
+
+
+def _clear_pending_skill_refresh(thread_id: str) -> None:
+    """丢弃某个会话的技能欠账标记。
+
+    仅在 backend 刚刚重建、技能已经同步到最新时调用。
+
+    Args:
+        thread_id: 会话唯一标识。
+    """
+    try:
+        from services.sandbox_skill_sync import consume_pending_refresh
+
+        consume_pending_refresh(thread_id)
+    except Exception:
+        logger.debug("清理技能欠账标记失败：thread_id=%s", thread_id, exc_info=True)
+
+
+def _apply_pending_skill_refresh(thread_id: str, backend: BaseSandbox) -> None:
+    """把运行期间挂起的技能变更补同步进沙箱。
+
+    技能上传时若会话正在执行（``running`` / ``awaiting_approval``），同步会被
+    推迟并留下标记，否则会打断正在跑的对话。等到下一次构建智能体时再补上，
+    保证用户上传完技能后的**下一条消息**就能看到新技能。
+
+    Args:
+        thread_id: 会话唯一标识。
+        backend: 当前 thread 的 backend 实例。
+
+    Note:
+        只有沙箱 backend 需要补同步；本地 backend 的技能目录就是主机目录，
+        不存在副本。标记在确认 backend 是沙箱后才消费，避免因 backend 类型
+        不匹配而把欠账丢掉。
+    """
+    try:
+        from agent.runtime._helpers import resolve_thread_project_name
+        from backends.opensandbox import OpenSandboxBackend, sync_sandbox_skills
+        from services.sandbox_skill_sync import consume_pending_refresh
+
+        if not isinstance(backend, OpenSandboxBackend):
+            return
+        if not consume_pending_refresh(thread_id):
+            return
+        written = sync_sandbox_skills(backend, resolve_thread_project_name(thread_id))
+        logger.info("补同步技能到沙箱：thread_id=%s files=%d", thread_id, written)
+    except Exception:
+        logger.warning("补同步技能到沙箱失败：thread_id=%s", thread_id, exc_info=True)
 
 
 def _resolve_skill_sources(thread_id: str, backend_type: str | None) -> list[str]:
@@ -141,29 +198,28 @@ def _resolve_skill_sources(thread_id: str, backend_type: str | None) -> list[str
     顺序加载且**后写的源覆盖先写的同名技能**，因此越贴近具体工作的层排在越
     后面，让仓库专属约定优先于个人全局偏好。
 
+    项目名不再按 backend 类型跳过反查：项目集合层落在全局技能目录下，不要求
+    项目绑定本地文件夹，本地环境与沙箱环境都应该挂载它。沙箱环境少挂一层
+    ``local``（容器内没有项目本地文件夹），且路径写成容器内真实路径——沙箱
+    backend 不做虚拟路径映射。
+
     Args:
         thread_id: 会话唯一标识。
-        backend_type: 运行环境类型，沙箱模式不参与本地文件夹反查。
+        backend_type: 运行环境类型，``"sandbox"`` 时走沙箱技能源。
 
     Returns:
-        虚拟路径列表，例如 ``["/skills-global/", "/skills-set/", "/skills/"]``。
+        技能源路径列表。本地环境形如
+        ``["/skills-global/", "/skills-set/", "/skills/"]``；
+        沙箱环境形如
+        ``["/workspace/skills/", "/workspace/skills/.project-set/Xihe/"]``。
     """
-    from services.skill_registry import agent_skill_sources
+    from agent.runtime._helpers import resolve_thread_project_name
+    from services.skill_registry import agent_skill_sources, sandbox_skill_sources
 
-    project_name: str | None = None
-    if backend_type != "sandbox":
-        try:
-            # 复用运行时既有的项目反查入口，避免在 server 层重复实现 DB 访问。
-            from agent.graph.graph import get_store
-            from agent.runtime._helpers import resolve_project_local_folder
+    project_name = resolve_thread_project_name(thread_id)
 
-            if resolve_project_local_folder(thread_id):
-                thread = get_store().get_thread(thread_id)
-                raw_name = thread.get("project_name") if thread else None
-                if isinstance(raw_name, str) and raw_name.strip():
-                    project_name = raw_name.strip()
-        except Exception:
-            logger.warning("解析会话所属项目失败：thread_id=%s", thread_id, exc_info=True)
+    if backend_type == "sandbox":
+        return sandbox_skill_sources(project_name)
 
     sources = agent_skill_sources(project_name)
     return sources or []

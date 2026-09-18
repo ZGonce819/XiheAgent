@@ -358,11 +358,19 @@ export const api = {
   saveProfile: (body: ProfileUpdate) =>
     request<Profile>("/profile", { method: "PUT", body: JSON.stringify(body) }),
   repos: () => request<ReposPayload>("/repos"),
-  skills: (projectName?: string | null) =>
-    request<SkillsPayload>(
-      `/skills${projectName ? `?project_name=${encodeURIComponent(projectName)}` : ""}`
-    ),
-  skillDetail: (skillId: string, scope: string, projectName?: string | null) => {
+  skills: (projectName?: string | null, backendType?: string | null) => {
+    const params = new URLSearchParams()
+    if (projectName) params.set("project_name", projectName)
+    // 沙箱会话没有项目本地文件夹，后端据此隐藏「本地」层，避免出现死选项。
+    if (backendType) params.set("backend_type", backendType)
+    const query = params.toString()
+    return request<SkillsPayload>(`/skills${query ? `?${query}` : ""}`)
+  },
+  skillDetail: (
+    skillId: string,
+    scope: string,
+    projectName?: string | null
+  ) => {
     const params = new URLSearchParams({ scope })
     if (projectName) params.set("project_name", projectName)
     return request<SkillDetail>(
@@ -501,7 +509,9 @@ export const api = {
     }),
   getCommandApprovalSettings: () =>
     request<CommandApprovalSettings>("/command-approval-settings"),
-  saveCommandApprovalSettings: (body: Pick<CommandApprovalSettings, "local" | "sandbox">) =>
+  saveCommandApprovalSettings: (
+    body: Pick<CommandApprovalSettings, "local" | "sandbox">
+  ) =>
     request<CommandApprovalSettings>("/command-approval-settings", {
       method: "PUT",
       body: JSON.stringify(body),
@@ -531,12 +541,12 @@ export const api = {
   bindProjectFolder: (body: { project_name: string; local_folder: string }) =>
     request<{ project_name: string; local_folder: string }>(
       "/workspace/projects/bind-folder",
-      { method: "POST", body: JSON.stringify(body) },
+      { method: "POST", body: JSON.stringify(body) }
     ),
   unbindProjectFolder: (projectName: string) =>
     request<{ project_name: string; unbound: boolean }>(
       `/workspace/projects/${encodeURIComponent(projectName)}/unbind-folder`,
-      { method: "DELETE" },
+      { method: "DELETE" }
     ),
 }
 
