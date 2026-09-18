@@ -15,6 +15,8 @@
 4. 一轮没跑成功（失败、或者根本没执行）时，把原因写进定义的 ``lastError``。
    不写的话，一个坏掉的任务在列表上和正常的长得一模一样 —— 只有点进详情
    才看得见，等于没人会发现。跑成功的那次触发会把这条错误清掉；
+   「这一轮跑完了、但配好的检查项一条都没执行」也归这一条 —— 验证门是空的
+   同样是坏掉的一种，只是从结果上看不出来；
 5. 循环已经把自己停了的任务**不再触发**。触发它只会空转，却会把
    ``lastTriggeredAt`` 写新，界面上显示成「刚触发过」。
 
@@ -73,6 +75,13 @@ def cycle_problem(result: CycleResult) -> str | None:
         # 这两种都不该只在点进详情后才看得见 —— 定时任务在列表上看起来一切正常、
         # 实际每轮都在空转，是最难发现的一种坏法。
         return result.summary or "这一轮没有完成"
+    verification = result.verification
+    if isinstance(verification, dict) and not verification.get("executed", True):
+        # 这一轮本身看着没事，但配好的检查项一条都没执行 —— 验证门是空的。
+        # 放在最后判：这一轮真失败了的话，那条原因更该被看见，别被这条盖掉。
+        # 默认配置（仓库在沙箱容器里）下每轮都会落这里，那正是最该被发现的事。
+        # 直接用验证结论里的那句话：它已经把「没执行」和原因都说清了。
+        return str(verification.get("summary") or "配好的检查项没有执行")
     return None
 
 

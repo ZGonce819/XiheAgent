@@ -329,17 +329,46 @@ def test_render_state_does_not_write_anything(data_dir: Path) -> None:
     assert state_path(AUTOMATION_ID).exists() is False
 
 
-def verification(passed: bool, *, summary: str = "", checks: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def verification(
+    passed: bool,
+    *,
+    summary: str = "",
+    checks: list[dict[str, Any]] | None = None,
+    executed: bool | None = None,
+) -> dict[str, Any]:
     """造一份验证结论。
+
+    不传 ``checks`` 时默认造一条**真的跑过**的检查 —— 这是常见情形，也让
+    「有验证结论就以它为准」这类用例测的是本该测的东西。要造「一条都没跑成」
+    的结论，把 ``checks`` 传成 ``status="skipped"`` 的那一种，或者显式传 ``executed``。
+
+    Args:
+        passed: 整体是否通过。
+        summary: 一句话结论；不传按 ``passed`` 编一句。
+        checks: 每一条检查的结果；不传则按 ``passed`` 造一条跑过的检查。
+        executed: 有没有检查真的跑过；不传则交给 ``_normalize_verification``
+            按 ``checks`` 的状态推。
 
     Returns:
         与 ``VerificationResult.as_state_dict()`` 同构的字典。
     """
-    return {
+    if checks is None:
+        checks = [
+            {
+                "command": "pytest tests/",
+                "description": "跑测试",
+                "status": "passed" if passed else "failed",
+                "exitCode": 0 if passed else 1,
+            }
+        ]
+    payload: dict[str, Any] = {
         "passed": passed,
         "summary": summary or ("检查通过" if passed else "检查未通过"),
-        "checks": checks or [],
+        "checks": checks,
     }
+    if executed is not None:
+        payload["executed"] = executed
+    return payload
 
 
 def test_run_keeps_the_verification_conclusion(data_dir: Path) -> None:
@@ -429,6 +458,85 @@ def test_blocked_round_does_not_count_as_a_failure(data_dir: Path) -> None:
     assert failure_streak(AUTOMATION_ID) == 0
 
 
+def skipped_check(command: str = "pytest tests/") -> list[dict[str, Any]]:
+    """造一条「没跑成」的检查结果。
+
+    Returns:
+        与状态文件里同构的检查结果列表。
+    """
+    return [{"command": command, "description": "跑测试", "status": "skipped", "exitCode": None}]
+
+
+def test_a_round_that_could_not_be_verified_is_not_a_failure(data_dir: Path) -> None:
+    """一条检查都没跑成的轮次不算未通过。
+
+    「没能验证」说的是环境不通（默认配置下仓库在沙箱容器里就是这种），不是活儿
+    没干好。算成未通过的话，``maxConsecutiveFailures`` 会数着环境问题把任务停掉，
+    理由还写着「未通过验证」，把人指去改代码。
+    """
+    record_run(
+        AUTOMATION_ID,
+        outcome="succeeded",
+        verification=verification(
+            False,
+            summary="1 项检查没有执行，无法确认结果",
+            checks=skipped_check(),
+        ),
+    )
+    assert failure_streak(AUTOMATION_ID) == 0
+
+
+def test_unverified_rounds_never_reach_the_failure_limit(data_dir: Path) -> None:
+    """连着多少轮「没验成」都不会触发「连续未通过就停」。"""
+    set_budget(AUTOMATION_ID, max_consecutive_failures=1)
+    for _ in range(3):
+        record_run(
+            AUTOMATION_ID,
+            outcome="succeeded",
+            verification=verification(False, checks=skipped_check()),
+        )
+    assert stop_status(AUTOMATION_ID) == (False, None)
+
+
+def test_a_state_file_without_the_executed_key_still_judges_correctly(
+    data_dir: Path,
+) -> None:
+    """加 ``executed`` 之前写下的状态文件也要判对：从每条的结论推得出来。"""
+    state = load_state(AUTOMATION_ID)
+    state["runs"] = [
+        {
+            "outcome": "succeeded",
+            "verification": {
+                "passed": False,
+                "summary": "1 项检查没有执行，无法确认结果",
+                "checks": skipped_check(),
+            },
+        }
+    ]
+    save_state(AUTOMATION_ID, state)
+    assert failure_streak(AUTOMATION_ID) == 0
+
+
+def test_a_verdict_from_a_check_that_ran_is_still_a_failure(data_dir: Path) -> None:
+    """真跑过且没过的结论仍然算未通过 —— 别把这条一起放走了。"""
+    record_run(
+        AUTOMATION_ID,
+        outcome="succeeded",
+        verification=verification(
+            False,
+            checks=[
+                {
+                    "command": "pytest tests/",
+                    "description": "跑测试",
+                    "status": "failed",
+                    "exitCode": 1,
+                }
+            ],
+        ),
+    )
+    assert failure_streak(AUTOMATION_ID) == 1
+
+
 def test_max_consecutive_failures_stops_the_loop(data_dir: Path) -> None:
     """连续失败到上限就停下交给人，并把原因写清楚。"""
     set_budget(AUTOMATION_ID, max_consecutive_failures=2)
@@ -462,11 +570,28 @@ def test_render_state_shows_verification_and_streak(data_dir: Path) -> None:
         AUTOMATION_ID,
         outcome="failed",
         summary="测试还是没过",
-        verification=verification(False, summary="1 项检查未通过（共 2 项）"),
+        verification=verification(False, summary="1 项未通过（共 2 项）"),
     )
     text = render_state(AUTOMATION_ID)
-    assert "验证未通过：1 项检查未通过（共 2 项）" in text
+    assert "验证未通过：1 项未通过（共 2 项）" in text
     assert "已连续 1 轮未通过验证" in text
+
+
+def test_render_state_marks_a_verification_that_never_ran(data_dir: Path) -> None:
+    """没跑成要单独标一个说法，不能和「跑过但没过」混成一句。"""
+    record_run(
+        AUTOMATION_ID,
+        outcome="succeeded",
+        verification=verification(
+            False,
+            summary="1 项检查没有执行，无法确认结果：说不清仓库在哪",
+            checks=skipped_check(),
+        ),
+    )
+    text = render_state(AUTOMATION_ID)
+    assert "验证未执行：1 项检查没有执行，无法确认结果：说不清仓库在哪" in text
+    # 没验成当然不算通过，但也不能混进「连续未通过」。
+    assert "已连续" not in text
 
 
 def test_render_state_marks_a_passing_verification(data_dir: Path) -> None:

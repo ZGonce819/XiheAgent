@@ -1,11 +1,13 @@
 """验证门的测试。
 
-重点覆盖三条安全性质：
+重点覆盖四条安全性质：
 
 1. **没配置检查项时结论是不通过**，不是通过；
 2. **需要审批的命令在无人值守时不会被偷偷执行**（策略判 ``deny`` 与 ``approval``
    都记为跳过，执行器一次都不该被调用）；
-3. 执行器抛异常、命令超时都不能把循环带崩，只记为一条「执行出错」。
+3. 执行器抛异常、命令超时都不能把循环带崩，只记为一条「执行出错」；
+4. **「没跑成」不能报成「没通过」**：一条检查都没执行时，结论、反馈与落盘字段都
+   要说清是「没能验」，因为默认配置下每一轮都是这种情形。
 
 用例里的审批结论依赖 ``LOCAL_DEFAULTS`` / ``SANDBOX_DEFAULTS``，所以必须把
 ``Settings.data_dir`` 指向临时目录，避免开发机上真实的 ``command_approval.json``
@@ -27,6 +29,7 @@ from services.automation_verification import (
     VerificationResult,
     parse_checks,
     run_checks,
+    unverified,
 )
 
 ALLOWED_COMMAND = "git status"
@@ -103,7 +106,8 @@ def test_one_failure_fails_the_whole_verification() -> None:
         (Check(command=ALLOWED_COMMAND), Check(command=TEST_COMMAND)), runner=runner
     )
     assert result.passed is False
-    assert result.summary == "1 项检查未通过（共 2 项）"
+    assert result.executed is True
+    assert result.summary == "1 项未通过（共 2 项）"
 
 
 def test_no_checks_is_not_a_pass() -> None:
@@ -234,7 +238,8 @@ def test_state_dict_carries_conclusions_not_output() -> None:
     ).as_state_dict()
 
     assert payload["passed"] is False
-    assert payload["summary"] == "1 项检查未通过（共 1 项）"
+    assert payload["executed"] is True
+    assert payload["summary"] == "1 项未通过（共 1 项）"
     assert payload["checks"] == [
         {
             "command": TEST_COMMAND,
@@ -250,7 +255,74 @@ def test_empty_result_has_no_checks_in_state_dict() -> None:
     """空结果写进状态时 ``checks`` 是空列表，不能变成缺键。"""
     payload = VerificationResult(()).as_state_dict()
     assert payload["passed"] is False
+    assert payload["executed"] is False
     assert payload["checks"] == []
+
+
+def test_nothing_ran_is_not_reported_as_a_failure() -> None:
+    """一条都没跑成时说「没有执行」，不能说「未通过」。
+
+    「没能验证」和「验证没通过」是两件事：前者该去修环境，后者该去改代码。
+    说成一样的话，下一轮会去修一个从没运行过的东西。
+    """
+    runner, _ = make_runner()
+    result = run_checks((Check(command=UNKNOWN_COMMAND),), runner=runner)
+
+    assert result.passed is False
+    assert result.executed is False
+    assert "未通过" not in result.summary
+    assert "没有执行" in result.summary
+
+
+def test_a_check_that_blew_up_is_also_not_a_verdict() -> None:
+    """执行出错也算「没跑成」—— 它同样说明不了活儿干得怎么样。"""
+    runner, _ = make_runner({TEST_COMMAND: OSError("找不到可执行文件")})
+    result = run_checks((Check(command=TEST_COMMAND),), runner=runner)
+
+    assert result.executed is False
+    assert "未通过" not in result.summary
+
+
+def test_summary_separates_the_kinds_of_not_passing() -> None:
+    """跑过没过、跑起来出错、压根没跑，三种分开数。"""
+    runner, _ = make_runner({TEST_COMMAND: (1, "1 failed")})
+    result = run_checks(
+        (Check(command=TEST_COMMAND), Check(command=UNKNOWN_COMMAND)), runner=runner
+    )
+
+    assert result.executed is True
+    assert result.passed is False
+    assert result.summary == "1 项未通过、1 项未执行（共 2 项）"
+
+
+def test_nothing_ran_but_passed_checks_still_counts_as_executed() -> None:
+    """有项目真跑过就轮到验证下判断，哪怕别的项被跳过。"""
+    runner, _ = make_runner()
+    result = run_checks(
+        (Check(command=ALLOWED_COMMAND), Check(command=UNKNOWN_COMMAND)), runner=runner
+    )
+    assert result.executed is True
+    assert result.summary == "1 项未执行（共 2 项）"
+
+
+def test_summary_carries_the_reason_when_nothing_ran() -> None:
+    """一条都没跑成时把原因带上 —— 否则看的人得自己翻每一条备注。"""
+    result = unverified(
+        "仓库在沙箱容器里，还没有接通容器内执行验证的通道",
+        (Check(command=TEST_COMMAND),),
+    )
+    assert "沙箱" in result.summary
+
+
+def test_feedback_does_not_claim_a_failure_when_nothing_ran() -> None:
+    """反馈第一句不能写「验证未通过」—— 那会让下一轮去修没运行过的东西。"""
+    result = unverified("说不清仓库在哪", (Check(command=TEST_COMMAND),))
+    first_line = result.feedback().splitlines()[0]
+
+    assert "未通过" not in first_line
+    assert "说不清仓库在哪" in first_line
+    # 原因还是要落在每一条上，反馈里翻得到。
+    assert "未执行" in result.feedback()
 
 
 def test_parse_checks_accepts_plain_strings() -> None:

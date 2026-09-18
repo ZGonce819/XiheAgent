@@ -26,7 +26,14 @@ from config.automation_config import (
     mark_automation_triggered,
     update_automation,
 )
-from config.automation_state import load_state, record_run, set_budget, set_cursor
+from config.automation_state import (
+    failure_streak,
+    load_state,
+    record_run,
+    set_budget,
+    set_cursor,
+    stop_status,
+)
 from services.automation_loop import (
     CycleResult,
     RoundRequest,
@@ -407,6 +414,28 @@ def test_skipped_checks_in_sandbox_say_why(data_dir: Path) -> None:
     feedback = load_state(AUTOMATION_ID)["lastFeedback"]
     assert "沙箱" in feedback
     assert "容器内执行验证" in feedback
+
+
+def test_sandbox_rounds_never_accumulate_a_failure_streak(data_dir: Path) -> None:
+    """默认配置下每轮都验不成，但一轮都不该算「没通过」。
+
+    ``resolve_workspace`` 对沙箱返回 ``None``，检查项一条都跑不了。这类轮次必须
+    既不喂连续未通过、也不触发那条停止条件 —— 否则用户一填
+    ``maxConsecutiveFailures``，任务就会按环境问题把自己停掉，理由却写着
+    「未通过验证」，把人指去改代码。
+    """
+    set_budget(AUTOMATION_ID, max_consecutive_failures=1)
+    runner, _ = make_round_runner()
+    automation = make_automation(checks=[PASSING_CHECK])
+
+    first = run_cycle(automation, runner, backend_type="sandbox")
+    assert first.verification is not None
+    assert first.verification["executed"] is False
+    assert failure_streak(AUTOMATION_ID) == 0
+
+    second = run_cycle(automation, runner, backend_type="sandbox")
+    assert second.stopped is False
+    assert stop_status(AUTOMATION_ID) == (False, None)
 
 
 def test_injected_check_runner_still_runs_without_a_workspace(

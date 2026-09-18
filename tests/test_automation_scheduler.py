@@ -263,6 +263,33 @@ def test_a_later_success_clears_the_recorded_error(data_dir: Path) -> None:
             ),
             "检查项配置有误：超时不是正整数",
         ),
+        (
+            CycleResult(
+                automation_id="a",
+                ran=True,
+                outcome="succeeded",
+                verification={
+                    "passed": False,
+                    "executed": False,
+                    "summary": "1 项检查没有执行，无法确认结果：说不清仓库在哪",
+                },
+            ),
+            "1 项检查没有执行，无法确认结果：说不清仓库在哪",
+        ),
+        (
+            CycleResult(
+                automation_id="a",
+                ran=True,
+                outcome="failed",
+                summary="这一轮没能跑完：RuntimeError",
+                verification={
+                    "passed": False,
+                    "executed": False,
+                    "summary": "1 项检查没有执行，无法确认结果",
+                },
+            ),
+            "这一轮没能跑完：RuntimeError",
+        ),
         (CycleResult(automation_id="a", ran=False, skipped_reason=""), "这一轮没有执行"),
         (
             CycleResult(

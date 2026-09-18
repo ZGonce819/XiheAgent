@@ -68,6 +68,13 @@ MAX_ATTEMPTS_KEPT = 20
 MAX_CHECKS_KEPT = 20
 """每轮最多保留多少条验证结果。"""
 
+_EXECUTED_CHECK_STATUSES = frozenset({"passed", "failed"})
+"""这些状态表示那条检查真的跑出了退出码。
+
+与 ``services.automation_verification`` 里的那份同义 —— 那边落盘、这边读回，
+两边都要认同一件事才算数。
+"""
+
 MAX_SUMMARY_CHARS = 1000
 MAX_TEXT_CHARS = 300
 """单条文本字段的截断长度，防止状态文件无上限膨胀。"""
@@ -143,6 +150,34 @@ def _clip_list(values: Any, limit: int) -> list[str]:
     return result
 
 
+def _verification_executed(verification: dict[str, Any]) -> bool:
+    """这一轮的检查项有没有真的跑起来过。
+
+    ``executed`` 是后加的字段，老状态文件里没有。缺了它就从每条的结论推 ——
+    **不能默认成「跑过」**，那正是要消掉的误判：默认配置（仓库在沙箱容器里）下
+    每一轮都跑不成，默认成「跑过」等于把环境问题记成「没通过」。
+
+    读取侧的 ``runs`` 是原样透传的（:func:`_normalize` 只过滤非字典项），所以这条
+    推导不能只写在写入口。
+
+    Args:
+        verification: 一轮的验证结论。
+
+    Returns:
+        有任意一条检查的结论是 ``passed`` / ``failed`` 时返回 ``True``。
+    """
+    executed = verification.get("executed")
+    if isinstance(executed, bool):
+        return executed
+    checks = verification.get("checks")
+    if not isinstance(checks, list):
+        return False
+    return any(
+        isinstance(item, dict) and item.get("status") in _EXECUTED_CHECK_STATUSES
+        for item in checks
+    )
+
+
 def _normalize_verification(raw: Any) -> dict[str, Any] | None:
     """把一轮的验证结论归一成固定形状。
 
@@ -154,7 +189,7 @@ def _normalize_verification(raw: Any) -> dict[str, Any] | None:
         raw: 验证结论，通常是一个字典；``None`` 表示这一轮没做验证。
 
     Returns:
-        含 ``passed`` / ``summary`` / ``checks`` 的字典，或 ``None``。
+        含 ``passed`` / ``executed`` / ``summary`` / ``checks`` 的字典，或 ``None``。
     """
     if not isinstance(raw, dict) or "passed" not in raw:
         return None
@@ -180,8 +215,11 @@ def _normalize_verification(raw: Any) -> dict[str, Any] | None:
         if len(checks) >= MAX_CHECKS_KEPT:
             break
 
+    executed = _verification_executed(raw)
+
     return {
         "passed": bool(raw.get("passed")),
+        "executed": executed,
         "summary": _clip(raw.get("summary"), MAX_SUMMARY_CHARS),
         "checks": checks,
     }
@@ -636,6 +674,11 @@ def _round_failed(run: dict[str, Any]) -> bool:
 
     有验证结论时以验证结论为准；没做验证时退回看 ``outcome``。
 
+    **「没跑成验证」不算没通过。** 一条检查都没执行时（默认配置下仓库在沙箱容器里
+    就是这种），我们不知道活儿干得怎么样 —— 那说的是环境不通，不是活儿没干好。
+    算进来的话，``maxConsecutiveFailures`` 会数着环境问题把任务停掉，而停的理由
+    写着「未通过验证」，把人指去一个完全错误的方向。
+
     Args:
         run: 一条运行记录。
 
@@ -644,7 +687,9 @@ def _round_failed(run: dict[str, Any]) -> bool:
     """
     verification = run.get("verification")
     if isinstance(verification, dict) and "passed" in verification:
-        return not verification["passed"]
+        if verification["passed"]:
+            return False
+        return _verification_executed(verification)
     return run.get("outcome") == "failed"
 
 
@@ -752,6 +797,25 @@ def stop_status(automation_id: Any) -> tuple[bool, str | None]:
     return source is not None, reason
 
 
+def _verification_mark(verification: dict[str, Any]) -> str:
+    """给一轮的验证结论挑一个说法。
+
+    「没跑成」要单独一个说法：写成「未通过」会让人以为检查项跑过并且失败了，
+    从而去改代码，实际该改的是「为什么跑不起来」。
+
+    Args:
+        verification: 归一化之后的验证结论。
+
+    Returns:
+        ``验证通过`` / ``验证未通过`` / ``验证未执行`` 三者之一。
+    """
+    if verification.get("passed"):
+        return "验证通过"
+    if not _verification_executed(verification):
+        return "验证未执行"
+    return "验证未通过"
+
+
 def render_state(automation_id: Any) -> str:
     """把状态渲染成给人看的纯文本。
 
@@ -815,9 +879,9 @@ def render_state(automation_id: Any) -> str:
             )
             verification = run.get("verification")
             if isinstance(verification, dict):
-                mark = "通过" if verification.get("passed") else "未通过"
                 lines.append(
-                    f"    - 验证{mark}：{verification.get('summary') or '（无说明）'}"
+                    f"    - {_verification_mark(verification)}："
+                    f"{verification.get('summary') or '（无说明）'}"
                 )
             for item in run.get("changed") or []:
                 lines.append(f"    - 改动：{item}")

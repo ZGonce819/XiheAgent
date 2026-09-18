@@ -18,6 +18,12 @@
 3. **给出一个机器可判定的结论**。没有配置任何检查项时结论是**不通过**，不是通过 ——
    「没检查」和「检查过了」是两件事。
 
+   结论里的 ``passed`` 与 ``executed`` 是两个不同的字段，别只看一个：``passed`` 回答
+   「检查项都确认通过了吗」，``executed`` 回答「有检查项真的跑起来过吗」。
+   **「没能验证」不是「验证没通过」** —— 前者说的是环境不通（例如仓库在沙箱容器里），
+   后者说的是活儿没干好。把两者说成一样的话，下一轮会去修一个从没运行过的东西，
+   「连续未通过就停」那条停止条件也会数着环境问题把任务停掉。
+
 Note:
     本模块不碰后端抽象：执行器由调用方以 ``runner`` 传入，将来应传一个走沙箱
     backend 的执行器。不传时退回本机 ``subprocess``，只适合本地开发与测试。
@@ -30,6 +36,7 @@ Note:
 from __future__ import annotations
 
 import subprocess
+from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,6 +45,9 @@ from typing import Any, Literal
 from backends.command_policy import evaluate_command
 
 CheckStatus = Literal["passed", "failed", "skipped", "error"]
+
+_EXECUTED_STATUSES = frozenset({"passed", "failed"})
+"""这些状态表示检查项真的跑出了退出码，可以据此判断活儿干得怎么样。"""
 
 Runner = Callable[[str, int], tuple[int, str]]
 """执行一条命令，返回 ``(退出码, 输出)``；无法执行时应抛异常。"""
@@ -82,6 +92,25 @@ class CheckOutcome:
         return self.status == "passed"
 
 
+def _shared_note(outcomes: Sequence[CheckOutcome]) -> str:
+    """把所有检查项共用的那条说明取出来，各条不一样就返回空串。
+
+    一条都没跑成时，原因（例如「仓库在沙箱容器里」）比「没有执行」这几个字有用得多 ——
+    不带上它，看状态的人得自己翻每一条备注才知道该改什么。
+
+    Args:
+        outcomes: 检查项结果。
+
+    Returns:
+        唯一的非空说明；各条不同或都为空时返回空串。
+    """
+    notes = {item.note.strip() for item in outcomes}
+    if len(notes) != 1:
+        return ""
+    only = notes.pop()
+    return only
+
+
 @dataclass(frozen=True)
 class VerificationResult:
     """一次验证的整体结论。"""
@@ -100,19 +129,51 @@ class VerificationResult:
         return bool(self.outcomes) and all(item.ok for item in self.outcomes)
 
     @property
+    def executed(self) -> bool:
+        """有检查项真的跑起来过吗。
+
+        和 :attr:`passed` 是两个问题，别混：``passed`` 回答「都确认通过了吗」，
+        本属性回答「有东西真的跑过吗」。默认配置下仓库在沙箱容器里，检查项一条
+        都跑不了 —— 那种情况下我们**不知道**活儿干得怎么样，不能说成「没通过」。
+
+        Returns:
+            有任意一条检查真的跑出退出码时返回 ``True``；全部是跳过、执行出错，
+            或者压根没配检查项时返回 ``False``。
+        """
+        return any(item.status in _EXECUTED_STATUSES for item in self.outcomes)
+
+    @property
     def summary(self) -> str:
         """一句话结论，用于写进循环状态。
 
+        没通过的情形要分开说：真跑过且没过（``未通过``）、跑起来就出错
+        （``执行出错``）、根本没跑成（``未执行``）。都说成「未通过」的话，
+        看的人分不清该去修活儿还是修环境。
+
         Returns:
-            中文短句，例如 ``2 项检查全部通过`` 或 ``1 项检查未通过（共 3 项）``。
+            中文短句，例如 ``2 项检查全部通过``、
+            ``1 项未通过、1 项未执行（共 2 项）``；一条都没跑成时带上共同的原因。
         """
         total = len(self.outcomes)
         if not total:
             return "没有配置检查项，无法确认结果"
         if self.passed:
             return f"{total} 项检查全部通过"
-        bad = sum(1 for item in self.outcomes if not item.ok)
-        return f"{bad} 项检查未通过（共 {total} 项）"
+        if not self.executed:
+            text = f"{total} 项检查没有执行，无法确认结果"
+            reason = _shared_note(self.outcomes)
+            return f"{text}：{reason}" if reason else text
+        counts = Counter(item.status for item in self.outcomes)
+        detail = "、".join(
+            f"{counts[status]} 项{label}"
+            for status, label in (
+                ("failed", "未通过"),
+                ("error", "执行出错"),
+                ("skipped", "未执行"),
+            )
+            if counts[status]
+        )
+        return f"{detail}（共 {total} 项）"
 
     def feedback(self) -> str:
         """拼出塞回下一轮的反馈文本。
@@ -123,7 +184,10 @@ class VerificationResult:
         Returns:
             多行纯文本。
         """
-        lines = [f"验证未通过：{self.summary}"]
+        # 一条都没跑成时**不能**写「验证未通过」—— 那是「活儿没干好」的意思，
+        # 而这里的事实是「没能验」。写错了，下一轮会去修一个从没运行过的东西。
+        # 所以没跑成时头一句直接用结论本身，它已经把「没有执行」和原因说清了。
+        lines = [f"验证未通过：{self.summary}" if self.executed else self.summary]
         for item in self.outcomes:
             if item.ok:
                 continue
@@ -146,10 +210,11 @@ class VerificationResult:
         测试输出都塞进去。
 
         Returns:
-            含 ``passed`` / ``summary`` / ``checks`` 的字典。
+            含 ``passed`` / ``executed`` / ``summary`` / ``checks`` 的字典。
         """
         return {
             "passed": self.passed,
+            "executed": self.executed,
             "summary": self.summary,
             "checks": [
                 {
@@ -255,7 +320,11 @@ def unverified(reason: str, checks: Sequence[Check]) -> VerificationResult:
     """把一批检查项整体记成「没执行」。
 
     用于「说不清该在哪跑」这类情况：与其退回进程当前目录跑出一份与目标仓库无关的
-    结论，不如明确记成没验证。结论仍然是不通过 —— 没确认过就不能算通过。
+    结论，不如明确记成没验证。结论仍然是**不通过** —— 没确认过就不能算通过。
+
+    但它落在「没跑成」那一类（``executed`` 为假），不是「跑过且没过」：循环据此
+    知道这一轮**没法判断**，不会把它算进连续未通过。原因会写进每一条的备注，
+    也会被 :attr:`VerificationResult.summary` 带出来。
 
     Args:
         reason: 给人看的原因，会写进每一条的备注与反馈。
