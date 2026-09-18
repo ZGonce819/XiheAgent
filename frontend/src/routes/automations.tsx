@@ -414,7 +414,12 @@ const EMPTY_BUDGET: BudgetDraft = {
   maxConsecutiveFailures: "0",
 }
 
-function AutomationRow({
+/** 一行自动化任务：概要、开关、操作按钮，以及点开才出现的循环状态。
+ *
+ * 导出是为了让测试能只渲染这一行就钉住它的动画约定（列表行错峰、状态面板展开、
+ * 一次性提示），不必把整页连同会话与模型列表一起搭起来。
+ */
+export function AutomationRow({
   schedule,
   index,
   disabled,
@@ -597,7 +602,9 @@ function AutomationRow({
       </div>
 
       {receipt && (
-        <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+        <p
+          className="surface-inline-note flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground"
+        >
           <span>
             已开始第 {receipt.roundNumber} 轮，跑完会出现在会话列表里。
           </span>
@@ -611,11 +618,13 @@ function AutomationRow({
         </p>
       )}
       {runError && (
-        <p className="text-xs text-destructive">{runError}</p>
+        <p className="surface-inline-note text-xs text-destructive">
+          {runError}
+        </p>
       )}
 
       {stateOpen && (
-        <div className="rounded-md border border-border bg-muted/40 p-3">
+        <div className="surface-panel-expand rounded-md border border-border bg-muted/40 p-3">
           {loopState.isLoading ? (
             <p className="text-xs text-muted-foreground">正在读取循环状态…</p>
           ) : loopState.isError ? (
@@ -667,7 +676,9 @@ function AutomationRow({
                     </p>
                   )}
                   {resumeError && (
-                    <p className="text-[0.625rem] text-destructive">
+                    <p
+                      className="surface-inline-note text-[0.625rem] text-destructive"
+                    >
                       {resumeError}
                     </p>
                   )}
@@ -751,12 +762,16 @@ function AutomationRow({
                       清空历史
                     </Button>
                     {budgetError && (
-                      <span className="text-[0.625rem] text-destructive">
+                      <span
+                        className="surface-inline-note text-[0.625rem] text-destructive"
+                      >
                         {budgetError}
                       </span>
                     )}
                     {resetError && (
-                      <span className="text-[0.625rem] text-destructive">
+                      <span
+                        className="surface-inline-note text-[0.625rem] text-destructive"
+                      >
                         {resetError}
                       </span>
                     )}
@@ -820,7 +835,12 @@ function Field({
   )
 }
 
-function StateMessage({
+/** 空态与错误态共用的一屏提示。
+ *
+ * 导出是为了让测试能直接钉住它挂的动画类 —— 与技能接口页
+ * （``routes/skills.tsx``）的空态用的是同一个类，两处必须一致。
+ */
+export function StateMessage({
   icon,
   title,
   description,
@@ -832,7 +852,7 @@ function StateMessage({
   action?: ReactNode
 }) {
   return (
-    <div className="flex min-h-48 flex-col items-center justify-center px-6 py-10 text-center">
+    <div className="surface-state-enter flex min-h-48 flex-col items-center justify-center px-6 py-10 text-center">
       {icon && <div className="mb-3 text-muted-foreground">{icon}</div>}
       <p className="text-xs font-medium">{title}</p>
       <p className="mt-1 max-w-sm text-xs text-muted-foreground">

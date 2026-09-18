@@ -247,6 +247,20 @@
   animation: surface-content-swap 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/* 挂在列表行下面、点开才出现的内联区块（循环状态与预算那一块）。节奏与
+   command-explanation-open 完全一致：同一处缓动、同一段时长、同一个 25% 的
+   纵向裁切起点 —— 项目里「从上方长出一个区块」只有这一种节奏。 */
+.surface-panel-expand {
+  animation: surface-panel-expand 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  transform-origin: center top;
+}
+
+/* 行内的一次性提示：跑一轮的回执、以及各处就地报的错。比区块轻 —— 只抬 4px、
+   不做裁切，因为它只是一行字，用区块那套会显得在「展开」。 */
+.surface-inline-note {
+  animation: surface-inline-note 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
 .skill-icon {
   transition:
     transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
@@ -363,6 +377,30 @@
   to {
     opacity: 1;
     clip-path: inset(0);
+  }
+}
+
+@keyframes surface-panel-expand {
+  from {
+    opacity: 0;
+    transform: scaleY(0.96);
+    clip-path: inset(0 0 25% 0);
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+    clip-path: inset(0);
+  }
+}
+
+@keyframes surface-inline-note {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
@@ -533,6 +571,8 @@
   .skill-row,
   .skill-results,
   .surface-state-enter,
+  .surface-panel-expand,
+  .surface-inline-note,
   .approval-policy-row,
   .command-approval-panel,
   .command-approval-alert,
