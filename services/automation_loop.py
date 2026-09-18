@@ -96,6 +96,12 @@ class RoundResult:
     changed: tuple[str, ...] = ()
     next_steps: tuple[str, ...] = ()
     tokens: int = 0
+    waiting_approval: bool = False
+    """这一轮是不是停在等人工确认。
+
+    是的话循环会停下来等人，不再往后跑 —— 无人值守的循环里没人会去点那个确认，
+    下一轮只会卡在同一个地方。
+    """
     thread_id: str | None = None
     workspace: str | None = None
     """这一轮实际在哪个目录里跑的，供验证命令当工作目录。
@@ -357,6 +363,7 @@ def run_cycle(
         next_steps=result.next_steps,
         verification=verification.as_state_dict() if verification else None,
         tokens=result.tokens,
+        waiting_approval=result.waiting_approval,
     )
     set_last_feedback(
         identifier,

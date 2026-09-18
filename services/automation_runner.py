@@ -340,6 +340,9 @@ def make_agent_round_runner(
         return RoundResult(
             outcome=_outcome_from_status(status),
             summary=summary,
+            # 停在等人工确认要单独记下来。它虽然也落在 blocked 里，但和「状态还没
+            # 落定、下一轮接着看」不是一回事 —— 这一条要循环停下来等人。
+            waiting_approval=status == "awaiting_approval",
             thread_id=current_thread,
             tokens=_tokens_used(list(result.get("messages") or [])),
             # 跑完才解析：仓库是这一轮才 clone 下来的，跑之前那个目录还不存在。

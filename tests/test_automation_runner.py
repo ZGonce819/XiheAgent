@@ -321,6 +321,9 @@ def test_a_round_waiting_for_approval_says_what_it_is_waiting_for(
     )
 
     assert result.outcome == "blocked"
+    # 只记成 blocked 还不够 —— 循环要靠这个标记才知道该停下来等人，否则它会
+    # 以为这一轮「没做完但可以接着做」，下一轮又卡在同一条命令上。
+    assert result.waiting_approval is True
     assert "等待人工审批" in result.summary
     assert "git -C repo status" in result.summary
     assert "git -C repo log --oneline -10" in result.summary

@@ -21,6 +21,7 @@ from config.automation_state import (
     MAX_RUNS_KEPT,
     MAX_SUMMARY_CHARS,
     clear_stopped,
+    clear_waiting_approval,
     delete_state,
     failure_streak,
     initial_state,
@@ -483,10 +484,10 @@ def test_render_state_lists_the_failure_limit(data_dir: Path) -> None:
 
 
 def test_stop_decision_names_the_source(data_dir: Path) -> None:
-    """停止来源要能分清 —— 四种来源的恢复方式不一样。
+    """停止来源要能分清 —— 五个来源的恢复方式不一样。
 
-    只有显式标记能直接清掉；轮数、token、连续未通过这三条得改预算上限才有效。
-    分不清来源，界面就只能给一个点了没反应的「继续运行」。
+    显式标记和「停在等人工确认」能直接清掉；轮数、token、连续未通过这三条得改预算
+    上限才有效。分不清来源，界面就只能给一个点了没反应的「继续运行」。
     """
     assert stop_decision(AUTOMATION_ID) == (None, None)
 
@@ -510,3 +511,53 @@ def test_stop_decision_marks_a_failure_stop(data_dir: Path) -> None:
     source, reason = stop_decision(AUTOMATION_ID)
     assert source == "failures"
     assert "人工介入" in str(reason)
+
+
+def test_stop_decision_reports_waiting_approval(data_dir: Path) -> None:
+    """停在等人工确认要单独认出来。
+
+    它和「状态还没落定、下一轮接着看」都落在 ``blocked`` 里，但这一条需要有人动手，
+    循环必须停下来 —— 无人值守时没人会去点那个确认，下一轮只会卡在同一个地方。
+    """
+    record_run(
+        AUTOMATION_ID,
+        outcome="blocked",
+        summary="这一轮停在等待人工审批，需要人工处理：git push origin main",
+        waiting_approval=True,
+    )
+    source, reason = stop_decision(AUTOMATION_ID)
+    assert source == "awaiting_approval"
+    assert "git push origin main" in str(reason)
+
+
+def test_stop_decision_ignores_a_plain_blocked_round(data_dir: Path) -> None:
+    """没在等确认的 ``blocked`` 不该让循环停下 —— 它本来就该下一轮接着做。"""
+    record_run(AUTOMATION_ID, outcome="blocked", summary="这一轮还没跑完")
+    assert stop_decision(AUTOMATION_ID) == (None, None)
+
+
+def test_waiting_approval_outranks_the_budget(data_dir: Path) -> None:
+    """同时撞上限时先报等确认。
+
+    报「额度用完了」会把人引去调上限，调完还是卡在同一个地方。
+    """
+    set_budget(AUTOMATION_ID, max_runs=1)
+    record_run(AUTOMATION_ID, outcome="blocked", waiting_approval=True)
+    source, _ = stop_decision(AUTOMATION_ID)
+    assert source == "awaiting_approval"
+
+
+def test_clear_waiting_approval_lets_the_loop_run_again(data_dir: Path) -> None:
+    """处理完审批之后清掉标记，循环要能重新跑起来。"""
+    record_run(AUTOMATION_ID, outcome="blocked", waiting_approval=True)
+    assert stop_decision(AUTOMATION_ID)[0] == "awaiting_approval"
+
+    clear_waiting_approval(AUTOMATION_ID)
+    assert stop_decision(AUTOMATION_ID) == (None, None)
+
+
+def test_record_run_defaults_to_not_waiting(data_dir: Path) -> None:
+    """没显式说在等确认的轮次不能被误标 —— 否则循环会凭空停下来。"""
+    record_run(AUTOMATION_ID, outcome="succeeded")
+    assert load_state(AUTOMATION_ID)["runs"][0]["waitingApproval"] is False
+    assert stop_decision(AUTOMATION_ID) == (None, None)

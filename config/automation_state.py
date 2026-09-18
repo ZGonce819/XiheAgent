@@ -391,6 +391,7 @@ def record_run(
     next_steps: Any = None,
     verification: dict[str, Any] | None = None,
     tokens: int = 0,
+    waiting_approval: bool = False,
     started_at: str | None = None,
     finished_at: str | None = None,
 ) -> dict[str, Any]:
@@ -409,6 +410,9 @@ def record_run(
         next_steps: 留给下一轮的待办列表。
         verification: 本轮的验证结论，形状见 :func:`_normalize_verification`。
         tokens: 本轮消耗的 token 数，累加进预算。
+        waiting_approval: 这一轮是不是停在等人工确认。是的话循环会停下来等人，
+            不再把它当成一轮普通的「没做完」—— 无人值守的循环里，没人会去点那个
+            确认，下一轮还会卡在同一个地方。
         started_at: 本轮开始时间；不传则留空。
         finished_at: 本轮结束时间；不传则用当前时间。
 
@@ -434,6 +438,7 @@ def record_run(
             "changed": _clip_list(changed, MAX_TEXT_CHARS),
             "nextSteps": _clip_list(next_steps, MAX_TEXT_CHARS),
             "verification": _normalize_verification(verification),
+            "waitingApproval": bool(waiting_approval),
         },
     )
     del state["runs"][MAX_RUNS_KEPT:]
@@ -604,6 +609,28 @@ def clear_stopped(automation_id: Any) -> dict[str, Any]:
     return save_state(automation_id, state)
 
 
+def clear_waiting_approval(automation_id: Any) -> dict[str, Any]:
+    """清掉「最近一轮停在等人工确认」这个标记，让循环可以继续。
+
+    人工处理完待审批的命令之后再调。这个标记不清的话，:func:`stop_decision`
+    会一直因为那一轮停着 —— 审批已经处理完了，循环却再也起不来。
+
+    Args:
+        automation_id: 自动化任务 id。
+
+    Returns:
+        写入后的完整状态。
+
+    Raises:
+        ValueError: id 非法。
+    """
+    state = load_state(automation_id)
+    runs = state["runs"]
+    if runs:
+        runs[0]["waitingApproval"] = False
+    return save_state(automation_id, state)
+
+
 def _round_failed(run: dict[str, Any]) -> bool:
     """判断一轮算不算没通过。
 
@@ -645,19 +672,37 @@ def failure_streak(automation_id: Any) -> int:
     return streak
 
 
+def _waiting_approval_reason(run: dict[str, Any]) -> str:
+    """给「停在等人工确认」这一条拼一句给人看的原因。
+
+    原因直接取那一轮的 summary —— 跑那一轮的时候已经把待处理的命令列进去了。
+
+    Args:
+        run: 最近一条运行记录。
+
+    Returns:
+        给人看的中文短句。
+    """
+    summary = str(run.get("summary") or "").strip()
+    if not summary:
+        return "上一轮停在等待人工确认，需要有人处理之后才会继续"
+    return _clip(summary, MAX_SUMMARY_CHARS)
+
+
 def stop_decision(automation_id: Any) -> tuple[str | None, str | None]:
     """算出循环是**因为哪一条**停下的，以及给人看的原因。
 
-    停止判定有四个来源，恢复方式各不相同：显式标记可以直接清掉；轮数 / token /
-    连续未通过这三条要改预算上限才有效。只把「停了」告诉用户，他会去点一个点了
-    没反应的按钮。
+    停止判定有五个来源，恢复方式各不相同：显式标记和「停在等人工确认」可以直接
+    清掉；轮数 / token / 连续未通过这三条要改预算上限才有效。只把「停了」告诉
+    用户，他会去点一个点了没反应的按钮。
 
     Args:
         automation_id: 自动化任务 id。
 
     Returns:
-        ``(来源, 原因)``。来源是 ``"marked"`` / ``"max_runs"`` / ``"max_tokens"``
-        / ``"failures"`` 之一；不该停时两者都是 ``None``。
+        ``(来源, 原因)``。来源是 ``"marked"`` / ``"awaiting_approval"`` /
+        ``"max_runs"`` / ``"max_tokens"`` / ``"failures"`` 之一；不该停时两者
+        都是 ``None``。
 
     Raises:
         ValueError: id 非法。
@@ -666,6 +711,12 @@ def stop_decision(automation_id: Any) -> tuple[str | None, str | None]:
     stop = state["stop"]
     if stop.get("reached"):
         return "marked", str(stop.get("reason") or "已标记停止")
+
+    # 停在等人工确认要排在上限之前：这一条是「需要你动手」，比「额度用完了」
+    # 更紧急 —— 只报上限的话，人以为调高上限就能继续，其实还是卡在同一个地方。
+    runs = state["runs"]
+    if runs and runs[0].get("waitingApproval"):
+        return "awaiting_approval", _waiting_approval_reason(runs[0])
 
     budget = state["budget"]
     max_runs = int(budget.get("maxRuns") or 0)
@@ -685,8 +736,8 @@ def stop_decision(automation_id: Any) -> tuple[str | None, str | None]:
 def stop_status(automation_id: Any) -> tuple[bool, str | None]:
     """判断循环是否应该停下。
 
-    四个来源合在一起判断：显式标记、轮数上限、token 上限、连续未通过次数。
-    需要知道是哪一条触发的，用 :func:`stop_decision`。
+    五个来源合在一起判断：显式标记、停在等人工确认、轮数上限、token 上限、连续
+    未通过次数。需要知道是哪一条触发的，用 :func:`stop_decision`。
 
     Args:
         automation_id: 自动化任务 id。

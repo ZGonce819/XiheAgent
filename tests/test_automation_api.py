@@ -233,8 +233,45 @@ def test_resume_refuses_when_the_stop_came_from_the_budget(
     assert body["stopSource"] == "max_runs"
 
 
+def test_resume_clears_a_round_stuck_waiting_for_approval(
+    dashboard: TestClient, dispatched: list[dict[str, Any]]
+) -> None:
+    """停在等人工确认的循环，恢复之后要真的能再触发。
+
+    这一条清的不是停止标记（那条路上根本没往停止标记里写过东西），而是「最近一轮
+    停在等确认」这个标记 —— 清错了循环还是起不来。
+    """
+    automation = make_automation()
+    record_run(
+        automation["id"],
+        outcome="blocked",
+        summary="这一轮停在等待人工审批，需要人工处理：git push origin main",
+        waiting_approval=True,
+    )
+
+    body = dashboard.get(f"/dashboard/api/schedules/{automation['id']}/state").json()
+    assert body["stopSource"] == "awaiting_approval"
+    assert "git push origin main" in body["stopReason"]
+
+    assert (
+        dashboard.post(f"/dashboard/api/schedules/{automation['id']}/run").status_code
+        == 409
+    )
+
+    resumed = dashboard.post(f"/dashboard/api/schedules/{automation['id']}/resume")
+    assert resumed.status_code == 200
+    assert resumed.json()["stopped"] is False
+    assert resumed.json()["stopSource"] is None
+
+    assert (
+        dashboard.post(f"/dashboard/api/schedules/{automation['id']}/run").status_code
+        == 202
+    )
+    assert len(dispatched) == 1
+
+
 def test_state_reports_where_the_stop_came_from(dashboard: TestClient) -> None:
-    """四种停止来源的恢复方式不同，所以来源要一起给出来。"""
+    """五个停止来源的恢复方式不同，所以来源要一起给出来。"""
     automation = make_automation()
 
     mark_stopped(automation["id"], "手动停的")

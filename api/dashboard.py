@@ -37,6 +37,7 @@ from config.automation_config import (
 )
 from config.automation_state import (
     clear_stopped,
+    clear_waiting_approval,
     load_state,
     render_state,
     set_budget,
@@ -352,8 +353,9 @@ def dashboard_delete_schedule(schedule_id: str) -> None:
 def _schedule_state_payload(schedule_id: str) -> dict[str, Any]:
     """拼出循环状态的响应体。
 
-    带上 ``stopSource`` 是因为四个停止来源的恢复方式不同：只有显式标记能直接清掉，
-    其余三条要调高预算上限。前端据此决定给「继续运行」按钮还是给一句提示。
+    带上 ``stopSource`` 是因为五个停止来源的恢复方式不同：显式标记与「停在等人工
+    确认」能直接清掉，其余三条要调高预算上限。前端据此决定给「继续运行」按钮还是
+    给一句提示。
     """
     source, reason = stop_decision(schedule_id)
     return {
@@ -387,11 +389,12 @@ def dashboard_schedule_state(schedule_id: str) -> dict[str, Any]:
 
 @dashboard_router.post("/schedules/{schedule_id}/resume")
 def dashboard_resume_schedule(schedule_id: str) -> dict[str, Any]:
-    """清除停止标记，让一个被停下的循环重新可以触发。
+    """让一个被停下的循环重新可以触发。
 
-    只能救「被显式标记停止」的循环。因轮数 / token / 连续未通过而停下的，清标记
-    没有用 —— 那三条的恢复办法是调高对应的预算上限，所以这里直接返回 409 说明原因，
-    而不是让用户点一个点了没反应的按钮。
+    能救两种：被显式标记停止的（清停止标记），以及停在等人工确认的（清那一轮的
+    等确认标记）。因轮数 / token / 连续未通过而停下的救不了 —— 那三条的恢复办法是
+    调高对应的预算上限，所以这里直接返回 409 说明原因，而不是让用户点一个点了
+    没反应的按钮。
 
     没停过的循环调用它是安全的，相当于什么都没做。
 
@@ -402,13 +405,19 @@ def dashboard_resume_schedule(schedule_id: str) -> dict[str, Any]:
         与 GET ``/schedules/{id}/state`` 同样的状态结构，前端可直接替换。
 
     Raises:
-        HTTPException: 自动化任务不存在返回 404；停止原因不是显式标记返回 409。
+        HTTPException: 自动化任务不存在返回 404；停止原因救不了返回 409。
     """
     if get_automation(schedule_id) is None:
         raise HTTPException(status_code=404, detail="自动化任务不存在")
 
     source, reason = stop_decision(schedule_id)
-    if source is not None and source != "marked":
+    if source == "marked":
+        clear_stopped(schedule_id)
+    elif source == "awaiting_approval":
+        # 人工处理完待审批的命令之后点这里。清的是「最近一轮停在等确认」这个标记，
+        # 不是停止标记 —— 这一条路本来就没往停止标记里写过东西。
+        clear_waiting_approval(schedule_id)
+    elif source is not None:
         raise HTTPException(
             status_code=409,
             detail=(
@@ -417,7 +426,6 @@ def dashboard_resume_schedule(schedule_id: str) -> dict[str, Any]:
             ),
         )
 
-    clear_stopped(schedule_id)
     return _schedule_state_payload(schedule_id)
 
 

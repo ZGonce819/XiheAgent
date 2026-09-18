@@ -195,6 +195,13 @@ export interface AutomationLoopState {
 export type AutomationStopSource =
   /** 被显式标记停止，可以清掉标记继续跑。 */
   | "marked"
+  /**
+   * 上一轮停在等人工确认，清那一轮的标记就能继续。
+   *
+   * 和 `marked` 一样能直接救回来，但点按钮之前得先有人把待审批的命令处理掉 ——
+   * 不处理的话下一轮还会卡在同一条命令上。
+   */
+  | "awaiting_approval"
   /** 轮数用完了，要调高最多运行轮数。 */
   | "max_runs"
   /** token 用完了，要调高最多消耗 token 数。 */

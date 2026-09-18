@@ -450,6 +450,11 @@ function AutomationRow({
   const [budgetError, setBudgetError] = useState<string | null>(null)
   const loopState = useAgentScheduleState(schedule.id, { enabled: stateOpen })
 
+  const stopSource = loopState.data?.stopSource ?? null
+  // 五个停止来源里，只有这两种能靠「清标记」救回来；轮数 / token / 连续未通过
+  // 那三条得去调高预算上限，给按钮等于给一个点了没反应的按钮。
+  const resumable = stopSource === "marked" || stopSource === "awaiting_approval"
+
   // 打开面板、或保存之后状态刷新时，把三个上限同步成服务端的当前值。
   const budget = loopState.data?.state.budget
   useEffect(() => {
@@ -631,12 +636,16 @@ function AutomationRow({
                       这个循环已经停了：
                       {loopState.data.stopReason ?? "原因未知"}
                     </p>
-                    {loopState.data.stopSource === "marked" ? (
+                    {resumable ? (
                       <Button
                         variant="outline"
                         size="sm"
                         disabled={resumeSchedule.isPending}
-                        title="清掉停止标记，让这个循环重新可以触发"
+                        title={
+                          stopSource === "awaiting_approval"
+                            ? "清掉「上一轮在等人工确认」这个标记，让这个循环重新可以触发"
+                            : "清掉停止标记，让这个循环重新可以触发"
+                        }
                         onClick={() => {
                           setResumeError(null)
                           resumeSchedule.mutate(schedule.id, {
@@ -658,6 +667,12 @@ function AutomationRow({
                       </span>
                     )}
                   </div>
+                  {stopSource === "awaiting_approval" && (
+                    <p className="text-[0.625rem] text-muted-foreground">
+                      先到那一轮会话里把待审批的命令处理掉，再点「继续运行」——
+                      没人处理的话，下一轮还会卡在同一条命令上。
+                    </p>
+                  )}
                   {resumeError && (
                     <p className="text-[0.625rem] text-destructive">
                       {resumeError}
