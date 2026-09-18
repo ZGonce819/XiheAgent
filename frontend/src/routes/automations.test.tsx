@@ -44,9 +44,45 @@ vi.mock("@/lib/agents/queries", () => ({
     isPending: false,
   }),
   useAgentScheduleState: () => hooks.state(),
+  // 下面几个只服务于「渲染整页」的用例：列表给空，走空态 → 点新建 → 表单。
+  useAgentSchedules: () => ({ isLoading: false, isError: false, data: [] }),
+  useCreateAgentSchedule: () => ({ mutate: vi.fn(), isPending: false }),
+  useUpdateAgentSchedule: () => ({ mutate: vi.fn(), isPending: false }),
+  useDeleteAgentSchedule: () => ({ mutate: vi.fn(), isPending: false }),
 }))
 
-import { AutomationRow, StateMessage } from "./automations"
+vi.mock("@/lib/session", () => ({
+  useSession: () => ({ isLoading: false, data: { name: "测试用户" } }),
+}))
+
+vi.mock("@/lib/agents/useModelOptions", () => ({
+  useModelOptions: () => ({
+    models: [
+      { id: "model-a", label: "模型甲" },
+      { id: "model-b", label: "模型乙" },
+    ],
+    defaultSelection: { modelId: "model-a" },
+  }),
+}))
+
+vi.mock("@/components/AppShell", () => ({
+  AppShell: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
+  SettingsSection: ({ children }: { children: React.ReactNode }) => (
+    <section>{children}</section>
+  ),
+}))
+
+import { AutomationRow, Route, StateMessage } from "./automations"
+
+// automations.tsx 没有默认导出（路由文件只导出 Route）。桩掉的 createFileRoute
+// 让 Route 直接就是选项对象，组件挂在 component 上；真实现挂在 options.component。
+const AutomationsPage =
+  (Route as unknown as { options?: { component?: React.ComponentType } })
+    .options?.component ??
+  (Route as unknown as { component?: React.ComponentType }).component
+if (!AutomationsPage) throw new Error("路由上取不到页面组件")
 
 afterEach(cleanup)
 
@@ -151,5 +187,26 @@ describe("自动化任务页的动画约定", () => {
     expect(
       screen.getByText("这个任务已经有一轮在跑").className
     ).toContain("surface-inline-note")
+  })
+})
+
+describe("表单里的下拉与项目统一", () => {
+  it("执行频率与模型走共享 Select，页面不再出现原生 select", () => {
+    const { container } = render(<AutomationsPage />)
+
+    // 空列表下有两处「新建任务」（列表头与空态各一），点哪个都会打开同一个表单。
+    const newButton = screen.getAllByRole("button", { name: "新建任务" })[0]
+    if (!newButton) throw new Error("页面上没有「新建任务」按钮")
+    fireEvent.click(newButton)
+
+    // 原生 select 是那次不一致的根源：系统外观、系统箭头、系统菜单，
+    // 三样都插不进项目约定（agents.css 里 [data-popup-open] 的箭头旋转它也吃不到）。
+    expect(container.querySelector("select")).toBeNull()
+    // 共享组件的触发器恰好两个：执行频率 + 模型。箭头与弹出动画都挂在 data-slot 上。
+    expect(
+      container.querySelectorAll('[data-slot="select-trigger"]')
+    ).toHaveLength(2)
+    // 触发器直接渲染当前选项的中文标签（执行频率的默认预设是「每天」）。
+    expect(screen.getByText("每天")).toBeTruthy()
   })
 })

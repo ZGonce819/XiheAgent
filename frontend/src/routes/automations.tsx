@@ -15,6 +15,12 @@ import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
@@ -273,12 +279,10 @@ function AutomationManager() {
               </Field>
               <div className="grid gap-4 sm:grid-cols-3">
                 <Field label="执行频率" htmlFor="automation-preset">
-                  <select
-                    id="automation-preset"
-                    className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+                  <Select
                     value={form.preset}
-                    onChange={(event) => {
-                      const preset = event.target.value as FormState["preset"]
+                    onValueChange={(next) => {
+                      const preset = next as FormState["preset"]
                       const match = CRON_PRESETS.find(
                         (item) => item.id === preset
                       )
@@ -289,13 +293,24 @@ function AutomationManager() {
                       })
                     }}
                   >
-                    {CRON_PRESETS.map((preset) => (
-                      <option key={preset.id} value={preset.id}>
-                        {preset.label}
-                      </option>
-                    ))}
-                    <option value="custom">自定义</option>
-                  </select>
+                    <SelectTrigger
+                      id="automation-preset"
+                      className="w-full bg-background"
+                    >
+                      <span className="flex flex-1 text-left">
+                        {CRON_PRESETS.find((item) => item.id === form.preset)
+                          ?.label ?? "自定义"}
+                      </span>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CRON_PRESETS.map((preset) => (
+                        <SelectItem key={preset.id} value={preset.id}>
+                          {preset.label}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value="custom">自定义</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </Field>
                 <Field label="Cron 表达式" htmlFor="automation-cron">
                   <Input
@@ -312,20 +327,30 @@ function AutomationManager() {
                   />
                 </Field>
                 <Field label="模型" htmlFor="automation-model">
-                  <select
-                    id="automation-model"
-                    className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
+                  <Select
                     value={form.modelId}
-                    onChange={(event) =>
-                      setForm({ ...form, modelId: event.target.value })
+                    onValueChange={(next) =>
+                      setForm({ ...form, modelId: next as string })
                     }
                   >
-                    {modelOptions.models.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.label}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger
+                      id="automation-model"
+                      className="w-full bg-background"
+                    >
+                      <span className="flex flex-1 text-left">
+                        {modelOptions.models.find(
+                          (model) => model.id === form.modelId
+                        )?.label ?? form.modelId}
+                      </span>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {modelOptions.models.map((model) => (
+                        <SelectItem key={model.id} value={model.id}>
+                          {model.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
               </div>
               <Field
