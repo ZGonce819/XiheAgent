@@ -2,7 +2,7 @@
 
 这里能测的是**判断**，不是执行 —— 真正跑一轮需要模型和数据库。所以覆盖的是：
 
-1. :func:`services.automation_runner.read_only_refusal` 的放行与拒绝边界；
+1. :func:`services.automation_runner.loop_scope_refusal` 的放行与拒绝边界；
 2. 运行状态到循环结果的映射（未知状态一律算 ``blocked``，不能算成功）；
 3. 「跑一轮」在超出范围、没配仓库时**在碰运行时之前就返回**；
 4. token 用量的累加（拿不到时按 0 记，不影响这一轮的成败判定）。
@@ -24,16 +24,20 @@ import pytest
 from services.automation_loop import RoundRequest
 from services.automation_runner import (
     READ_ONLY_KINDS,
+    REFUSED_KINDS,
+    WRITE_KINDS,
+    _latest_run_id,
     _outcome_from_status,
     _tokens_used,
+    loop_scope_refusal,
     make_agent_round_runner,
-    read_only_refusal,
+    refusal_for_kind,
     resolve_backend_type,
+    resolve_container_exec,
     resolve_workspace,
 )
 
 ALL_KINDS = ("coding", "planning", "analysis", "qa", "sync", "inspect", "review")
-WRITE_KINDS = ("coding", "planning")
 
 
 def _stub_kind(monkeypatch: pytest.MonkeyPatch, kind: str) -> list[str]:
@@ -50,36 +54,61 @@ def _stub_kind(monkeypatch: pytest.MonkeyPatch, kind: str) -> list[str]:
 
 @pytest.mark.parametrize("kind", sorted(READ_ONLY_KINDS))
 def test_read_only_kinds_are_allowed(monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
-    """只读类任务放行。"""
+    """只读类任务放行，配不配检查项都一样。"""
     _stub_kind(monkeypatch, kind)
-    assert read_only_refusal("随便一句指令") is None
+    assert loop_scope_refusal("随便一句指令", has_checks=False) is None
 
 
-@pytest.mark.parametrize("kind", WRITE_KINDS)
-def test_write_kinds_are_refused(monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
-    """会改代码或需要等确认的任务拒掉，理由要说清是为什么。"""
-    _stub_kind(monkeypatch, kind)
-    refusal = read_only_refusal("随便一句指令")
-    assert refusal is not None
-    assert "只读任务" in refusal
-    assert "方案确认" in refusal
-
-
-def test_refusal_names_the_recognized_kind(monkeypatch: pytest.MonkeyPatch) -> None:
-    """理由里要写清被识别成了哪一类，否则用户不知道该怎么改。"""
-    _stub_kind(monkeypatch, "coding")
-    assert "开发实现" in str(read_only_refusal("随便一句指令"))
-    _stub_kind(monkeypatch, "planning")
-    assert "方案规划" in str(read_only_refusal("随便一句指令"))
-
-
-@pytest.mark.parametrize("kind", WRITE_KINDS)
-def test_refusal_does_not_leak_the_internal_code(
+@pytest.mark.parametrize("kind", sorted(WRITE_KINDS))
+def test_write_kinds_are_allowed_when_checks_are_configured(
     monkeypatch: pytest.MonkeyPatch, kind: str
 ) -> None:
-    """给人看的理由里不能出现 ``coding`` 这种内部取值。"""
+    """配了验证检查项的写入任务放行 —— 检查项是它唯一的独立判断依据。"""
     _stub_kind(monkeypatch, kind)
-    assert kind not in str(read_only_refusal("随便一句指令"))
+    assert loop_scope_refusal("随便一句指令", has_checks=True) is None
+
+
+@pytest.mark.parametrize("kind", sorted(WRITE_KINDS))
+def test_write_kinds_need_checks(monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
+    """没配检查项的写入任务拒掉，理由要说清「为什么非配不可」。"""
+    _stub_kind(monkeypatch, kind)
+    refusal = loop_scope_refusal("随便一句指令", has_checks=False)
+    assert refusal is not None
+    assert "验证检查项" in refusal
+
+
+@pytest.mark.parametrize("kind", sorted(REFUSED_KINDS))
+def test_refused_kinds_say_it_will_stall(
+    monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    """被明确拒掉的类型要说清是「会停下来等确认」，而不是「不许做」。"""
+    _stub_kind(monkeypatch, kind)
+    refusal = loop_scope_refusal("随便一句指令", has_checks=True)
+    assert refusal is not None
+    assert "确认" in refusal
+
+
+def test_refused_kinds_are_named_in_the_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """理由里要写清被识别成了哪一类，否则用户不知道该怎么改。"""
+    _stub_kind(monkeypatch, "planning")
+    assert "方案规划" in str(loop_scope_refusal("随便一句指令", has_checks=True))
+
+
+def test_refusal_does_not_leak_the_internal_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """给人看的理由里不能出现 ``planning`` 这种内部取值。"""
+    _stub_kind(monkeypatch, "planning")
+    assert "planning" not in str(loop_scope_refusal("随便一句指令", has_checks=True))
+
+
+def test_an_unknown_kind_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """冒出来一个没见过的类型时默认拒掉：漏放一个写入类任务的代价比多拒一次大。"""
+    _stub_kind(monkeypatch, "什么鬼类型")
+    refusal = loop_scope_refusal("随便一句指令", has_checks=True)
+    assert refusal is not None
 
 
 def test_refusal_judges_the_instruction_it_was_given(
@@ -87,7 +116,7 @@ def test_refusal_judges_the_instruction_it_was_given(
 ) -> None:
     """判定必须拿调用方给的那一句，不能自己另取。"""
     calls = _stub_kind(monkeypatch, "analysis")
-    read_only_refusal("分析这个仓库的目录结构")
+    loop_scope_refusal("分析这个仓库的目录结构", has_checks=False)
     assert calls == ["分析这个仓库的目录结构"]
 
 
@@ -98,10 +127,27 @@ def test_every_known_kind_is_either_allowed_or_refused(
     from agent.runtime.task_router import TASK_KIND_LABELS
 
     assert set(ALL_KINDS) == set(TASK_KIND_LABELS)
+    assert set(ALL_KINDS) == READ_ONLY_KINDS | WRITE_KINDS | REFUSED_KINDS
     for kind in ALL_KINDS:
         _stub_kind(monkeypatch, kind)
-        allowed = read_only_refusal("随便一句指令") is None
-        assert allowed == (kind in READ_ONLY_KINDS)
+        # 配了检查项时，只有 REFUSED_KINDS 会被拒。
+        allowed = loop_scope_refusal("随便一句指令", has_checks=True) is None
+        assert allowed == (kind not in REFUSED_KINDS)
+        # 没配检查项时，写入类也会被拒。
+        allowed_without_checks = (
+            loop_scope_refusal("随便一句指令", has_checks=False) is None
+        )
+        assert allowed_without_checks == (kind in READ_ONLY_KINDS)
+
+
+def test_refusal_for_kind_and_scope_refusal_agree(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """两条入口（已判好的类型 / 一句指令）必须给出同一个结论。"""
+    _stub_kind(monkeypatch, "coding")
+    assert refusal_for_kind("coding", has_checks=False) == loop_scope_refusal(
+        "随便一句指令", has_checks=False
+    )
 
 
 def test_read_only_kinds_match_the_project_predicate_except_for_sync() -> None:
@@ -128,6 +174,8 @@ def test_planning_is_deliberately_excluded() -> None:
 
     assert is_read_only_task("planning")
     assert "planning" not in READ_ONLY_KINDS
+    assert "planning" in REFUSED_KINDS
+    assert "coding" not in REFUSED_KINDS
 
 
 def test_completed_maps_to_succeeded() -> None:
@@ -149,7 +197,7 @@ def test_unknown_status_maps_to_blocked(status: str) -> None:
 def test_runner_refuses_before_touching_the_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """超出只读范围时直接返回，不去建会话、不调模型。"""
+    """写入任务没配检查项时直接返回，不去建会话、不调模型。"""
     _stub_kind(monkeypatch, "coding")
     runner = make_agent_round_runner()
     result = runner(
@@ -162,8 +210,116 @@ def test_runner_refuses_before_touching_the_runtime(
         )
     )
     assert result.outcome == "blocked"
-    assert "只读任务" in result.summary
+    assert "验证检查项" in result.summary
     assert result.thread_id is None
+
+
+def test_a_write_round_skips_the_plan_confirmation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """配了检查项的写入任务真的往下跑，并且跳过「先出方案等确认」那一步。
+
+    交互路径会把首轮的开发需求转成 planning 停下来等用户确认；无人值守的循环里
+    没有人会点那个确认，所以必须显式跳过 —— 否则每轮都停在同一处。
+    """
+    seen: dict[str, Any] = {}
+
+    def fake_run_agent_task(**kwargs: Any) -> dict[str, Any]:
+        seen.update(kwargs)
+        return {"messages": [], "run_id": "run-9"}
+
+    class FakeStore:
+        def get_thread(self, thread_id: str) -> dict[str, str]:
+            return {"latest_run_status": "completed"}
+
+    monkeypatch.setattr("agent.runtime.task_router.run_agent_task", fake_run_agent_task)
+    monkeypatch.setattr(
+        "agent.runtime.task_router.initialize_task_record",
+        lambda **kwargs: kwargs["thread_id"],
+    )
+    monkeypatch.setattr("agent.graph.graph.get_store", lambda: FakeStore())
+    monkeypatch.setattr(
+        "utils.message_utils.extract_final_assistant_text", lambda messages: "改好了"
+    )
+    monkeypatch.setattr("services.automation_runner.resolve_workspace", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "services.automation_runner.resolve_container_exec", lambda *a, **k: None
+    )
+    _stub_kind(monkeypatch, "coding")
+
+    from services.automation_verification import Check
+
+    runner = make_agent_round_runner(thread_id="t1")
+    result = runner(
+        RoundRequest(
+            automation_id="a1",
+            name="每日实现",
+            prompt="实现登录页",
+            instruction="实现一个登录页",
+            repo="https://github.com/owner/repo.git",
+            checks=(Check(command="pytest -q", description="回归"),),
+        )
+    )
+
+    assert result.outcome == "succeeded"
+    assert seen["task_kind"] == "coding"
+    assert seen["skip_plan_confirmation"] is True
+    # 运行 id 要带回来，调用方才能写进定义的 lastRunId。
+    assert result.run_id == "run-9"
+
+
+def test_the_round_run_id_falls_back_to_the_store(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """运行时没回 run_id 时，从运行记录里补一个 —— 界面靠它跳转到这一轮。"""
+
+    def fake_run_agent_task(**kwargs: Any) -> dict[str, Any]:
+        return {"messages": []}
+
+    class FakeStore:
+        def get_thread(self, thread_id: str) -> dict[str, str]:
+            return {"latest_run_status": "completed"}
+
+        def get_latest_run(self, thread_id: str) -> dict[str, str]:
+            return {"run_id": "run-from-store"}
+
+    monkeypatch.setattr("agent.runtime.task_router.run_agent_task", fake_run_agent_task)
+    monkeypatch.setattr(
+        "agent.runtime.task_router.initialize_task_record",
+        lambda **kwargs: kwargs["thread_id"],
+    )
+    monkeypatch.setattr("agent.graph.graph.get_store", lambda: FakeStore())
+    monkeypatch.setattr(
+        "utils.message_utils.extract_final_assistant_text", lambda messages: ""
+    )
+    monkeypatch.setattr("services.automation_runner.resolve_workspace", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "services.automation_runner.resolve_container_exec", lambda *a, **k: None
+    )
+    _stub_kind(monkeypatch, "analysis")
+
+    runner = make_agent_round_runner(thread_id="t1")
+    result = runner(
+        RoundRequest(
+            automation_id="a1",
+            name="每日分诊",
+            prompt="读一遍仓库概况",
+            instruction="读一遍仓库概况",
+            repo="https://github.com/owner/repo.git",
+        )
+    )
+
+    assert result.run_id == "run-from-store"
+
+
+def test_reading_the_run_id_never_fails_the_round() -> None:
+    """运行记录读不到就返回 None —— 它是旁路信息，不该把一轮好活带崩。"""
+
+    class BrokenStore:
+        def get_latest_run(self, thread_id: str) -> dict[str, str]:
+            raise RuntimeError("库连不上")
+
+    assert _latest_run_id(BrokenStore(), "t1") is None
 
 
 def test_runner_refuses_without_a_repo(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -817,3 +973,138 @@ def test_a_failing_resume_hands_the_round_back_to_the_human(
 
     assert result.waiting_approval is True
     assert "checkpoint 读不到" in result.summary
+
+
+def _fake_sandbox_backend(
+    responses: dict[str, tuple[int, str]], *, has_workspace: bool = False
+) -> Any:
+    """造一个假沙箱后端：按命令返回预设的退出码与输出。"""
+    calls: list[tuple[str, int | None]] = []
+
+    class FakeBackend:
+        def execute(self, command: str, *, timeout: int | None = None) -> Any:
+            calls.append((command, timeout))
+            code, output = responses.get(command, (128, ""))
+            return SimpleNamespace(exit_code=code, output=output)
+
+    backend = FakeBackend()
+    if has_workspace:
+        backend.workspace = "/tmp/fake-workspace"
+    return SimpleNamespace(backend=backend, calls=calls)
+
+
+def _stub_backend(monkeypatch: pytest.MonkeyPatch, backend: Any) -> None:
+    """把取 backend 的那一步换掉，避免真去连沙箱。"""
+    monkeypatch.setattr(
+        "server.ensure_backend_for_thread", lambda thread_id, backend_type: backend
+    )
+
+
+def test_container_exec_is_not_resolved_for_the_local_backend() -> None:
+    """本地执行环境不需要容器执行器。"""
+    assert resolve_container_exec("t1", "https://github.com/o/r.git", backend_type="local") is None
+
+
+def test_container_repo_dir_is_discovered_by_asking_git(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """容器里的仓库目录是**问出来的**，不是猜的：问到哪条算哪条。"""
+    fake = _fake_sandbox_backend(
+        {
+            "git -C projects/r rev-parse --show-toplevel": (128, "fatal: not a git repository"),
+            "git -C /projects/r rev-parse --show-toplevel": (0, "/projects/r\n"),
+        }
+    )
+    _stub_backend(monkeypatch, fake.backend)
+
+    resolved = resolve_container_exec(
+        "t1", "https://github.com/owner/r.git", backend_type="sandbox"
+    )
+
+    assert resolved is not None
+    assert resolved.repo_dir == "/projects/r"
+    assert resolved.backend is fake.backend
+    # 第一个候选问失败了才会去问第二个。
+    assert fake.calls[0][0] == "git -C projects/r rev-parse --show-toplevel"
+    assert fake.calls[1][0] == "git -C /projects/r rev-parse --show-toplevel"
+
+
+def test_container_probe_command_passes_the_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """探路命令必须是审批策略判「放行」的只读命令。
+
+    沙箱的 ``execute`` 只拦 ``deny``，判成 ``approval`` 的命令会**直接跑掉** ——
+    那就等于循环自己在无人值守时放行了一条本该等人确认的命令。所以这条探路命令
+    必须落在只读白名单里。
+    """
+    from backends.command_policy import evaluate_command
+
+    for candidate in ("projects/r", "/projects/r", "/workspace/r", "~/r"):
+        command = f"git -C {candidate} rev-parse --show-toplevel"
+        result = evaluate_command(command, "sandbox")
+        assert result.action == "allow", f"{command} 被判成 {result.action}"
+
+
+def test_container_exec_is_none_when_no_candidate_matches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """一个候选都对不上时返回 None —— 调用方会记「没有执行验证」，不糊一份结论。"""
+    fake = _fake_sandbox_backend({})
+    _stub_backend(monkeypatch, fake.backend)
+
+    assert (
+        resolve_container_exec(
+            "t1", "https://github.com/owner/r.git", backend_type="sandbox"
+        )
+        is None
+    )
+
+
+def test_container_exec_skips_backends_that_have_a_local_workspace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """后端有本机工作区就说明这一轮落在本地，不该走容器那条路。"""
+    fake = _fake_sandbox_backend({}, has_workspace=True)
+    _stub_backend(monkeypatch, fake.backend)
+
+    assert (
+        resolve_container_exec(
+            "t1", "https://github.com/owner/r.git", backend_type="sandbox"
+        )
+        is None
+    )
+    assert fake.calls == []
+
+
+def test_a_broken_probe_does_not_break_the_round(monkeypatch: pytest.MonkeyPatch) -> None:
+    """连不上沙箱时返回 None，而不是把异常抛进这一轮。"""
+
+    class BrokenBackend:
+        def execute(self, command: str, *, timeout: int | None = None) -> Any:
+            raise RuntimeError("沙箱连不上")
+
+    _stub_backend(monkeypatch, BrokenBackend())
+
+    assert (
+        resolve_container_exec(
+            "t1", "https://github.com/owner/r.git", backend_type="sandbox"
+        )
+        is None
+    )
+
+
+def test_a_broken_backend_lookup_does_not_break_the_round(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """取 backend 这一步就炸了也要返回 None，原因记日志。"""
+
+    def boom(thread_id: str, backend_type: str) -> Any:
+        raise RuntimeError("沙箱创建失败")
+
+    monkeypatch.setattr("server.ensure_backend_for_thread", boom)
+
+    assert (
+        resolve_container_exec(
+            "t1", "https://github.com/owner/r.git", backend_type="sandbox"
+        )
+        is None
+    )

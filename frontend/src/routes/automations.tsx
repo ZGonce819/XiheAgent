@@ -9,7 +9,7 @@ import {
   RobotIcon,
   TrashIcon,
 } from "@phosphor-icons/react"
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 
 import { AppShell, SettingsSection } from "@/components/AppShell"
 import { Button } from "@/components/ui/button"
@@ -26,6 +26,7 @@ import {
   useCreateAgentSchedule,
   useDeleteAgentSchedule,
   useResumeAgentSchedule,
+  useResetAgentSchedule,
   useRunAgentSchedule,
   useUpdateAgentSchedule,
   useUpdateAgentScheduleBudget,
@@ -46,7 +47,6 @@ type FormState = {
   preset: "hourly" | "daily" | "weekly" | "custom"
   repo: string
   modelId: string
-  effort: string
   autoApprove: boolean
 }
 
@@ -57,7 +57,6 @@ const EMPTY_FORM: FormState = {
   preset: "daily",
   repo: "",
   modelId: "",
-  effort: "default",
   autoApprove: false,
 }
 
@@ -93,22 +92,15 @@ function AutomationManager() {
       setForm((current) => ({
         ...current,
         modelId: modelOptions.defaultSelection?.modelId ?? "",
-        effort: modelOptions.defaultSelection?.effort ?? "default",
       }))
     }
   }, [form.modelId, modelOptions.defaultSelection])
-
-  const selectedModel = useMemo(
-    () => modelOptions.models.find((model) => model.id === form.modelId),
-    [form.modelId, modelOptions.models]
-  )
 
   const resetForm = () => {
     setEditing(null)
     setForm({
       ...EMPTY_FORM,
       modelId: modelOptions.defaultSelection?.modelId ?? "",
-      effort: modelOptions.defaultSelection?.effort ?? "default",
     })
     setError(null)
     setFormOpen(false)
@@ -123,7 +115,6 @@ function AutomationManager() {
       preset: presetForCron(schedule.schedule),
       repo: schedule.repo ?? "",
       modelId: schedule.model,
-      effort: schedule.effort ?? "default",
       autoApprove: schedule.autoApprove === true,
     })
     setError(null)
@@ -146,7 +137,6 @@ function AutomationManager() {
       schedule: form.schedule.trim(),
       repo: form.repo.trim() || null,
       model_id: form.modelId || null,
-      effort: form.effort || null,
       autoApprove: form.autoApprove,
     }
     try {
@@ -326,16 +316,9 @@ function AutomationManager() {
                     id="automation-model"
                     className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:border-ring focus:ring-2 focus:ring-ring/30"
                     value={form.modelId}
-                    onChange={(event) => {
-                      const model = modelOptions.models.find(
-                        (item) => item.id === event.target.value
-                      )
-                      setForm({
-                        ...form,
-                        modelId: event.target.value,
-                        effort: model?.default_effort ?? "default",
-                      })
-                    }}
+                    onChange={(event) =>
+                      setForm({ ...form, modelId: event.target.value })
+                    }
                   >
                     {modelOptions.models.map((model) => (
                       <option key={model.id} value={model.id}>
@@ -345,24 +328,6 @@ function AutomationManager() {
                   </select>
                 </Field>
               </div>
-              {selectedModel && selectedModel.efforts.length > 1 && (
-                <Field label="推理强度" htmlFor="automation-effort">
-                  <select
-                    id="automation-effort"
-                    className="h-7 rounded-md border border-input bg-background px-2 text-xs"
-                    value={form.effort}
-                    onChange={(event) =>
-                      setForm({ ...form, effort: event.target.value })
-                    }
-                  >
-                    {selectedModel.efforts.map((effort) => (
-                      <option key={effort} value={effort}>
-                        {effort}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-              )}
               <Field
                 label="全流程自动化（审批交给表决）"
                 htmlFor="automation-auto-approve"
@@ -466,11 +431,14 @@ function AutomationRow({
 }) {
   const runSchedule = useRunAgentSchedule()
   const resumeSchedule = useResumeAgentSchedule()
+  const resetSchedule = useResetAgentSchedule()
   const updateBudget = useUpdateAgentScheduleBudget()
   const [stateOpen, setStateOpen] = useState(false)
   const [receipt, setReceipt] = useState<AutomationRunReceipt | null>(null)
   const [runError, setRunError] = useState<string | null>(null)
   const [resumeError, setResumeError] = useState<string | null>(null)
+  const [resetOpen, setResetOpen] = useState(false)
+  const [resetError, setResetError] = useState<string | null>(null)
   const [budgetDraft, setBudgetDraft] = useState<BudgetDraft>(EMPTY_BUDGET)
   const [budgetError, setBudgetError] = useState<string | null>(null)
   const loopState = useAgentScheduleState(schedule.id, { enabled: stateOpen })
@@ -770,9 +738,26 @@ function AutomationRow({
                     >
                       {updateBudget.isPending ? "正在保存" : "保存上限"}
                     </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={resetSchedule.isPending}
+                      title="把轮数、token 用量、连续未通过次数与停止标记一起归零，任务本身保留"
+                      onClick={() => {
+                        setResetError(null)
+                        setResetOpen(true)
+                      }}
+                    >
+                      清空历史
+                    </Button>
                     {budgetError && (
                       <span className="text-[0.625rem] text-destructive">
                         {budgetError}
+                      </span>
+                    )}
+                    {resetError && (
+                      <span className="text-[0.625rem] text-destructive">
+                        {resetError}
                       </span>
                     )}
                   </div>
@@ -782,6 +767,28 @@ function AutomationRow({
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={resetOpen}
+        title="清空循环历史"
+        description={`将把“${schedule.name}”的轮数、token 用量、连续未通过次数与停止标记一起归零，已有会话记录不受影响。任务配置保留。`}
+        confirmText="清空"
+        destructive
+        busy={resetSchedule.isPending}
+        onOpenChange={setResetOpen}
+        onConfirm={() => {
+          resetSchedule.mutate(schedule.id, {
+            onSuccess: () => setResetOpen(false),
+            onError: (error: unknown) => {
+              // 关掉对话框再看错误：对话框里没有位置显示它，留着只会让人以为没反应。
+              setResetOpen(false)
+              setResetError(
+                error instanceof Error ? error.message : "清空历史失败"
+              )
+            },
+          })
+        }}
+      />
     </div>
   )
 }

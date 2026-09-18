@@ -144,7 +144,6 @@ export interface AgentSchedule {
   schedule: string
   repo: string | null
   model: string
-  effort?: string | null
   /**
    * 这个任务有没有开启「全流程自动化」：需要审批的命令由三个评审表决决定，
    * 不再停下来等人在界面上点确认。
@@ -153,8 +152,8 @@ export interface AgentSchedule {
    */
   autoApprove?: boolean
   enabled: boolean
-  cronId?: string | null
   lastThreadId?: string | null
+  /** 最近一轮运行的 id；跑完一轮之后才写回来。 */
   lastRunId?: string | null
   lastTriggeredAt?: string | null
   lastError?: string | null

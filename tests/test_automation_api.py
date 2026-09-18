@@ -49,15 +49,21 @@ def dashboard(monkeypatch: pytest.MonkeyPatch, data_root) -> Iterator[TestClient
 def dispatched(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     """拦下整轮执行，返回每次被派发的参数。"""
     import api.dashboard as dashboard_module
+    from services.automation_loop import CycleResult
 
     seen: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        dashboard_module,
-        "run_cycle",
-        lambda automation, runner, **kwargs: seen.append(
-            {"automation": automation, "runner": runner, **kwargs}
-        ),
-    )
+
+    def fake_run_cycle(automation: dict[str, Any], runner: Any, **kwargs: Any) -> Any:
+        seen.append({"automation": automation, "runner": runner, **kwargs})
+        # 真的 run_cycle 一定返回结论 —— 跑完还要拿它的 run_id 写回定义。
+        return CycleResult(
+            automation_id=str(automation.get("id") or ""),
+            ran=True,
+            outcome="succeeded",
+            run_id="run-stub",
+        )
+
+    monkeypatch.setattr(dashboard_module, "run_cycle", fake_run_cycle)
     return seen
 
 
@@ -84,18 +90,60 @@ def test_run_returns_404_for_unknown_automation(dashboard: TestClient) -> None:
     assert dashboard.post("/dashboard/api/schedules/nope/run").status_code == 404
 
 
-def test_run_refuses_write_tasks(
+def test_run_refuses_write_tasks_without_checks(
     dashboard: TestClient, monkeypatch: pytest.MonkeyPatch, dispatched: list[dict[str, Any]]
 ) -> None:
-    """超出只读范围的任务当场拒掉，不能先回 202 再在后台失败。"""
+    """写入任务没配检查项时当场拒掉，不能先回 202 再在后台失败。"""
     monkeypatch.setattr(
         "utils.intent_utils.classify_task_kind", lambda instruction: "coding"
     )
     automation = make_automation(prompt="实现一个登录页并提交代码")
     response = dashboard.post(f"/dashboard/api/schedules/{automation['id']}/run")
     assert response.status_code == 400
-    assert "只读任务" in response.json()["detail"]
+    assert "验证检查项" in response.json()["detail"]
     assert dispatched == []
+
+
+def test_run_allows_write_tasks_with_checks(
+    dashboard: TestClient, monkeypatch: pytest.MonkeyPatch, dispatched: list[dict[str, Any]]
+) -> None:
+    """配了检查项的写入任务可以跑：检查项是无人值守时唯一的独立判断依据。"""
+    monkeypatch.setattr(
+        "utils.intent_utils.classify_task_kind", lambda instruction: "coding"
+    )
+    automation = make_automation(
+        prompt="实现一个登录页并提交代码",
+        checks=[{"command": "git status", "description": "仓库状态"}],
+    )
+    response = dashboard.post(f"/dashboard/api/schedules/{automation['id']}/run")
+    assert response.status_code == 202
+    assert dispatched != []
+
+
+def test_run_refuses_planning_tasks(
+    dashboard: TestClient, monkeypatch: pytest.MonkeyPatch, dispatched: list[dict[str, Any]]
+) -> None:
+    """方案规划仍然拒掉：它按设计会停下来等确认，在循环里等于空转。"""
+    monkeypatch.setattr(
+        "utils.intent_utils.classify_task_kind", lambda instruction: "planning"
+    )
+    automation = make_automation(
+        prompt="先给我一个技术方案",
+        checks=[{"command": "git status", "description": "仓库状态"}],
+    )
+    response = dashboard.post(f"/dashboard/api/schedules/{automation['id']}/run")
+    assert response.status_code == 400
+    assert "确认" in response.json()["detail"]
+    assert dispatched == []
+
+
+def test_a_finished_round_records_its_run_id(
+    dashboard: TestClient, dispatched: list[dict[str, Any]]
+) -> None:
+    """跑完一轮要把运行 id 写回定义，界面才能从任务跳到这一轮。"""
+    automation = make_automation()
+    dashboard.post(f"/dashboard/api/schedules/{automation['id']}/run")
+    assert get_automation(automation["id"])["lastRunId"] == "run-stub"
 
 
 def test_run_refuses_without_repo(
@@ -474,3 +522,61 @@ def test_a_round_that_voted_shows_up_in_the_state(dashboard: TestClient) -> None
     assert votes[0]["approve"] == 2
     assert "审批表决放行" in payload["text"]
     assert 'git commit -m "自动提交"' in payload["text"]
+
+
+def test_deleting_a_task_deletes_its_state_file(dashboard: TestClient) -> None:
+    """删任务要连状态文件一起删。
+
+    定义与状态分两处存，只删定义的话状态目录只增不减 —— 界面上一个任务都没有，
+    磁盘上却堆着一批点不进去的历史。
+    """
+    automation = make_automation()
+    record_run(automation["id"], outcome="succeeded", summary="跑完了")
+    assert state_path(automation["id"]).exists()
+
+    assert dashboard.delete(f"/dashboard/api/schedules/{automation['id']}").status_code == 204
+
+    assert not state_path(automation["id"]).exists()
+
+
+def test_deleting_a_task_without_state_still_works(dashboard: TestClient) -> None:
+    """从没跑过的任务没有状态文件，删除照样成功。"""
+    automation = make_automation()
+    assert not state_path(automation["id"]).exists()
+
+    assert dashboard.delete(f"/dashboard/api/schedules/{automation['id']}").status_code == 204
+
+
+def test_reset_clears_the_history_but_keeps_the_task(dashboard: TestClient) -> None:
+    """清空历史只把计数与结论归零，任务配置留着。"""
+    automation = make_automation()
+    record_run(automation["id"], outcome="failed", summary="这一轮失败了", tokens=120)
+    set_budget(automation["id"], max_runs=3)
+
+    response = dashboard.post(f"/dashboard/api/schedules/{automation['id']}/reset")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["state"]["runs"] == []
+    assert body["state"]["budget"]["runsUsed"] == 0
+    assert body["state"]["budget"]["tokensUsed"] == 0
+    assert body["stopped"] is False
+    # 任务本身还在。
+    assert get_automation(automation["id"]) is not None
+
+
+def test_reset_clears_a_stop_mark(dashboard: TestClient) -> None:
+    """被停下的循环用「清空历史」也能重新跑起来。"""
+    automation = make_automation()
+    mark_stopped(automation["id"], reason="连续未通过")
+
+    response = dashboard.post(f"/dashboard/api/schedules/{automation['id']}/reset")
+
+    assert response.status_code == 200
+    assert response.json()["stopped"] is False
+    assert response.json()["state"]["stop"]["reached"] is False
+
+
+def test_reset_returns_404_for_unknown_automation(dashboard: TestClient) -> None:
+    """清空历史对不存在的任务返回 404。"""
+    assert dashboard.post("/dashboard/api/schedules/nope/reset").status_code == 404

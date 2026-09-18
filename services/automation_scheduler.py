@@ -21,9 +21,10 @@
    ``lastTriggeredAt`` 写新，界面上显示成「刚触发过」。
 
 Note:
-    调度是**进程内**的。多进程部署时每个进程都会扫一遍，同一个任务会被重复触发。
-    要支持多进程得先把「谁负责触发」收敛到一处（单实例选主，或换成外部定时器
-    打 ``POST /dashboard/api/schedules/{id}/run``）。目前只支持单进程。
+    调度是**进程内**的，但**扫描**这一步在多个进程之间用一份 Redis 租约串起来
+    （见 :class:`ScannerLease`）：谁拿到租约谁扫，没拿到的这一轮什么都不做。
+    没有它，多进程部署时每个进程都会扫一遍，同一个任务会被重复触发。
+    租约只是「谁负责触发」的收敛，不改变「一轮在自己的线程里跑」这件事。
 
 Note:
     轮次线程是 daemon。进程退出时不打断正在跑的那一轮，它下一轮会自己重新触发
@@ -37,9 +38,9 @@ import threading
 import uuid
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Protocol
 
-from config.automation_config import mark_automation_triggered
+from config.automation_config import mark_automation_run, mark_automation_triggered
 from config.automation_state import stop_status
 from services.automation_loop import CycleResult, due_automations, run_cycle
 from services.automation_runner import make_agent_round_runner, resolve_backend_type
@@ -48,6 +49,107 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TICK_SECONDS = 30
 """多久扫一次。cron 的最小粒度是分钟，30 秒足够，也不至于空转太频繁。"""
+
+LEASE_KEY = "xihe:automation:scheduler:lease"
+"""扫描租约的 Redis key。"""
+
+DEFAULT_LEASE_SECONDS = 90
+"""租约有效期，取 ``3 ×`` 默认扫描间隔。
+
+必须明显大于扫描间隔：进程被挂起或某次 tick 卡住时，租约到期才能让别的进程接管。
+同时它也不能太小 —— 每次 tick 都会续期，正常运行时不会过期。"""
+
+
+class ScannerLeaseProtocol(Protocol):
+    """扫描租约需要实现的两件事。"""
+
+    def acquire(self) -> bool:
+        """拿到（或续上）租约时返回 ``True``。"""
+        ...
+
+    def release(self) -> None:
+        """主动放掉租约。"""
+        ...
+
+
+class ScannerLease:
+    """基于 Redis 的扫描租约。
+
+    ``SET key owner NX EX ttl`` 抢，抢到了就是自己的；本来就是自己的就续期。
+    没有这个动作，多进程部署下每个进程都会扫到同一分钟、把同一个任务重复触发。
+
+    **Redis 不可用时不拦住扫描**：记一条警告后照常扫。理由是另一头更糟 ——
+    缓存故障会让所有定时任务静默停掉，而当前部署本来就是单进程（真出问题的是
+    「本来就会重复触发」的多进程部署，那是配置问题，不是运行期故障）。
+    这条取舍写在这里，换部署形态时要一起重新想。
+    """
+
+    def __init__(
+        self,
+        *,
+        key: str = LEASE_KEY,
+        ttl_seconds: int = DEFAULT_LEASE_SECONDS,
+        owner: str | None = None,
+        client: Any = None,
+    ) -> None:
+        """初始化租约。
+
+        Args:
+            key: 租约的 key。
+            ttl_seconds: 有效期；必须大于扫描间隔。
+            owner: 持有者标识；不传则现场生成一个进程内唯一的串。
+            client: Redis 客户端；不传则用 :func:`database.redis.get_redis_stream_connection`。
+        """
+        self._key = key
+        self._ttl_seconds = max(1, int(ttl_seconds))
+        self._owner = owner or uuid.uuid4().hex
+        self._client = client
+        self._degraded_logged = False
+
+    def _connection(self) -> Any:
+        """取 Redis 连接（第一次用时才建）。"""
+        if self._client is None:
+            from database.redis import get_redis_stream_connection
+
+            self._client = get_redis_stream_connection()
+        return self._client
+
+    def acquire(self) -> bool:
+        """抢租约或续期。
+
+        Returns:
+            这一轮的扫描该由本进程负责时返回 ``True``。
+        """
+        try:
+            client = self._connection()
+            if client.set(self._key, self._owner, nx=True, ex=self._ttl_seconds):
+                return True
+            if client.get(self._key) == self._owner:
+                client.expire(self._key, self._ttl_seconds)
+                return True
+            return False
+        except Exception:
+            if not self._degraded_logged:
+                # 只报一次：每个 tick 都刷一条会把日志淹掉。
+                logger.warning(
+                    "拿不到扫描租约（Redis 不可用？），本次仍按单进程继续扫描", exc_info=True
+                )
+                self._degraded_logged = True
+            return True
+
+    def release(self) -> None:
+        """放掉租约，让别的进程立刻能接管。
+
+        只删自己的那一份：租约可能已经因为超时落到别人手里了，那时候删掉就等于
+        把别人的锁撬开。
+        """
+        try:
+            client = self._connection()
+            if client.get(self._key) == self._owner:
+                client.delete(self._key)
+        except Exception:
+            logger.debug("释放扫描租约失败", exc_info=True)
+
 
 RoundRunnerFactory = Callable[..., Callable[[Any], Any]]
 
@@ -79,7 +181,8 @@ def cycle_problem(result: CycleResult) -> str | None:
     if isinstance(verification, dict) and not verification.get("executed", True):
         # 这一轮本身看着没事，但配好的检查项一条都没执行 —— 验证门是空的。
         # 放在最后判：这一轮真失败了的话，那条原因更该被看见，别被这条盖掉。
-        # 默认配置（仓库在沙箱容器里）下每轮都会落这里，那正是最该被发现的事。
+        # 容器里没能确定仓库目录、检查项全被审批策略拦下，都会落这里：任务在列表上
+        # 看着一切正常、实际每轮的验证门都没关上，那正是最该被发现的事。
         # 直接用验证结论里的那句话：它已经把「没执行」和原因都说清了。
         return str(verification.get("summary") or "配好的检查项没有执行")
     return None
@@ -94,6 +197,7 @@ class AutomationScheduler:
         tick_seconds: int = DEFAULT_TICK_SECONDS,
         backend_type: str | None = None,
         round_runner_factory: RoundRunnerFactory | None = None,
+        lease_factory: Callable[[], ScannerLeaseProtocol] | None = None,
     ) -> None:
         """初始化调度器（不启动线程）。
 
@@ -102,16 +206,36 @@ class AutomationScheduler:
             backend_type: 执行环境；``None`` 表示每轮按全局配置决定。
             round_runner_factory: 造「跑一轮」的工厂，默认接真实 Agent 运行时。
                 注入是为了让调度本身可以在不调模型的情况下被测试。
+            lease_factory: 造扫描租约的工厂；默认用 Redis 租约，
+                **测试必须传一个假的**，否则会去连真的 Redis，还可能因为别的进程
+                持有租约而让 tick 变成空转。
         """
         self.tick_seconds = max(1, int(tick_seconds))
         self._backend_type = backend_type
         self._round_runner_factory: RoundRunnerFactory = (
             round_runner_factory or make_agent_round_runner
         )
+        self._lease_factory = lease_factory
+        self._lease: ScannerLeaseProtocol | None = None
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._inflight: set[str] = set()
         self._thread: threading.Thread | None = None
+
+    def _scanner_lease(self) -> ScannerLeaseProtocol:
+        """取（必要时新建）扫描租约。
+
+        Returns:
+            本调度器使用的租约对象。
+        """
+        if self._lease is None:
+            if self._lease_factory is not None:
+                self._lease = self._lease_factory()
+            else:
+                self._lease = ScannerLease(
+                    ttl_seconds=max(DEFAULT_LEASE_SECONDS, self.tick_seconds * 3)
+                )
+        return self._lease
 
     @property
     def running(self) -> frozenset[str]:
@@ -143,6 +267,7 @@ class AutomationScheduler:
         """停掉扫描线程。
 
         正在跑的那几轮**不打断** —— 打断会让状态停在半路。它们各自跑完自己收尾。
+        扫描租约同时放掉，让别的进程不用等到超时就能接管。
 
         Args:
             timeout: 等待扫描线程退出的秒数。
@@ -151,6 +276,8 @@ class AutomationScheduler:
         thread, self._thread = self._thread, None
         if thread is not None and thread.is_alive():
             thread.join(timeout=timeout)
+        if self._lease is not None:
+            self._lease.release()
         logger.info("自动化任务调度已停止")
 
     def tick(self, now: datetime | None = None) -> list[str]:
@@ -158,12 +285,18 @@ class AutomationScheduler:
 
         只负责「启动」，不等结果 —— 一轮可能要跑几分钟。
 
+        扫描本身要先拿到租约：多进程部署时，同一个到点任务只该由一个进程触发。
+
         Args:
             now: 扫描时刻；不传则取当前 UTC 时间。
 
         Returns:
             本次启动了哪些自动化任务（id 列表）。
         """
+        if not self._scanner_lease().acquire():
+            logger.debug("扫描租约不在本进程，跳过这一轮扫描")
+            return []
+
         moment = now or datetime.now(UTC)
         scan = due_automations(moment)
         for identifier, problem in scan.problems:
@@ -267,6 +400,8 @@ class AutomationScheduler:
                 identifier, thread_id, moment, f"{type(exc).__name__}: {exc}"
             )
         else:
+            # 跑完了才拿得到运行 id，写进定义让界面能直接跳到这一轮的记录。
+            mark_automation_run(identifier, run_id=result.run_id)
             problem = cycle_problem(result)
             if problem:
                 self._record_error(identifier, thread_id, moment, problem)

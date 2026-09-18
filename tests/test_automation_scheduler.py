@@ -1,12 +1,16 @@
 """自动化任务常驻调度的测试。
 
 调度本身不调模型：``round_runner_factory`` 是注入的，跑一轮的活儿由假对象接手。
-覆盖三件事：
+覆盖四件事：
 
 1. 到点的任务会被启动，**并且触发时间是在启动之前写下的** —— ``is_due`` 靠它
    判断「这一分钟跑过没有」，写晚了同一分钟会重复触发；
 2. 同一个任务上一轮还没跑完时，这一分钟跳过它；
-3. 出任何错都不能把扫描线程带走 —— 线程死了的表现是「所有定时任务都停了」。
+3. 出任何错都不能把扫描线程带走 —— 线程死了的表现是「所有定时任务都停了」；
+4. 扫描租约：拿到才扫，别人的租约不抢、只删自己那份。
+
+调度器一律走 :func:`make_scheduler` 造 —— 默认租约接的是真的 Redis，直接用会把
+用例之间串起来（详见 :class:`StubLease`）。
 """
 
 from __future__ import annotations
@@ -26,7 +30,12 @@ from config.automation_config import (
 )
 from config.automation_state import mark_stopped
 from services.automation_loop import CycleResult, RoundResult
-from services.automation_scheduler import AutomationScheduler, cycle_problem
+from services.automation_scheduler import (
+    LEASE_KEY,
+    AutomationScheduler,
+    ScannerLease,
+    cycle_problem,
+)
 
 MONDAY_9AM = datetime(2026, 9, 21, 9, 0, 30, tzinfo=UTC)
 
@@ -107,11 +116,52 @@ def wait_for(predicate: Any, timeout: float = 5.0) -> bool:
     return False
 
 
+class StubLease:
+    """测试用的扫描租约：本进程永远负责扫描。
+
+    默认租约接的是真的 Redis。测试里**必须**换掉它，否则同一个进程里前一个用例
+    拿走的租约还在有效期内，后面每个用例的 ``tick`` 都会变成空转 ——
+    表现是一整片「到点却没启动」，跟代码坏掉长得一模一样。
+    """
+
+    def __init__(self, grant: bool = True) -> None:
+        """初始化。
+
+        Args:
+            grant: ``acquire`` 该返回什么。传 ``False`` 用来测「租约不在本进程」。
+        """
+        self.grant = grant
+        self.acquires = 0
+        self.releases = 0
+
+    def acquire(self) -> bool:
+        """记一次调用并返回预设结果。"""
+        self.acquires += 1
+        return self.grant
+
+    def release(self) -> None:
+        """记一次释放。"""
+        self.releases += 1
+
+
+def make_scheduler(**kwargs: Any) -> AutomationScheduler:
+    """造一个调度器，扫描租约换成假的。
+
+    用例只关心「到点启不启动」，租约本身另有专门的用例覆盖。
+
+    Returns:
+        注入了假租约的调度器。
+    """
+    kwargs.setdefault("round_runner_factory", make_factory([]))
+    kwargs.setdefault("lease_factory", StubLease)
+    return AutomationScheduler(**kwargs)
+
+
 def test_due_automation_is_started(data_dir: Path) -> None:
     """到点的任务会被启动。"""
     automation = make_automation()
     started: list[dict[str, Any]] = []
-    scheduler = AutomationScheduler(round_runner_factory=make_factory(started))
+    scheduler = make_scheduler(round_runner_factory=make_factory(started))
 
     assert scheduler.tick(MONDAY_9AM) == [automation["id"]]
     assert wait_for(lambda: len(started) == 1)
@@ -122,7 +172,7 @@ def test_trigger_time_is_written_before_the_round_starts(data_dir: Path) -> None
     """触发时间必须写在启动之前 —— 写晚了同一分钟会被重复触发。"""
     automation = make_automation()
     started: list[dict[str, Any]] = []
-    scheduler = AutomationScheduler(round_runner_factory=make_factory(started))
+    scheduler = make_scheduler(round_runner_factory=make_factory(started))
 
     scheduler.tick(MONDAY_9AM)
     saved = get_automation(automation["id"]) or {}
@@ -137,7 +187,7 @@ def test_same_minute_is_not_triggered_twice(data_dir: Path) -> None:
     """同一分钟内重复扫描只启动一次。"""
     make_automation()
     started: list[dict[str, Any]] = []
-    scheduler = AutomationScheduler(round_runner_factory=make_factory(started))
+    scheduler = make_scheduler(round_runner_factory=make_factory(started))
 
     scheduler.tick(MONDAY_9AM)
     scheduler.tick(MONDAY_9AM.replace(second=50))
@@ -153,7 +203,7 @@ def test_disabled_automation_is_skipped(data_dir: Path) -> None:
     # 停用要走更新这条路径。
     update_automation(automation["id"], {"enabled": False})
     started: list[dict[str, Any]] = []
-    scheduler = AutomationScheduler(round_runner_factory=make_factory(started))
+    scheduler = make_scheduler(round_runner_factory=make_factory(started))
 
     assert scheduler.tick(MONDAY_9AM) == []
     assert started == []
@@ -164,7 +214,7 @@ def test_a_round_still_running_is_not_started_again(data_dir: Path) -> None:
     automation = make_automation(schedule="* * * * *")
     release = threading.Event()
     started: list[dict[str, Any]] = []
-    scheduler = AutomationScheduler(
+    scheduler = make_scheduler(
         round_runner_factory=make_factory(started, release=release)
     )
 
@@ -182,7 +232,7 @@ def test_a_finished_round_frees_the_slot(data_dir: Path) -> None:
     """跑完之后这个任务可以被下一次触发。"""
     automation = make_automation(schedule="* * * * *")
     started: list[dict[str, Any]] = []
-    scheduler = AutomationScheduler(round_runner_factory=make_factory(started))
+    scheduler = make_scheduler(round_runner_factory=make_factory(started))
 
     scheduler.tick(MONDAY_9AM)
     assert wait_for(lambda: not scheduler.running)
@@ -194,7 +244,7 @@ def test_a_failing_round_records_the_error_on_the_definition(data_dir: Path) -> 
     """一轮炸了要把原因记进定义，用户在界面上看得见。"""
     automation = make_automation()
     started: list[dict[str, Any]] = []
-    scheduler = AutomationScheduler(
+    scheduler = make_scheduler(
         round_runner_factory=make_factory(started, failure=RuntimeError("编排炸了"))
     )
 
@@ -222,7 +272,7 @@ def test_a_later_success_clears_the_recorded_error(data_dir: Path) -> None:
 
         return run
 
-    scheduler = AutomationScheduler(round_runner_factory=factory)
+    scheduler = make_scheduler(round_runner_factory=factory)
     scheduler.tick(MONDAY_9AM)
     assert wait_for(lambda: not scheduler.running)
     assert "第一次炸了" in str((get_automation(automation["id"]) or {})["lastError"])
@@ -318,7 +368,7 @@ def test_a_stopped_loop_is_not_triggered(data_dir: Path) -> None:
     automation = make_automation(schedule="* * * * *")
     mark_stopped(automation["id"], "连续 3 轮没有通过验证")
     started: list[dict[str, Any]] = []
-    scheduler = AutomationScheduler(round_runner_factory=make_factory(started))
+    scheduler = make_scheduler(round_runner_factory=make_factory(started))
 
     assert scheduler.tick(MONDAY_9AM) == []
     assert started == []
@@ -330,14 +380,14 @@ def test_broken_schedule_is_reported_not_swallowed(data_dir: Path) -> None:
     make_automation(schedule="这不是 cron")
     good = make_automation(name="正常的那个")
     started: list[dict[str, Any]] = []
-    scheduler = AutomationScheduler(round_runner_factory=make_factory(started))
+    scheduler = make_scheduler(round_runner_factory=make_factory(started))
 
     assert scheduler.tick(MONDAY_9AM) == [good["id"]]
 
 
 def test_start_and_stop_are_idempotent(data_dir: Path) -> None:
     """重复启动不会起第二个线程；停掉之后可以再起。"""
-    scheduler = AutomationScheduler(tick_seconds=1, round_runner_factory=make_factory([]))
+    scheduler = make_scheduler(tick_seconds=1, round_runner_factory=make_factory([]))
     assert scheduler.start() is True
     assert scheduler.start() is False
     scheduler.stop()
@@ -356,7 +406,7 @@ def test_scan_failure_does_not_kill_the_thread(
         raise RuntimeError("扫描炸了")
 
     monkeypatch.setattr("services.automation_scheduler.due_automations", boom)
-    scheduler = AutomationScheduler(tick_seconds=1, round_runner_factory=make_factory([]))
+    scheduler = make_scheduler(tick_seconds=1, round_runner_factory=make_factory([]))
     scheduler.start()
     assert wait_for(lambda: len(calls) >= 2, timeout=5)
     scheduler.stop()
@@ -369,7 +419,7 @@ def test_stop_does_not_interrupt_a_running_round(data_dir: Path) -> None:
     automation = make_automation(schedule="* * * * *")
     release = threading.Event()
     started: list[dict[str, Any]] = []
-    scheduler = AutomationScheduler(
+    scheduler = make_scheduler(
         tick_seconds=1, round_runner_factory=make_factory(started, release=release)
     )
     scheduler.start()
@@ -380,3 +430,111 @@ def test_stop_does_not_interrupt_a_running_round(data_dir: Path) -> None:
     assert automation["id"] in scheduler.running
     release.set()
     assert wait_for(lambda: not scheduler.running)
+
+
+def test_a_lease_held_by_someone_else_skips_the_scan(data_dir: Path) -> None:
+    """租约不在本进程时，这一轮一次扫描都不做。
+
+    多进程部署下这条是「同一个到点任务只被触发一次」的全部依据：没拿到租约的进程
+    如果照样扫，每个进程都会各触发一遍。
+    """
+    automation = make_automation()
+    started: list[dict[str, Any]] = []
+    lease = StubLease(grant=False)
+    scheduler = make_scheduler(
+        round_runner_factory=make_factory(started), lease_factory=lambda: lease
+    )
+
+    assert scheduler.tick(MONDAY_9AM) == []
+    assert started == []
+    assert lease.acquires == 1
+    # 没扫描就不该动定义：触发时间必须还是空的，否则界面会显示「刚触发过」。
+    assert (get_automation(automation["id"]) or {})["lastTriggeredAt"] is None
+
+
+def test_stopping_the_scheduler_releases_the_lease(data_dir: Path) -> None:
+    """停调度要把租约放掉，别让别的进程白等到超时。"""
+    lease = StubLease()
+    scheduler = make_scheduler(tick_seconds=1, lease_factory=lambda: lease)
+    scheduler.tick(MONDAY_9AM)
+    scheduler.stop()
+    assert lease.releases == 1
+
+
+class FakeRedis:
+    """够用的假 Redis：只实现租约用到的那四个命令。"""
+
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}
+        self.expires: list[tuple[str, int]] = []
+
+    def set(self, key: str, value: str, *, nx: bool = False, ex: int | None = None) -> bool:
+        """``SET NX EX`` 的最小实现。"""
+        if nx and key in self.values:
+            return False
+        self.values[key] = value
+        return True
+
+    def get(self, key: str) -> str | None:
+        """读回 key。"""
+        return self.values.get(key)
+
+    def expire(self, key: str, seconds: int) -> bool:
+        """记一次续期。"""
+        self.expires.append((key, seconds))
+        return True
+
+    def delete(self, key: str) -> int:
+        """删掉 key。"""
+        return 1 if self.values.pop(key, None) is not None else 0
+
+
+def test_the_lease_is_renewed_when_it_is_already_ours() -> None:
+    """租约本来就是自己的就续期，不能每次都重新抢。"""
+    client = FakeRedis()
+    lease = ScannerLease(client=client, owner="me", ttl_seconds=90)
+
+    assert lease.acquire() is True
+    assert lease.acquire() is True
+
+    assert client.values[LEASE_KEY] == "me"
+    assert client.expires == [(LEASE_KEY, 90)]
+
+
+def test_the_lease_is_not_stolen_when_someone_else_holds_it() -> None:
+    """别人拿着租约时不抢，也不续期别人的。"""
+    client = FakeRedis()
+    client.values[LEASE_KEY] = "someone-else"
+    lease = ScannerLease(client=client, owner="me")
+
+    assert lease.acquire() is False
+    assert client.values[LEASE_KEY] == "someone-else"
+    assert client.expires == []
+
+
+def test_release_only_removes_our_own_lease() -> None:
+    """租约可能已经超时落到别人手里，那时删掉等于撬开别人的锁。"""
+    client = FakeRedis()
+    lease = ScannerLease(client=client, owner="me")
+
+    client.values[LEASE_KEY] = "someone-else"
+    lease.release()
+    assert client.values[LEASE_KEY] == "someone-else"
+
+    client.values[LEASE_KEY] = "me"
+    lease.release()
+    assert LEASE_KEY not in client.values
+
+
+def test_a_broken_redis_does_not_stop_the_scan() -> None:
+    """Redis 不可用时照常扫 —— 缓存故障不该让所有定时任务静默停掉。"""
+
+    class BrokenRedis:
+        def set(self, *args: Any, **kwargs: Any) -> Any:
+            raise ConnectionError("redis 挂了")
+
+    lease = ScannerLease(client=BrokenRedis())
+
+    assert lease.acquire() is True
+    # 放不掉也不能抛：那会把 stop() 带崩。
+    lease.release()

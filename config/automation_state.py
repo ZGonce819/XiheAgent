@@ -39,19 +39,30 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
 import re
+import shutil
 import threading
+import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from config.app_config import get_settings
 
+logger = logging.getLogger(__name__)
+
 _STATE_DIRNAME = "automation_state"
 _LOCK = threading.RLock()
+
+_REPLACE_ATTEMPTS = 5
+"""``os.replace`` 被占用时的最多尝试次数。"""
+
+_REPLACE_BACKOFF_SECONDS = 0.05
+"""每次重试之间等待的基准秒数，按尝试次数线性加长（0.05 / 0.10 / 0.15 …）。"""
 
 SCHEMA_VERSION = 2
 """状态结构版本。v2 相对 v1 多了预算里的 ``maxConsecutiveFailures`` 与每轮的
@@ -310,6 +321,34 @@ def _normalize_approval_votes(raw: Any) -> list[dict[str, Any]]:
     return records
 
 
+def _replace_with_retry(temp: Path, target: Path) -> None:
+    """把临时文件顶替成正式文件，被占用时短退避重试。
+
+    ``os.replace`` 在 Windows 上偶发 ``PermissionError: [WinError 5]`` —— 刚写好的
+    ``.tmp`` 会被文件监视、杀毒或沙箱短暂占用，而状态写盘正好落在「一轮跑完」这个
+    高频时刻。实测比例不高（单文件约 0.3%），但一次失败就让整轮的状态落盘中断，
+    表现成「这一轮没记录」。
+
+    **重试不改变语义**：``os.replace`` 是原子的，重试只是把「碰巧被占用」这一次
+    再试一遍；重试到底仍然失败就照常抛出，不吞异常、也不做半截写入。
+
+    Args:
+        temp: 已写好内容的临时文件。
+        target: 要顶替成的正式文件。
+
+    Raises:
+        PermissionError: 重试用完之后仍然被占用。
+    """
+    for attempt in range(_REPLACE_ATTEMPTS):
+        try:
+            os.replace(temp, target)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(_REPLACE_BACKOFF_SECONDS * (attempt + 1))
+
+
 def state_dir() -> Path:
     """返回循环状态的存放目录。
 
@@ -437,7 +476,9 @@ def save_state(automation_id: Any, state: dict[str, Any]) -> dict[str, Any]:
     """把状态写回磁盘。
 
     先写同目录下的临时文件再 ``os.replace`` 顶替，避免进程中途退出时留下
-    半截 JSON——状态文件被写坏会直接让下一轮读到空历史。
+    半截 JSON——状态文件被写坏会直接让下一轮读到空历史。顶替那一步带短退避
+    重试（见 :func:`_replace_with_retry`）：Windows 上刚写的 ``.tmp`` 会被文件
+    监视短暂占用，一次失败就让整轮状态落空。
 
     Args:
         automation_id: 自动化任务 id。
@@ -464,7 +505,7 @@ def save_state(automation_id: Any, state: dict[str, Any]) -> dict[str, Any]:
         temp.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        os.replace(temp, path)
+        _replace_with_retry(temp, path)
     return payload
 
 
@@ -481,6 +522,78 @@ def reset_state(automation_id: Any) -> dict[str, Any]:
         ValueError: id 非法。
     """
     return save_state(automation_id, initial_state(automation_id))
+
+
+def list_state_ids() -> list[str]:
+    """列出磁盘上所有状态文件对应的自动化 id。
+
+    只认 ``<id>.json`` 这一种文件名；临时文件（``.json.tmp``）不算。
+
+    Returns:
+        状态文件对应的 id，按文件名排序；目录不存在时返回空列表。
+    """
+    directory = state_dir()
+    if not directory.is_dir():
+        return []
+    return sorted(
+        path.stem
+        for path in directory.glob("*.json")
+        if _ID_PATTERN.match(path.stem)
+    )
+
+
+def orphan_state_ids(known_ids: Iterable[str]) -> list[str]:
+    """找出没有对应定义的孤儿状态文件。
+
+    删除自动化时如果没有顺手删状态文件，状态目录就会只增不减 —— 界面上一个任务
+    都没有，磁盘上却堆着一批点不进去的历史。id 是随机短串，不会被复用，留着只会
+    让人对着「0 个任务 / 100 多个状态文件」的落差困惑。
+
+    Args:
+        known_ids: 当前仍然存在的自动化 id。
+
+    Returns:
+        需要清理的 id，按文件名排序。
+    """
+    known = {str(item).strip() for item in known_ids if str(item).strip()}
+    return [item for item in list_state_ids() if item not in known]
+
+
+def prune_orphan_states(
+    known_ids: Iterable[str], *, archive_dir: Path | str | None = None
+) -> list[str]:
+    """清掉没有对应定义的状态文件。
+
+    历史里有真实跑过的记录，删掉不可恢复，所以支持先归档：给了 ``archive_dir``
+    就把文件**移过去**（同名已存在时覆盖），没给才真的删。归档目录是纯手工的
+    逃生口，程序本身不读它。
+
+    Args:
+        known_ids: 当前仍然存在的自动化 id。
+        archive_dir: 归档目录；为 ``None`` 时直接删除。
+
+    Returns:
+        被清理（或归档）的 id，按文件名排序。
+    """
+    pruned: list[str] = []
+    for identifier in orphan_state_ids(known_ids):
+        source = state_dir() / f"{identifier}.json"
+        try:
+            if archive_dir is None:
+                source.unlink()
+            else:
+                target_dir = Path(archive_dir)
+                target_dir.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(source), str(target_dir / source.name))
+        except FileNotFoundError:
+            continue
+        except OSError:
+            # 单个文件清不掉不该让整批停住，也不该把异常抛给调用方（这可能挂在
+            # 删除任务的路径上，用户的任务已经删掉了）。
+            logger.warning("清理孤儿状态文件失败：%s", source, exc_info=True)
+            continue
+        pruned.append(identifier)
+    return pruned
 
 
 def delete_state(automation_id: Any) -> bool:

@@ -55,7 +55,7 @@ export interface ScheduleCreateRequest {
   name?: string | null
   repo?: string | null
   model_id?: string | null
-  effort?: string | null
+  autoApprove?: boolean | null
 }
 
 export interface ScheduleUpdateRequest {
@@ -64,7 +64,7 @@ export interface ScheduleUpdateRequest {
   name?: string | null
   repo?: string | null
   model_id?: string | null
-  effort?: string | null
+  autoApprove?: boolean | null
   enabled?: boolean | null
 }
 
@@ -173,6 +173,11 @@ export const agentsApi = {
   resumeSchedule: (scheduleId: string) =>
     agentsRequest<AutomationStateResponse>(
       `/schedules/${encodeURIComponent(scheduleId)}/resume`,
+      { method: "POST" }
+    ),
+  resetSchedule: (scheduleId: string) =>
+    agentsRequest<AutomationStateResponse>(
+      `/schedules/${encodeURIComponent(scheduleId)}/reset`,
       { method: "POST" }
     ),
   updateScheduleBudget: (scheduleId: string, body: ScheduleBudgetRequest) =>

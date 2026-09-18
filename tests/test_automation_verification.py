@@ -382,3 +382,125 @@ def test_real_local_runner_reports_exit_code(tmp_path: Path) -> None:
     code, output = runner("echo hello", 30)
     assert code == 0
     assert "hello" in output
+
+
+def _fake_sandbox(responses: dict[str, tuple[int | None, str]]) -> Any:
+    """造一个假沙箱后端，用来检查容器执行器的退出码映射。"""
+    from types import SimpleNamespace
+
+    calls: list[str] = []
+
+    class FakeBackend:
+        def execute(self, command: str, *, timeout: int | None = None) -> Any:
+            calls.append(command)
+            code, output = responses.get(command, (0, ""))
+            return SimpleNamespace(exit_code=code, output=output)
+
+    return SimpleNamespace(backend=FakeBackend(), calls=calls)
+
+
+def test_container_runner_prefixes_the_repo_directory() -> None:
+    """命令要在容器内的仓库目录里跑：沙箱的 execute 没有工作目录参数。"""
+    from services.automation_verification import ContainerExec, make_container_runner
+
+    fake = _fake_sandbox({})
+    execute = make_container_runner(
+        ContainerExec(backend=fake.backend, repo_dir="/projects/r")
+    )
+
+    execute("pytest -q", 60)
+
+    assert fake.calls == ["cd /projects/r && pytest -q"]
+
+
+def test_container_runner_keeps_the_exit_code_and_output() -> None:
+    """正常返回时把退出码与输出原样交给验证门。"""
+    from types import SimpleNamespace
+
+    from services.automation_verification import ContainerExec, make_container_runner
+
+    class FakeBackend:
+        def execute(self, command: str, *, timeout: int | None = None) -> Any:
+            return SimpleNamespace(exit_code=2, output="1 failed")
+
+    execute = make_container_runner(ContainerExec(backend=FakeBackend(), repo_dir="."))
+
+    assert execute("pytest -q", 60) == (2, "1 failed")
+
+
+def test_container_timeout_is_not_reported_as_a_failed_check() -> None:
+    """超时的协议退出码要转成超时异常，不能记成「验证没通过」。"""
+    from services.automation_verification import ContainerExec, make_container_runner
+
+    fake = _fake_sandbox({"cd . && pytest -q": (124, "命令在 60 秒后超时")})
+    execute = make_container_runner(ContainerExec(backend=fake.backend, repo_dir="."))
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        execute("pytest -q", 60)
+
+
+def test_container_rejection_is_not_reported_as_a_failed_check() -> None:
+    """沙箱自己拒掉的协议退出码同样要转成异常。"""
+    from services.automation_verification import ContainerExec, make_container_runner
+
+    fake = _fake_sandbox({"cd . && pytest -q": (126, "命令被拒绝：禁止执行空命令")})
+    execute = make_container_runner(ContainerExec(backend=fake.backend, repo_dir="."))
+
+    with pytest.raises(RuntimeError, match="拒绝"):
+        execute("pytest -q", 60)
+
+
+def test_container_transport_error_is_not_reported_as_a_failed_check() -> None:
+    """沙箱连不上时返回的是退出码 1 + 固定前缀，必须与「命令返回 1」分开。
+
+    分不开的后果是把「没能验证」记成「验证没通过」—— 下一轮会去修一个根本没跑过
+    的东西，正是本模块最忌讳的那件事。
+    """
+    from services.automation_verification import ContainerExec, make_container_runner
+
+    fake = _fake_sandbox({"cd . && pytest -q": (1, "执行命令时出错：connection refused")})
+    execute = make_container_runner(ContainerExec(backend=fake.backend, repo_dir="."))
+
+    with pytest.raises(RuntimeError, match="没有执行"):
+        execute("pytest -q", 60)
+
+
+def test_a_real_exit_code_one_is_still_a_failed_check() -> None:
+    """命令自己返回 1（测试真的没过）要照常记成未通过。"""
+    from services.automation_verification import ContainerExec, make_container_runner
+
+    fake = _fake_sandbox({"cd . && pytest -q": (1, "1 failed")})
+    execute = make_container_runner(ContainerExec(backend=fake.backend, repo_dir="."))
+
+    assert execute("pytest -q", 60) == (1, "1 failed")
+
+
+def test_a_container_timeout_becomes_a_timeout_note() -> None:
+    """走完整条链路时，容器超时在结论里是「执行出错」而不是「未通过」。"""
+    from services.automation_verification import ContainerExec, make_container_runner
+
+    fake = _fake_sandbox({f"cd . && {TEST_COMMAND}": (124, "")})
+    result = run_checks(
+        (Check(command=TEST_COMMAND),),
+        backend_type="sandbox",
+        runner=make_container_runner(ContainerExec(backend=fake.backend, repo_dir=".")),
+    )
+
+    assert result.outcomes[0].status == "error"
+    assert "秒仍未结束" in result.outcomes[0].note
+
+
+def test_a_missing_exit_code_is_never_assumed_to_be_zero() -> None:
+    """沙箱没回退出码时绝不能补 0 —— 补 0 等于替它宣布检查通过。"""
+    from types import SimpleNamespace
+
+    from services.automation_verification import ContainerExec, make_container_runner
+
+    class FakeBackend:
+        def execute(self, command: str, *, timeout: int | None = None) -> Any:
+            return SimpleNamespace(output="没有任何退出码")
+
+    execute = make_container_runner(ContainerExec(backend=FakeBackend(), repo_dir="."))
+
+    with pytest.raises(RuntimeError, match="没有返回退出码"):
+        execute("pytest -q", 60)

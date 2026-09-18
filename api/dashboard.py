@@ -32,14 +32,17 @@ from config.automation_config import (
     delete_automation,
     get_automation,
     list_automations,
+    mark_automation_run,
     mark_automation_triggered,
     update_automation,
 )
 from config.automation_state import (
     clear_stopped,
     clear_waiting_approval,
+    delete_state,
     load_state,
     render_state,
+    reset_state,
     set_budget,
     stop_decision,
 )
@@ -70,8 +73,8 @@ from schemas.request_schema import (
 from services.approval_explanation import explain_pending_approval
 from services.automation_loop import run_cycle
 from services.automation_runner import (
+    loop_scope_refusal,
     make_agent_round_runner,
-    read_only_refusal,
     resolve_backend_type,
 )
 from services.automation_verification import parse_checks
@@ -349,9 +352,19 @@ def dashboard_update_schedule(
 
 @dashboard_router.delete("/schedules/{schedule_id}", status_code=204)
 def dashboard_delete_schedule(schedule_id: str) -> None:
-    """Delete an automation definition."""
+    """删除一个自动化任务，连同它的循环状态文件。
+
+    定义与状态分两处存（见 :mod:`config.automation_state`），只删定义的话状态目录
+    会只增不减：界面上一个任务都没有，磁盘上却堆着一批点不进去的历史。
+    """
     if not delete_automation(schedule_id):
         raise HTTPException(status_code=404, detail="自动化任务不存在")
+    # 状态文件已经没用了。清不掉也不让删除失败 —— 用户要删的任务已经删掉了，
+    # 这里再报错只会让他以为任务还在。
+    try:
+        delete_state(schedule_id)
+    except OSError:
+        logger.warning("删除自动化任务的状态文件失败：%s", schedule_id, exc_info=True)
 
 
 def _schedule_state_payload(schedule_id: str) -> dict[str, Any]:
@@ -433,6 +446,29 @@ def dashboard_resume_schedule(schedule_id: str) -> dict[str, Any]:
     return _schedule_state_payload(schedule_id)
 
 
+@dashboard_router.post("/schedules/{schedule_id}/reset")
+def dashboard_reset_schedule(schedule_id: str) -> dict[str, Any]:
+    """清空一个自动化任务的循环历史，保留任务本身。
+
+    和删除的区别是「任务还要继续按计划跑，只是不带着旧历史跑」：轮数、token 用量、
+    连续未通过次数、停止标记、每轮结论全部归零。想重新开始观察一个已经跑歪的任务，
+    又不想重建配置时用它。
+
+    Args:
+        schedule_id: 自动化任务 id。
+
+    Returns:
+        与 GET ``/schedules/{id}/state`` 同样的状态结构，前端可直接替换。
+
+    Raises:
+        HTTPException: 自动化任务不存在时返回 404。
+    """
+    if get_automation(schedule_id) is None:
+        raise HTTPException(status_code=404, detail="自动化任务不存在")
+    reset_state(schedule_id)
+    return _schedule_state_payload(schedule_id)
+
+
 @dashboard_router.patch("/schedules/{schedule_id}/budget")
 def dashboard_update_schedule_budget(
     schedule_id: str, body: dict[str, Any]
@@ -508,7 +544,7 @@ def dashboard_run_schedule(
 
     Raises:
         HTTPException: 任务不存在返回 404；循环已停返回 409；
-            超出只读范围、没配仓库或检查项配错返回 400。
+            任务超出循环可跑范围、没配仓库或检查项配错返回 400。
     """
     automation = get_automation(schedule_id)
     if automation is None:
@@ -518,15 +554,18 @@ def dashboard_run_schedule(
     if stop_source is not None:
         raise HTTPException(status_code=409, detail=f"这个循环已经停了：{reason}")
 
-    refusal = read_only_refusal(str(automation.get("prompt") or ""))
+    try:
+        checks = parse_checks(automation.get("checks"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"检查项配置有误：{exc}") from exc
+
+    refusal = loop_scope_refusal(
+        str(automation.get("prompt") or ""), has_checks=bool(checks)
+    )
     if refusal:
         raise HTTPException(status_code=400, detail=refusal)
     if not automation.get("repo"):
         raise HTTPException(status_code=400, detail="自动化任务没有配置代码仓库")
-    try:
-        parse_checks(automation.get("checks"))
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f"检查项配置有误：{exc}") from exc
 
     # 会话 id 在这里就定下来：触发时间要连同它一起记进定义，前端也能立刻跳过去。
     thread_id = str(uuid.uuid4())
@@ -539,7 +578,7 @@ def dashboard_run_schedule(
 
     def run_once() -> None:
         try:
-            run_cycle(
+            result = run_cycle(
                 automation,
                 make_agent_round_runner(thread_id=thread_id, backend_type=environment),
                 backend_type=environment,
@@ -548,6 +587,9 @@ def dashboard_run_schedule(
             # 跑一轮里的异常已经在 run_cycle 内部记成失败轮次了，能漏到这里的
             # 只剩编排本身的问题，记日志即可，不要让它冒到后台线程外面。
             logger.exception("自动化任务 %s 手动触发失败", schedule_id)
+            return
+        # 跑完才知道运行 id，写进定义让界面能直接跳到这一轮的记录。
+        mark_automation_run(schedule_id, run_id=result.run_id)
 
     background.add_task(run_once)
     return {

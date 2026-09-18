@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -80,7 +81,6 @@ def make_automation(**overrides: Any) -> dict[str, Any]:
         "repo": None,
         "checks": [],
         "model": "__builtin__",
-        "effort": "default",
         "enabled": True,
         "lastTriggeredAt": None,
     }
@@ -413,7 +413,7 @@ def test_skipped_checks_in_sandbox_say_why(data_dir: Path) -> None:
     )
     feedback = load_state(AUTOMATION_ID)["lastFeedback"]
     assert "沙箱" in feedback
-    assert "容器内执行验证" in feedback
+    assert "容器内的仓库目录" in feedback
 
 
 def test_sandbox_rounds_never_accumulate_a_failure_streak(data_dir: Path) -> None:
@@ -542,15 +542,27 @@ def test_cycle_result_is_json_friendly() -> None:
         "stopReason": None,
         "skippedReason": None,
         "approvalVotes": [],
+        "runId": None,
     }
 
 
-def test_round_request_defaults_match_the_definition_shape(data_dir: Path) -> None:
-    """定义里的 model / effort 要原样带进请求。"""
+def test_the_round_request_carries_the_parsed_checks(data_dir: Path) -> None:
+    """解析好的检查项要传给「跑一轮」。
+
+    写入任务靠「有没有配检查项」决定放不放行，而任务类型只有「跑一轮」判得出来 ——
+    少传这一项，配好的检查在闸门那里等于不存在，写入任务会被一律拒掉。
+    """
     runner, requests = make_round_runner()
-    run_cycle(make_automation(model="claude", effort="high"), runner)
+    run_cycle(make_automation(model="claude", checks=[PASSING_CHECK]), runner)
     assert requests[0].model_id == "claude"
-    assert requests[0].effort == "high"
+    assert [check.command for check in requests[0].checks] == [PASSING_CHECK]
+
+
+def test_a_round_without_checks_passes_an_empty_tuple(data_dir: Path) -> None:
+    """没配检查项时是空元组，不是 ``None`` —— 闸门那边只需要判真假。"""
+    runner, requests = make_round_runner()
+    run_cycle(make_automation(), runner)
+    assert requests[0].checks == ()
 
 
 def test_due_scan_can_be_replayed_for_a_specific_moment(data_dir: Path) -> None:
@@ -613,3 +625,93 @@ def test_votes_from_the_round_are_recorded_in_the_state(data_dir: Path) -> None:
     stored = load_state(AUTOMATION_ID)["runs"][0]["approvalVotes"]
     assert stored[0]["decision"] == "approve"
     assert stored[0]["votes"][0]["reason"] == "可以先只暂存"
+
+
+def test_a_round_in_a_container_runs_its_checks_inside(data_dir: Path) -> None:
+    """仓库在容器里时，检查项要在容器内、容器里的仓库目录下执行。
+
+    这是默认部署（``USE_SANDBOX=true``）下的关键一条：本机 ``subprocess`` 到不了
+    容器里的仓库，以前每轮都只能写「没有执行验证」，验证门等于空转。
+    """
+    from services.automation_verification import ContainerExec
+
+    ran: list[str] = []
+
+    class FakeBackend:
+        def execute(self, command: str, *, timeout: int | None = None) -> Any:
+            ran.append(command)
+            return SimpleNamespace(exit_code=0, output="ok")
+
+    runner, _ = make_round_runner(
+        RoundResult(
+            outcome="succeeded",
+            container_exec=ContainerExec(backend=FakeBackend(), repo_dir="/projects/r"),
+        )
+    )
+
+    result = run_cycle(
+        make_automation(checks=[PASSING_CHECK]), runner, backend_type="sandbox"
+    )
+
+    assert result.verification is not None
+    assert result.verification["executed"] is True
+    assert result.verification["passed"] is True
+    assert ran == [f"cd /projects/r && {PASSING_CHECK}"]
+
+
+def test_the_container_executor_wins_over_the_missing_workspace(data_dir: Path) -> None:
+    """容器执行器在场时不能再按「没有工作目录」记未执行。"""
+    from services.automation_verification import ContainerExec
+
+    class FakeBackend:
+        def execute(self, command: str, *, timeout: int | None = None) -> Any:
+            return SimpleNamespace(exit_code=1, output="1 failed")
+
+    runner, _ = make_round_runner(
+        RoundResult(container_exec=ContainerExec(backend=FakeBackend(), repo_dir="."))
+    )
+
+    result = run_cycle(
+        make_automation(checks=[PASSING_CHECK]), runner, backend_type="sandbox"
+    )
+
+    assert result.verification is not None
+    assert result.verification["executed"] is True
+    assert result.verification["passed"] is False
+
+
+def test_the_container_executor_does_not_swallow_the_approval_screen(
+    data_dir: Path,
+) -> None:
+    """需要审批的检查项在容器里也一样不执行 —— 换成容器不等于绕过审批。"""
+    from services.automation_verification import ContainerExec
+
+    ran: list[str] = []
+    approval_command = "git push origin main"
+
+    class FakeBackend:
+        def execute(self, command: str, *, timeout: int | None = None) -> Any:
+            ran.append(command)
+            return SimpleNamespace(exit_code=0, output="")
+
+    runner, _ = make_round_runner(
+        RoundResult(container_exec=ContainerExec(backend=FakeBackend(), repo_dir="."))
+    )
+
+    result = run_cycle(
+        make_automation(checks=[{"command": approval_command, "description": "推送"}]),
+        runner,
+        backend_type="sandbox",
+    )
+
+    assert ran == []
+    assert result.verification is not None
+    assert result.verification["executed"] is False
+
+
+def test_the_cycle_reports_the_run_id(data_dir: Path) -> None:
+    """运行 id 要一路交回调用方，否则定义里的 lastRunId 永远是空的。"""
+    runner, _ = make_round_runner(RoundResult(run_id="run-7"))
+    result = run_cycle(make_automation(), runner)
+    assert result.run_id == "run-7"
+    assert result.as_dict()["runId"] == "run-7"

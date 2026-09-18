@@ -25,8 +25,9 @@
    「连续未通过就停」那条停止条件也会数着环境问题把任务停掉。
 
 Note:
-    本模块不碰后端抽象：执行器由调用方以 ``runner`` 传入，将来应传一个走沙箱
-    backend 的执行器。不传时退回本机 ``subprocess``，只适合本地开发与测试。
+    本模块不碰后端抽象：执行器由调用方以 ``runner`` 传入。仓库在沙箱容器里时传
+    :func:`make_container_runner` 造的那个（命令走 ``backend.execute``，在容器内执行）；
+    不传时退回本机 ``subprocess``，只适合本地开发与测试。
 
 Note:
     检查命令来自配置，属于**不可信输入**。审批策略是第一道闸，:data:`MAX_OUTPUT_CHARS`
@@ -35,6 +36,7 @@ Note:
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 from collections import Counter
 from collections.abc import Callable, Sequence
@@ -52,6 +54,27 @@ _EXECUTED_STATUSES = frozenset({"passed", "failed"})
 Runner = Callable[[str, int], tuple[int, str]]
 """执行一条命令，返回 ``(退出码, 输出)``；无法执行时应抛异常。"""
 
+SANDBOX_REJECTED_EXIT_CODE = 126
+"""沙箱自己拒掉这条命令时用的退出码（见 ``backends/opensandbox.py`` 的
+``execute``）。它是**协议值不是命令的退出码**，必须转成「没能执行」。"""
+
+SANDBOX_TIMEOUT_EXIT_CODE = 124
+"""沙箱侧命令超时时用的退出码，同样是协议值。"""
+
+SANDBOX_ERROR_EXIT_CODE = 1
+"""沙箱侧执行命令出错（连不上、沙箱挂了）时用的退出码。
+
+它和「命令真的以 1 退出」撞在同一个数字上，只能靠输出前缀区分 ——
+见 :data:`SANDBOX_ERROR_PREFIX`。"""
+
+SANDBOX_ERROR_PREFIX = "执行命令时出错："
+"""沙箱执行失败时输出的前缀，用来把「沙箱坏了」与「命令返回 1」分开。
+
+**耦合点**：与 ``backends/opensandbox.py::_execute_command`` 里那条兜底分支的措辞
+绑在一起。改那边的文案就要同步改这里 —— 不同步的后果是把「没能验证」报成
+「验证没通过」，正是本模块最忌讳的那件事。
+"""
+
 DEFAULT_TIMEOUT_SECONDS = 300
 """单条检查的默认超时，避免一条卡住的命令把整个循环拖死。"""
 
@@ -60,6 +83,66 @@ MAX_OUTPUT_CHARS = 1200
 
 MAX_CHECKS_KEPT = 20
 """写进循环状态时最多保留多少条检查结果。"""
+
+
+@dataclass(frozen=True)
+class ContainerExec:
+    """在沙箱容器里执行验证命令所需的全部信息。
+
+    仓库在容器里时，本机 ``subprocess`` 跑不到它 —— 检查项必须在容器内、且必须在
+    **容器内的仓库目录**里执行。这两件事凑齐了才能验，凑不齐就如实记「没有执行
+    验证」，绝不退回本机目录糊一份与目标仓库无关的结论。
+
+    Attributes:
+        backend: 沙箱 backend，只要有 ``execute(command, timeout=...)`` 即可。
+        repo_dir: 容器内的仓库目录（探路探出来的那个，不是猜的）。
+    """
+
+    backend: Any
+    repo_dir: str
+
+
+def make_container_runner(target: ContainerExec) -> Runner:
+    """造一个在容器里执行的验证执行器。
+
+    命令拼成 ``cd <仓库目录> && <检查命令>`` 交给 ``backend.execute``：沙箱的执行
+    接口没有工作目录参数，只能这样指定。这两段都是审批策略能识别的（``cd`` 属只读、
+    检查命令本身已经过 :func:`run_checks` 的第一道闸），不会凭空多出一条「未识别的
+    命令」。
+
+    退出码里有三个是**协议值不是命令的退出码**，必须转成「没能执行」，否则会把
+    「沙箱坏了 / 被拒了」记成「验证没通过」，让下一轮去修一个根本没跑过的东西：
+
+    - :data:`SANDBOX_TIMEOUT_EXIT_CODE` → 抛 ``TimeoutExpired``（走超时那条备注）；
+    - :data:`SANDBOX_REJECTED_EXIT_CODE` → 抛异常（沙箱侧策略与这里不一致）；
+    - :data:`SANDBOX_ERROR_EXIT_CODE` 且输出带 :data:`SANDBOX_ERROR_PREFIX` → 抛异常。
+
+    Args:
+        target: 后端与容器内仓库目录。
+
+    Returns:
+        可以直接传给 :func:`run_checks` 的执行器。
+    """
+
+    def execute(command: str, timeout: int) -> tuple[int, str]:
+        wrapped = f"cd {shlex.quote(target.repo_dir)} && {command}"
+        response = target.backend.execute(wrapped, timeout=timeout)
+        code = getattr(response, "exit_code", None)
+        output = str(getattr(response, "output", "") or "")
+        if code is None:
+            # 拿不到退出码就是不知道结果。**未知绝不补 0** —— 补 0 等于替沙箱宣布
+            # 「检查通过」，那是拿故障换一个绿灯。
+            raise RuntimeError("沙箱没有返回退出码，无法判断这条检查的结果")
+        code = int(code)
+        if code == SANDBOX_TIMEOUT_EXIT_CODE:
+            raise subprocess.TimeoutExpired(command, timeout)
+        if code == SANDBOX_REJECTED_EXIT_CODE:
+            raise RuntimeError(f"沙箱侧拒绝对这条检查的执行：{output.strip()}")
+        if code == SANDBOX_ERROR_EXIT_CODE and output.startswith(SANDBOX_ERROR_PREFIX):
+            raise RuntimeError(f"沙箱没有执行这条检查：{output.strip()}")
+        return code, output
+
+    return execute
 
 
 @dataclass(frozen=True)

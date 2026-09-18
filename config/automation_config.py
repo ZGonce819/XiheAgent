@@ -101,10 +101,8 @@ def create_automation(payload: dict[str, Any]) -> dict[str, Any]:
         "repo": payload.get("repo") or None,
         "checks": _normalize_checks(payload.get("checks")),
         "model": payload.get("model_id") or "__builtin__",
-        "effort": payload.get("effort") or "default",
         "autoApprove": _normalize_flag(payload.get("autoApprove")),
         "enabled": True,
-        "cronId": None,
         "lastThreadId": None,
         "lastRunId": None,
         "lastTriggeredAt": None,
@@ -131,7 +129,6 @@ def update_automation(
         "repo",
         "checks",
         "model_id",
-        "effort",
         "enabled",
         "autoApprove",
     }
@@ -160,6 +157,36 @@ def delete_automation(automation_id: str) -> bool:
         return False
     _save_automations(remaining)
     return True
+
+
+def mark_automation_run(automation_id: str, *, run_id: str | None) -> dict[str, Any] | None:
+    """记下最近一轮运行的 id。
+
+    和 :func:`mark_automation_triggered` 分开是因为**两件事发生的时刻不同**：
+    触发标记必须在启动一轮**之前**写（``is_due`` 靠它判断「这一分钟跑过没有」），
+    而运行的 id 只有跑完之后才知道。用触发那一个函数在跑完后再写一次的话，
+    ``lastTriggeredAt`` 会被刷新成「跑完的时刻」，同一分钟内可能被再触发一次。
+
+    因此这里**只动 ``lastRunId``**，不碰时间与错误字段。
+
+    Args:
+        automation_id: 自动化任务 id。
+        run_id: 这一轮的运行 id；传 ``None`` 表示这一轮没跑起来，保持原值。
+
+    Returns:
+        更新后的自动化定义；id 不存在或 ``run_id`` 为空时返回 ``None``。
+    """
+    if not run_id:
+        return None
+    automations = _load_automations()
+    for automation in automations:
+        if automation.get("id") != automation_id:
+            continue
+        automation["lastRunId"] = str(run_id)
+        automation["updatedAt"] = datetime.now(UTC).isoformat()
+        _save_automations(automations)
+        return automation
+    return None
 
 
 def mark_automation_triggered(

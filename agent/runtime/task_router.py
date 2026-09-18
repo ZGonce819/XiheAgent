@@ -113,6 +113,7 @@ def run_agent_task(
     backend_type: str | None = None,
     routing_prompt: str | None = None,
     task_kind: str | None = None,
+    skip_plan_confirmation: bool = False,
 ) -> dict[str, Any]:
     """运行一次普通 Agent 任务的总入口。
 
@@ -134,6 +135,10 @@ def run_agent_task(
             判定只能看用户写的那一句，不能看附言。
         task_kind: 已经判好的任务类型；不传则自己判。调用方已经判过一次时传进来，
             既保证两边结论一致，也省掉一次模型调用。
+        skip_plan_confirmation: 首轮开发需求是否跳过「先出方案、等用户确认」这一步，
+            直接进入实现。**只给无人值守的循环用**：那里没有人能点确认，走原路径
+            等于每轮都停在同一步，还要被记成「没做完但没报错」。交互路径必须保持
+            默认值 ``False`` —— 用户看着的时候，方案确认是一道有价值的人工闸门。
     """
 
     thread_id = thread_id or str(uuid.uuid4())
@@ -203,7 +208,7 @@ def run_agent_task(
     if approved_plan_text is not None:
         task_kind = "coding"
 
-    if task_kind == "coding" and approved_plan_text is None:
+    if task_kind == "coding" and approved_plan_text is None and not skip_plan_confirmation:
         return run_plan_response_task(repo_url=repo_url, prompt=prompt, thread_id=thread_id, event_sink=event_sink, run_id=run_id, checkpoint_id=checkpoint_id, model_id=model_id, backend_type=backend_type, project_name=existing_thread.get("project_name") if existing_thread else None)
 
     store.clear_run_events(thread_id)

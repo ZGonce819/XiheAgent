@@ -182,6 +182,26 @@ export function useResumeAgentSchedule() {
 }
 
 /**
+ * 清空一个任务的循环历史（保留任务本身）。
+ *
+ * 轮数、token 用量、连续未通过次数与停止标记一起归零，等于让这个任务从「第 1 轮、
+ * 没花过钱、没停过」重新开始。想重新观察一个已经跑歪的任务又不想重建配置时用它。
+ */
+export function useResetAgentSchedule() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (scheduleId: string) => agentsApi.resetSchedule(scheduleId),
+    onSuccess: (_state, scheduleId) => {
+      queryClient.invalidateQueries({ queryKey: agentScheduleKeys.all })
+      queryClient.invalidateQueries({
+        queryKey: agentScheduleKeys.state(scheduleId),
+      })
+    },
+  })
+}
+
+/**
  * 改预算上限。
  *
  * 上限存在循环状态里，所以真正要刷新的是状态；任务列表一并刷是因为列表上会显示

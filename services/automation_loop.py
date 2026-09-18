@@ -38,8 +38,10 @@ from config.automation_state import (
 )
 from services.automation_verification import (
     Check,
+    ContainerExec,
     Runner,
     VerificationResult,
+    make_container_runner,
     parse_checks,
     run_checks,
     unverified,
@@ -62,7 +64,10 @@ def _no_workspace_reason(backend_type: str, outcome: str) -> str:
         # 那会让看状态的人以为目录解析坏了。
         return "这一轮没有跑完，没有执行验证"
     if backend_type == "sandbox":
-        return "仓库在沙箱容器里，还没有接通容器内执行验证的通道，这一轮没有执行验证"
+        return (
+            "仓库在沙箱容器里，但没能确定容器内的仓库目录，"
+            "这一轮没有执行验证"
+        )
     return "没有确定仓库在本机的目录，这一轮没有执行验证"
 
 
@@ -83,7 +88,6 @@ class RoundRequest:
 
     repo: str | None = None
     model_id: str = "__builtin__"
-    effort: str = "default"
     round_number: int = 1
     auto_approve: bool = False
     """这个任务有没有开启「审批交给表决」。
@@ -91,6 +95,14 @@ class RoundRequest:
     开启后，需要审批的命令由三个评审表决决定，不需要人在场
     （见 :mod:`services.approval_vote`）。默认关闭 —— 这是把一处人工闸门交给机器，
     必须是每个任务各自显式开的。
+    """
+
+    checks: tuple[Check, ...] = ()
+    """这个任务配置的验证检查项（已解析）。
+
+    「跑一轮」要用它判断**这个任务写着写入类需求、却一条检查都没配**的情况 ——
+    那等于让循环改完代码之后没有任何人验，必须当场拒掉，而不是跑完再说。
+    只看「配了几条」，不看具体命令 —— 命令能跑不能跑由验证门自己判。
     """
 
 
@@ -126,6 +138,20 @@ class RoundResult:
     不同的事，只记后者会让人以为这一轮没有任何人工介入。
     """
 
+    run_id: str | None = None
+    """这一轮在运行记录里的 id。
+
+    由「跑一轮」在跑完之后填 —— 触发那一刻还不知道它。调用方拿它写回定义里的
+    ``lastRunId``，界面上才能从任务直接跳到这一轮的记录。
+    """
+
+    container_exec: ContainerExec | None = None
+    """仓库在沙箱容器里时，验证命令该怎么进容器执行。
+
+    由「跑一轮」在跑完之后解析（仓库是这一轮才克隆下来的，跑之前那个目录还不
+    存在），交给循环去跑检查项。为空表示按本机 ``subprocess`` 验，或者压根验不了。
+    """
+
 
 MAX_APPROVAL_VOTES_PER_ROUND = 5
 """一轮里最多表决几次。
@@ -151,6 +177,8 @@ class CycleResult:
     skipped_reason: str | None = None
     approval_votes: tuple[dict[str, Any], ...] = ()
     """本轮发生的审批表决，供调度器判断有没有需要写进定义的异常。"""
+    run_id: str | None = None
+    """本轮在运行记录里的 id，供调用方写回定义的 ``lastRunId``。"""
 
     def as_dict(self) -> dict[str, Any]:
         """转成可以直接返回给前端的字典。
@@ -168,6 +196,7 @@ class CycleResult:
             "stopReason": self.stop_reason,
             "skippedReason": self.skipped_reason,
             "approvalVotes": [dict(item) for item in self.approval_votes],
+            "runId": self.run_id,
         }
 
 
@@ -347,10 +376,10 @@ def run_cycle(
         instruction=instruction,
         repo=automation.get("repo") or None,
         model_id=str(automation.get("model") or "__builtin__"),
-        effort=str(automation.get("effort") or "default"),
         round_number=round_number,
         # 开关只在定义里显式为真时才算开；缺字段、字符串 "false" 之类一律按关。
         auto_approve=automation.get("autoApprove") is True,
+        checks=checks,
     )
 
     try:
@@ -369,7 +398,11 @@ def run_cycle(
         # 那个；两者都没有就**不跑** —— 退回进程当前目录会在后端自己的仓库里跑检查项，
         # 得到一份与目标仓库无关的结论，比「没验证」更糟。
         effective_workspace = workspace or result.workspace
-        if effective_workspace is None and check_runner is None:
+        executor = check_runner
+        if executor is None and result.container_exec is not None:
+            # 仓库在沙箱容器里：本机 subprocess 到不了，改在容器内、容器里的仓库目录下执行。
+            executor = make_container_runner(result.container_exec)
+        if effective_workspace is None and executor is None:
             verification = unverified(
                 _no_workspace_reason(backend_type, result.outcome), checks
             )
@@ -378,7 +411,7 @@ def run_cycle(
                 checks,
                 backend_type=backend_type,
                 workspace=effective_workspace,
-                runner=check_runner,
+                runner=executor,
             )
 
     record_run(
@@ -410,4 +443,5 @@ def run_cycle(
         stopped=stopped,
         stop_reason=reason,
         approval_votes=result.approval_votes,
+        run_id=result.run_id,
     )

@@ -3,11 +3,17 @@
 只做一件事：给 :func:`services.automation_loop.run_cycle` 提供一个真正的「跑一轮」
 实现，内部走 :func:`agent.runtime.task_router.run_agent_task`。
 
-**当前只放行只读任务。** 任务类型由 :func:`utils.intent_utils.classify_task_kind`
-判定，只有项目分析 / 问题解答 / 代码审查 / 仓库同步 / 工作区查看这几类会真正执行；
-「开发实现」与「方案规划」会被拒掉。原因是现有交互路径会把首轮的 coding 需求转成
-planning 并停下来等用户确认 —— 对无人值守的循环，那等于永远停在等确认那一步。
-等循环有了自己的写入路径（或者想清楚它该不该直接改代码）再放开。
+**任务范围**：只读任务（项目分析 / 问题解答 / 代码审查 / 仓库同步 / 工作区查看）
+与**写入任务**（``coding``）都能跑。写入任务有两条额外规矩：
+
+1. **必须配验证检查项**。循环改完代码之后没有人在旁边看，唯一的判断依据就是检查项；
+   一条都没配就拒掉，而不是「先改了再说」。判定只看「配没配」，不看命令内容 ——
+   命令能不能跑由验证门自己判。
+2. **走一条不经过方案确认的路径**（``skip_plan_confirmation``）。交互路径会把首轮的
+   开发需求转成 planning 并停下来等用户确认，而无人值守的循环没人会去点那个确认，
+   于是每轮都停在同一步。这条路只给循环用，交互路径的行为不变。
+
+``planning`` 仍然拒掉：它按设计就是产出方案等确认，放进循环等于空转一轮。
 
 Note:
     所有 ``agent.*`` 的 import 都放在函数内部，这是项目既有约定：``services`` 与
@@ -42,6 +48,7 @@ from services.automation_loop import (
     RoundResult,
     RoundRunner,
 )
+from services.automation_verification import ContainerExec
 
 logger = logging.getLogger(__name__)
 
@@ -79,9 +86,7 @@ def _awaiting_approval_summary(thread_id: str) -> str:
     return "这一轮停在等待人工审批，需要人工处理：" + "；".join(commands[:5])
 
 READ_ONLY_KINDS = frozenset({"analysis", "qa", "sync", "inspect", "review"})
-"""允许在循环里自动执行的任务类型。
-
-其余类型（``coding`` / ``planning``）会被 :func:`read_only_refusal` 拒掉。
+"""允许在循环里自动执行的只读任务类型。
 
 与 :func:`utils.intent_utils.is_read_only_task` 有两处**刻意的**不同，别顺手改成一致：
 
@@ -89,6 +94,23 @@ READ_ONLY_KINDS = frozenset({"analysis", "qa", "sync", "inspect", "review"})
   停下来等用户确认，无人值守的循环会永远停在那一步，等于白跑。
 - **多 ``sync``**：项目那套判的是「能不能改文件、提交、push」，``sync`` 只拉取不产出改动；
   「定时拉最新代码」正是循环的典型用途。
+"""
+
+WRITE_KINDS = frozenset({"coding"})
+"""允许在循环里自动执行的写入任务类型。
+
+写入任务能在无人值守时改代码，代价是「改坏了也没人当场看见」，所以额外要求
+**必须配验证检查项**（见 :func:`refusal_for_kind`）—— 检查项是这种任务唯一的
+独立判断依据。
+"""
+
+REFUSED_KINDS = frozenset({"planning"})
+"""明确拒掉的任务类型。
+
+``planning`` 按设计就是「产出方案 → 停下来等用户确认」。交互路径里这是对的，
+放进循环就是每轮都停在同一步、还把它记成 ``blocked``（不算失败），
+``maxConsecutiveFailures`` 永远不会触发。要跑这类需求，把任务指令写成明确的
+实现内容，它会判成 ``coding``。
 """
 
 BUILTIN_MODEL_SENTINEL = "__builtin__"
@@ -109,39 +131,50 @@ def resolve_task_kind(instruction: str) -> str:
     return str(classify_task_kind(instruction))
 
 
-def refusal_for_kind(kind: str) -> str | None:
-    """判断一个已经判好的任务类型是否超出了「只读」范围。
+def refusal_for_kind(kind: str, *, has_checks: bool) -> str | None:
+    """判断一个已经判好的任务类型能不能在循环里跑。
 
     Args:
         kind: 任务类型取值。
+        has_checks: 这个任务有没有配验证检查项。
 
     Returns:
-        超出范围时返回给人看的原因；可以执行时返回 ``None``。
+        不能跑时返回给人看的原因；可以执行时返回 ``None``。
     """
     if kind in READ_ONLY_KINDS:
         return None
+    if kind in WRITE_KINDS:
+        if has_checks:
+            return None
+        return (
+            "写入任务必须至少配一条验证检查项：循环改完代码时没有人在旁边看，"
+            "检查项是唯一的独立判断依据。请先补上「跑什么命令才算改对了」再运行。"
+        )
     from agent.runtime.task_router import TASK_KIND_LABELS
 
     label = TASK_KIND_LABELS.get(kind, kind)
-    return (
-        f"当前只允许只读任务，这一轮的任务被识别为「{label}」。"
-        "要让循环自动改代码，得先给它定一条不经过方案确认的路径。"
-    )
+    if kind in REFUSED_KINDS:
+        return (
+            f"「{label}」会停下来等用户确认方案，无人值守的循环跑不出结果："
+            "请把任务指令写成明确的实现内容，它会被识别为开发实现并直接执行。"
+        )
+    return f"暂不支持的任务类型：{label}"
 
 
-def read_only_refusal(instruction: str) -> str | None:
-    """判断一条任务指令是否超出了「只读」范围。
+def loop_scope_refusal(instruction: str, *, has_checks: bool) -> str | None:
+    """判断一条任务指令能不能在循环里跑。
 
     传进来的应该是**用户写的原始任务指令**，不是拼上循环状态与验证反馈之后的那份 ——
     附加上去的文字会影响任务类型判定。
 
     Args:
         instruction: 原始任务指令。
+        has_checks: 这个任务有没有配验证检查项。
 
     Returns:
-        超出范围时返回给人看的原因；可以执行时返回 ``None``。
+        不能跑时返回给人看的原因；可以执行时返回 ``None``。
     """
-    return refusal_for_kind(resolve_task_kind(instruction))
+    return refusal_for_kind(resolve_task_kind(instruction), has_checks=has_checks)
 
 
 def _outcome_from_status(status: str) -> str:
@@ -385,6 +418,104 @@ def resolve_workspace(thread_id: str, repo_url: str, *, backend_type: str) -> st
     return str(path)
 
 
+CONTAINER_REPO_CANDIDATES = (
+    "projects/{repo}",
+    "/projects/{repo}",
+    "/workspace/{repo}",
+    "~/projects/{repo}",
+    "~/{repo}",
+)
+"""容器里仓库可能落在的几个位置，按常见程度排列。
+
+沙箱镜像不是我们控制的，容器内的工作目录只有跑起来才知道，所以这里**不猜**：
+逐个位置去问 git，问到哪个算哪个；一个都对不上就如实记「没有执行验证」。
+"""
+
+CONTAINER_PROBE_TIMEOUT_SECONDS = 30
+"""问一次容器内仓库目录的超时。只读命令，30 秒足够；卡住也不能把一轮拖死。"""
+
+
+def resolve_container_exec(
+    thread_id: str, repo_url: str, *, backend_type: str
+) -> ContainerExec | None:
+    """解析这一轮该怎样在容器里跑验证命令。
+
+    只有沙箱 + 容器里确实存在仓库时才返回结果。**探不到就返回 ``None``** ——
+    调用方会记「没有执行验证」，而不是退回本机目录糊一份与目标仓库无关的结论。
+
+    探路命令用 ``git -C <候选目录> rev-parse --show-toplevel``：它是一条只读命令，
+    审批策略判 ``allow``，所以既能过沙箱自己的策略闸，也不会凭空多出一条「未识别
+    的命令需要审批」。命令正则里 ``-C`` 会被剥掉再匹配，这条正是既有规则专门覆盖
+    过的形式。
+
+    Args:
+        thread_id: 这一轮的会话 id。
+        repo_url: 仓库地址。
+        backend_type: 执行环境；不是沙箱时直接返回 ``None``。
+
+    Returns:
+        容器执行所需的后端与目录；不需要或探不到时返回 ``None``。
+    """
+    if backend_type != "sandbox":
+        return None
+
+    try:
+        from agent.runtime.repo_mapping import parse_repo_url
+        from server import ensure_backend_for_thread
+
+        backend = ensure_backend_for_thread(thread_id, backend_type)
+        if getattr(backend, "workspace", None) is not None:
+            # 后端有本机工作区，说明这一轮其实落在本地，走本机那条路。
+            return None
+        repo = parse_repo_url(repo_url)
+    except Exception:
+        logger.exception("解析容器内的仓库目录失败：thread_id=%s", thread_id)
+        return None
+
+    for template in CONTAINER_REPO_CANDIDATES:
+        candidate = template.format(repo=repo.repo)
+        try:
+            response = backend.execute(
+                f"git -C {candidate} rev-parse --show-toplevel",
+                timeout=CONTAINER_PROBE_TIMEOUT_SECONDS,
+            )
+        except Exception:
+            logger.exception("在容器里探测仓库目录失败：candidate=%s", candidate)
+            continue
+        if int(getattr(response, "exit_code", 1) or 0) != 0:
+            continue
+        found = str(getattr(response, "output", "") or "").strip().splitlines()
+        # 取最后一行：git 的报错也会混在输出里，真正的工作区路径在最后一行。
+        resolved = found[-1].strip() if found else ""
+        if resolved:
+            logger.info("容器内仓库目录：%s", resolved)
+            return ContainerExec(backend=backend, repo_dir=resolved)
+
+    logger.info("没能在容器里找到仓库目录，这一轮不执行验证：thread_id=%s", thread_id)
+    return None
+
+
+def _latest_run_id(store: Any, thread_id: str) -> str | None:
+    """取这个会话最近一次运行记录的 id。
+
+    读不到就返回 ``None`` —— 运行记录是旁路信息，缺了它只是界面上少一个跳转入口，
+    不该让这一轮失败。
+
+    Args:
+        store: 业务 Store。
+        thread_id: 会话 id。
+
+    Returns:
+        运行 id；读不到时返回 ``None``。
+    """
+    with contextlib.suppress(Exception):
+        record = store.get_latest_run(thread_id) or {}
+        run_id = record.get("run_id")
+        if run_id:
+            return str(run_id)
+    return None
+
+
 def _tokens_used(messages: Sequence[object]) -> int:
     """把一轮里各条消息的 token 用量加起来。
 
@@ -441,7 +572,7 @@ def make_agent_round_runner(
         # 等用户确认的分支停住，而循环还会把这一轮记成「没做完但没报错」。
         instruction = request.instruction or request.prompt
         kind = resolve_task_kind(instruction)
-        refusal = refusal_for_kind(kind)
+        refusal = refusal_for_kind(kind, has_checks=bool(request.checks))
         if refusal:
             return RoundResult(outcome="blocked", summary=refusal)
         if not request.repo:
@@ -476,6 +607,8 @@ def make_agent_round_runner(
                 thread_id=current_thread,
                 model_id=model_id,
                 backend_type=environment,
+                # 循环专用：写入任务直接执行，不停下来等一个没人会点的方案确认。
+                skip_plan_confirmation=True,
             )
         except Exception as exc:
             # run_agent_task 自己的 try 只包住了「调用 Agent 执行」那一段。它前面的
@@ -490,6 +623,7 @@ def make_agent_round_runner(
                 outcome="failed",
                 summary=f"这一轮没能跑完：{type(exc).__name__}: {exc}",
                 thread_id=current_thread,
+                run_id=_latest_run_id(store, current_thread),
                 workspace=resolve_workspace(
                     current_thread, request.repo, backend_type=environment
                 ),
@@ -543,6 +677,16 @@ def make_agent_round_runner(
             # 跑完才解析：仓库是这一轮才 clone 下来的，跑之前那个目录还不存在。
             workspace=resolve_workspace(
                 current_thread, request.repo, backend_type=environment
+            ),
+            run_id=str(result.get("run_id") or "") or _latest_run_id(store, current_thread),
+            # 仓库在容器里时，验证得进容器跑；这里顺手把「怎么进去」也带回去。
+            # 没配检查项就不用探 —— 探路本身要往容器里发几条命令，别白跑。
+            container_exec=(
+                resolve_container_exec(
+                    current_thread, request.repo, backend_type=environment
+                )
+                if request.checks
+                else None
             ),
             approval_votes=settled.votes,
         )
