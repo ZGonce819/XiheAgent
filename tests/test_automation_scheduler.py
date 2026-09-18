@@ -5,12 +5,13 @@
 
 1. 到点的任务会被启动，**并且触发时间是在启动之前写下的** —— ``is_due`` 靠它
    判断「这一分钟跑过没有」，写晚了同一分钟会重复触发；
-2. 同一个任务上一轮还没跑完时，这一分钟跳过它；
+2. 同一个任务已经有一轮在跑时，这一分钟跳过它 —— 判据是那份两边共用的运行登记，
+   所以用户手动点的那一轮也算；
 3. 出任何错都不能把扫描线程带走 —— 线程死了的表现是「所有定时任务都停了」；
 4. 扫描租约：拿到才扫，别人的租约不抢、只删自己那份。
 
-调度器一律走 :func:`make_scheduler` 造 —— 默认租约接的是真的 Redis，直接用会把
-用例之间串起来（详见 :class:`StubLease`）。
+调度器一律走 :func:`make_scheduler` 造 —— 默认租约与默认登记都连着真的 Redis，
+直接用会把用例之间串起来（详见 :class:`StubLease`）。
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from config.automation_config import (
     update_automation,
 )
 from config.automation_state import mark_stopped
+from services.automation_guard import TaskRunGuard
 from services.automation_loop import CycleResult, RoundResult
 from services.automation_scheduler import (
     LEASE_KEY,
@@ -145,15 +147,18 @@ class StubLease:
 
 
 def make_scheduler(**kwargs: Any) -> AutomationScheduler:
-    """造一个调度器，扫描租约换成假的。
+    """造一个调度器，扫描租约与运行登记都换成假的。
 
-    用例只关心「到点启不启动」，租约本身另有专门的用例覆盖。
+    用例只关心「到点启不启动」，租约与登记本身另有专门的用例覆盖。
+    **登记必须换掉**：默认取的是全局那一份，它同样接真 Redis，而且同一个进程里
+    前面用例留下的登记还在有效期内，会让后面的 ``tick`` 全部变成「已经有一轮在跑」。
 
     Returns:
-        注入了假租约的调度器。
+        注入了假租约与假登记的调度器。
     """
     kwargs.setdefault("round_runner_factory", make_factory([]))
     kwargs.setdefault("lease_factory", StubLease)
+    kwargs.setdefault("guard_factory", TaskRunGuard.in_memory)
     return AutomationScheduler(**kwargs)
 
 
@@ -226,6 +231,49 @@ def test_a_round_still_running_is_not_started_again(data_dir: Path) -> None:
 
     release.set()
     assert wait_for(lambda: not scheduler.running)
+
+
+def test_a_task_started_from_elsewhere_is_skipped(data_dir: Path) -> None:
+    """别的入口正在跑这个任务时跳过它 —— 用户手动点的那一轮也算。
+
+    「正在跑」只看两边共用的那份登记。调度器要是只认自己起过的线程，一次点击
+    撞上一次自动触发就会两个线程同跑一轮。
+    """
+    automation = make_automation(schedule="* * * * *")
+    guard = TaskRunGuard.in_memory()
+    started: list[dict[str, Any]] = []
+    scheduler = make_scheduler(
+        round_runner_factory=make_factory(started), guard_factory=lambda: guard
+    )
+    assert guard.acquire(automation["id"]) is not None
+
+    assert scheduler.tick(MONDAY_9AM) == []
+    assert started == []
+    # 关键是**没有写触发标记**：写了的话界面上显示成「刚触发过」，而这一分钟
+    # 实际什么都没跑。
+    assert (get_automation(automation["id"]) or {})["lastTriggeredAt"] is None
+
+
+def test_a_broken_trigger_mark_holds_nothing(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """触发标记写不进去时既不启动，也不把登记攥在手里 —— 攥着就再也触发不了。"""
+    import services.automation_scheduler as scheduler_module
+
+    def broken(*args: Any, **kwargs: Any) -> None:
+        raise OSError("盘满了")
+
+    monkeypatch.setattr(scheduler_module, "mark_automation_triggered", broken)
+    make_automation()
+    guard = TaskRunGuard.in_memory()
+    started: list[dict[str, Any]] = []
+    scheduler = make_scheduler(
+        round_runner_factory=make_factory(started), guard_factory=lambda: guard
+    )
+
+    assert scheduler.tick(MONDAY_9AM) == []
+    assert started == []
+    assert guard.held() == frozenset()
 
 
 def test_a_finished_round_frees_the_slot(data_dir: Path) -> None:

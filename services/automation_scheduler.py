@@ -11,7 +11,9 @@
    ``lastTriggeredAt`` 判断「这一分钟跑过没有」，标记写在启动之后就晚了，
    同一分钟会被重复触发；
 2. 每一轮在自己的线程里跑，一个慢轮次不会挡住后面的任务；
-3. 同一个自动化上一轮还没跑完时，这一分钟跳过它；
+3. 同一个自动化已经有一轮在跑时，这一分钟跳过它 —— 「正在跑」这件事由
+   :mod:`services.automation_guard` 统一记账，不只看本调度器起过的线程，
+   用户手动点的那一轮也算；
 4. 一轮没跑成功（失败、或者根本没执行）时，把原因写进定义的 ``lastError``。
    不写的话，一个坏掉的任务在列表上和正常的长得一模一样 —— 只有点进详情
    才看得见，等于没人会发现。跑成功的那次触发会把这条错误清掉；
@@ -25,6 +27,13 @@ Note:
     （见 :class:`ScannerLease`）：谁拿到租约谁扫，没拿到的这一轮什么都不做。
     没有它，多进程部署时每个进程都会扫一遍，同一个任务会被重复触发。
     租约只是「谁负责触发」的收敛，不改变「一轮在自己的线程里跑」这件事。
+
+Note:
+    本调度器**只负责触发**，并不独占「这个任务正在跑」这件事 —— 用户在界面上点
+    「立即跑一轮」走的是另一条路（``api/dashboard.py`` 的手动触发接口），
+    而调度器实例由 ``app.py`` 的 lifespan 持有、没有「取当前调度器」的入口，
+    接口层拿不到它。两边共用 :mod:`services.automation_guard` 里的那份登记：
+    撞上时调度侧跳过这一分钟，接口侧返回 409。
 
 Note:
     轮次线程是 daemon。进程退出时不打断正在跑的那一轮，它下一轮会自己重新触发
@@ -42,6 +51,7 @@ from typing import Any, Protocol
 
 from config.automation_config import mark_automation_run, mark_automation_triggered
 from config.automation_state import stop_status
+from services.automation_guard import TaskRunGuardProtocol, task_guard
 from services.automation_loop import CycleResult, due_automations, run_cycle
 from services.automation_runner import make_agent_round_runner, resolve_backend_type
 
@@ -198,6 +208,7 @@ class AutomationScheduler:
         backend_type: str | None = None,
         round_runner_factory: RoundRunnerFactory | None = None,
         lease_factory: Callable[[], ScannerLeaseProtocol] | None = None,
+        guard_factory: Callable[[], TaskRunGuardProtocol] | None = None,
     ) -> None:
         """初始化调度器（不启动线程）。
 
@@ -209,6 +220,8 @@ class AutomationScheduler:
             lease_factory: 造扫描租约的工厂；默认用 Redis 租约，
                 **测试必须传一个假的**，否则会去连真的 Redis，还可能因为别的进程
                 持有租约而让 tick 变成空转。
+            guard_factory: 取运行登记的工厂；默认取全局登记（与手动触发接口同一份）。
+                **测试必须传一个假的**，否则用例之间会互相占着同一份登记。
         """
         self.tick_seconds = max(1, int(tick_seconds))
         self._backend_type = backend_type
@@ -217,9 +230,8 @@ class AutomationScheduler:
         )
         self._lease_factory = lease_factory
         self._lease: ScannerLeaseProtocol | None = None
+        self._guard: TaskRunGuardProtocol = (guard_factory or task_guard)()
         self._stop = threading.Event()
-        self._lock = threading.Lock()
-        self._inflight: set[str] = set()
         self._thread: threading.Thread | None = None
 
     def _scanner_lease(self) -> ScannerLeaseProtocol:
@@ -241,11 +253,13 @@ class AutomationScheduler:
     def running(self) -> frozenset[str]:
         """当前正在跑的自动化任务 id。
 
+        取自共享的运行登记，所以**手动触发的那一轮也算** —— 它和调度器起的那几轮
+        是同一份记账。
+
         Returns:
             正在跑的 id 集合。
         """
-        with self._lock:
-            return frozenset(self._inflight)
+        return self._guard.held()
 
     def start(self) -> bool:
         """启动后台扫描线程。
@@ -316,22 +330,34 @@ class AutomationScheduler:
                 # 实际什么都没做。跳过它，让停止状态在界面上保持诚实。
                 logger.debug("自动化任务 %s 已停止（%s），本次不触发", identifier, reason)
                 continue
-            with self._lock:
-                if identifier in self._inflight:
-                    logger.info(
-                        "自动化任务 %s 上一轮还没跑完，这一分钟跳过", identifier
-                    )
-                    continue
-                self._inflight.add(identifier)
-
-            thread_id = str(uuid.uuid4())
-            mark_automation_triggered(identifier, thread_id=thread_id, at=moment)
-            self._spawn(automation, thread_id, moment)
+            run_token = self._guard.acquire(identifier)
+            if run_token is None:
+                # 这个任务已经有一轮在跑：可能是上一轮还没跑完，也可能是用户刚在
+                # 界面上点的那一轮。两种都只该等 —— 两个线程同跑一轮会各读一份
+                # ``runsUsed``，跑完再互相把状态文件盖掉。
+                logger.info("自动化任务 %s 已经有一轮在跑，这一分钟跳过", identifier)
+                continue
+            try:
+                thread_id = str(uuid.uuid4())
+                mark_automation_triggered(identifier, thread_id=thread_id, at=moment)
+            except Exception:
+                # 触发标记写不进去就别启动了。登记留在自己手里的话，这个任务会一直
+                # 显示成「正在跑」，除非重启，否则再也触发不了。
+                self._guard.release(identifier, run_token)
+                logger.exception(
+                    "自动化任务 %s 的触发标记写不进去，本次不启动", identifier
+                )
+                continue
+            self._spawn(automation, thread_id, moment, run_token)
             started.append(identifier)
         return started
 
     def _spawn(
-        self, automation: Mapping[str, Any], thread_id: str, moment: datetime
+        self,
+        automation: Mapping[str, Any],
+        thread_id: str,
+        moment: datetime,
+        run_token: str,
     ) -> None:
         """把一轮放进独立线程。
 
@@ -340,21 +366,21 @@ class AutomationScheduler:
             thread_id: 这一轮的会话 id。
             moment: 触发时刻。要一路带到 :meth:`_run_one` —— 那一轮出问题时
                 写的 ``lastTriggeredAt`` 必须还是这个时刻，不能是「跑完的时刻」。
+            run_token: 这一轮占着的运行登记凭据，一路带到 :meth:`_run_one` 收尾时释放。
         """
         identifier = str(automation.get("id") or "")
         try:
             worker = threading.Thread(
                 target=self._run_one,
-                args=(automation, thread_id, moment),
+                args=(automation, thread_id, moment, run_token),
                 name=f"automation-{identifier}",
                 daemon=True,
             )
             worker.start()
         except Exception:
-            # 线程都起不来时必须把标记摘掉，否则这个任务会永远停在「正在跑」，
+            # 线程都起不来时必须把登记放掉，否则这个任务会永远停在「正在跑」，
             # 之后再也不会被触发。
-            with self._lock:
-                self._inflight.discard(identifier)
+            self._guard.release(identifier, run_token)
             logger.exception("自动化任务 %s 启动失败", identifier)
 
     def _record_error(
@@ -373,7 +399,11 @@ class AutomationScheduler:
         )
 
     def _run_one(
-        self, automation: Mapping[str, Any], thread_id: str, moment: datetime
+        self,
+        automation: Mapping[str, Any],
+        thread_id: str,
+        moment: datetime,
+        run_token: str,
     ) -> None:
         """跑一轮并把异常兜住。
 
@@ -381,6 +411,7 @@ class AutomationScheduler:
             automation: 自动化定义。
             thread_id: 这一轮的会话 id。
             moment: 触发时刻。
+            run_token: 这一轮占着的运行登记凭据。
         """
         identifier = str(automation.get("id") or "")
         environment = resolve_backend_type(self._backend_type)
@@ -406,8 +437,8 @@ class AutomationScheduler:
             if problem:
                 self._record_error(identifier, thread_id, moment, problem)
         finally:
-            with self._lock:
-                self._inflight.discard(identifier)
+            # 无论跑成什么样都要放掉登记：留着的话这个任务再也触发不了。
+            self._guard.release(identifier, run_token)
 
     def _loop(self) -> None:
         """后台扫描循环。"""

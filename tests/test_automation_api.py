@@ -33,7 +33,26 @@ REPO = "https://example.com/a/b.git"
 
 
 @pytest.fixture
-def dashboard(monkeypatch: pytest.MonkeyPatch, data_root) -> Iterator[TestClient]:
+def run_guard(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """把全局运行登记换成只在本进程内互斥的一份，并交给用例。
+
+    默认那份接的是真的 Redis：用例会往真缓存里写 key，而且同一个进程里前面用例
+    留下的登记还在有效期内，会把后面的触发全挡成 409。
+
+    Returns:
+        注入进去的登记实例。
+    """
+    import services.automation_guard as guard_module
+
+    guard = guard_module.TaskRunGuard.in_memory()
+    monkeypatch.setattr(guard_module, "_guard", guard)
+    return guard
+
+
+@pytest.fixture
+def dashboard(
+    monkeypatch: pytest.MonkeyPatch, run_guard: Any, data_root
+) -> Iterator[TestClient]:
     """一个只挂了仪表盘路由的测试客户端，任务类型判定固定为「项目分析」。"""
     import api.dashboard as dashboard_module
 
@@ -144,6 +163,80 @@ def test_a_finished_round_records_its_run_id(
     automation = make_automation()
     dashboard.post(f"/dashboard/api/schedules/{automation['id']}/run")
     assert get_automation(automation["id"])["lastRunId"] == "run-stub"
+
+
+def test_run_refuses_while_another_round_is_running(
+    dashboard: TestClient, dispatched: list[dict[str, Any]], run_guard: Any
+) -> None:
+    """这个任务已经有一轮在跑时当场拒掉。
+
+    占用的一方可能是上一轮还没跑完，也可能是用户刚在别处点的一轮 —— 这里直接把
+    登记占住来模拟。不拒的话两个线程会同跑一轮：各自读同一份 ``runsUsed``，
+    跑完再各自把状态写回去，轮次计数会丢。
+    """
+    automation = make_automation()
+    assert run_guard.acquire(automation["id"]) is not None
+
+    response = dashboard.post(f"/dashboard/api/schedules/{automation['id']}/run")
+
+    assert response.status_code == 409
+    assert "有一轮在跑" in response.json()["detail"]
+    # 拒掉就是真的没跑：一轮都不该派下去。
+    assert dispatched == []
+    # 也不能留下「刚触发过」的痕迹 —— 那会让界面上显示成跑过了。
+    assert get_automation(automation["id"])["lastTriggeredAt"] is None
+
+
+def test_a_finished_round_frees_the_registration(
+    dashboard: TestClient, dispatched: list[dict[str, Any]], run_guard: Any
+) -> None:
+    """跑完要把登记放掉 —— 不放的话在超时之前这个任务谁都点不动。"""
+    automation = make_automation()
+
+    first = dashboard.post(f"/dashboard/api/schedules/{automation['id']}/run")
+    assert first.status_code == 202
+    assert dispatched != []
+    assert run_guard.held() == frozenset()
+
+    # 放掉之后马上能再点一轮。
+    second = dashboard.post(f"/dashboard/api/schedules/{automation['id']}/run")
+    assert second.status_code == 202
+
+
+def test_a_failed_round_still_frees_the_registration(
+    dashboard: TestClient, monkeypatch: pytest.MonkeyPatch, run_guard: Any
+) -> None:
+    """一轮炸了也必须放掉登记 —— 这是这类锁最典型的卡死方式。"""
+    import api.dashboard as dashboard_module
+
+    def broken(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("编排炸了")
+
+    monkeypatch.setattr(dashboard_module, "run_cycle", broken)
+    automation = make_automation()
+
+    response = dashboard.post(f"/dashboard/api/schedules/{automation['id']}/run")
+
+    assert response.status_code == 202
+    assert run_guard.held() == frozenset()
+
+
+def test_a_broken_acceptance_releases_the_registration(
+    dashboard: TestClient, monkeypatch: pytest.MonkeyPatch, run_guard: Any
+) -> None:
+    """受理这一步就失败时也要放掉登记，否则这个任务在超时前谁都点不动。"""
+    import api.dashboard as dashboard_module
+
+    def broken(*args: Any, **kwargs: Any) -> None:
+        raise OSError("盘满了")
+
+    monkeypatch.setattr(dashboard_module, "mark_automation_triggered", broken)
+    automation = make_automation()
+
+    with pytest.raises(OSError):
+        dashboard.post(f"/dashboard/api/schedules/{automation['id']}/run")
+
+    assert run_guard.held() == frozenset()
 
 
 def test_run_refuses_without_repo(

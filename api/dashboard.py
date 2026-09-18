@@ -71,6 +71,7 @@ from schemas.request_schema import (
     DashboardViewSnapshotRequest,
 )
 from services.approval_explanation import explain_pending_approval
+from services.automation_guard import task_guard
 from services.automation_loop import run_cycle
 from services.automation_runner import (
     loop_scope_refusal,
@@ -535,6 +536,11 @@ def dashboard_run_schedule(
     去猜。能跑则把整轮交给后台 —— 一轮可能要跑几分钟，不该占着这个请求。
     跑完之后的进展用 GET ``/schedules/{id}/state`` 读。
 
+    这个任务已经有一轮在跑时当场拒掉。调度线程到点也会跑同一个任务，两边看到的
+    如果只是各自的记账，一次点击撞上一次自动触发就是两个线程同跑一轮：各自读同一份
+    ``runsUsed``，跑完再各自把状态写回去，轮次计数会丢。互斥靠
+    :func:`services.automation_guard.task_guard` 里那份两边共用的登记。
+
     Args:
         schedule_id: 自动化任务 id。
         background: FastAPI 的后台任务收集器。
@@ -543,8 +549,8 @@ def dashboard_run_schedule(
         含 ``threadId`` 与第几轮的受理回执。
 
     Raises:
-        HTTPException: 任务不存在返回 404；循环已停返回 409；
-            任务超出循环可跑范围、没配仓库或检查项配错返回 400。
+        HTTPException: 任务不存在返回 404；循环已停、或这个任务已经有一轮在跑
+            返回 409；任务超出循环可跑范围、没配仓库或检查项配错返回 400。
     """
     automation = get_automation(schedule_id)
     if automation is None:
@@ -567,10 +573,26 @@ def dashboard_run_schedule(
     if not automation.get("repo"):
         raise HTTPException(status_code=400, detail="自动化任务没有配置代码仓库")
 
-    # 会话 id 在这里就定下来：触发时间要连同它一起记进定义，前端也能立刻跳过去。
-    thread_id = str(uuid.uuid4())
-    mark_automation_triggered(schedule_id, thread_id=thread_id)
-    round_number = int(load_state(schedule_id)["budget"]["runsUsed"]) + 1
+    # 抢「这个任务正在跑」的登记。必须在写触发标记之前抢：抢不到却已经把
+    # lastTriggeredAt 写新了，界面上就显示成「刚触发过」，实际一次都没跑。
+    guard = task_guard()
+    run_token = guard.acquire(schedule_id)
+    if run_token is None:
+        raise HTTPException(
+            status_code=409,
+            detail="这个任务已经有一轮在跑（也可能是上一次运行没能正常收尾），等它结束再触发",
+        )
+
+    try:
+        # 会话 id 在这里就定下来：触发时间要连同它一起记进定义，前端也能立刻跳过去。
+        thread_id = str(uuid.uuid4())
+        mark_automation_triggered(schedule_id, thread_id=thread_id)
+        round_number = int(load_state(schedule_id)["budget"]["runsUsed"]) + 1
+    except Exception:
+        # 受理这一步失败就放掉登记。留着自己手里的话，这个任务在登记超时之前
+        # 谁都点不动 —— 用户看到的会是一个永远说「已经在跑」的任务。
+        guard.release(schedule_id, run_token)
+        raise
 
     # 执行环境要显式定下来传下去：验证门的审批策略按它判断，缺省值 "local" 在
     # 开了沙箱的部署里会用错一套策略。
@@ -587,9 +609,12 @@ def dashboard_run_schedule(
             # 跑一轮里的异常已经在 run_cycle 内部记成失败轮次了，能漏到这里的
             # 只剩编排本身的问题，记日志即可，不要让它冒到后台线程外面。
             logger.exception("自动化任务 %s 手动触发失败", schedule_id)
-            return
-        # 跑完才知道运行 id，写进定义让界面能直接跳到这一轮的记录。
-        mark_automation_run(schedule_id, run_id=result.run_id)
+        else:
+            # 跑完才知道运行 id，写进定义让界面能直接跳到这一轮的记录。
+            mark_automation_run(schedule_id, run_id=result.run_id)
+        finally:
+            # 无论跑成什么样都要放掉登记：留着的话这个任务再也点不动了。
+            guard.release(schedule_id, run_token)
 
     background.add_task(run_once)
     return {
