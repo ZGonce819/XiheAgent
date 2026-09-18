@@ -543,6 +543,7 @@ def test_cycle_result_is_json_friendly() -> None:
         "skippedReason": None,
         "approvalVotes": [],
         "runId": None,
+        "innerIterations": 1,
     }
 
 
@@ -715,3 +716,172 @@ def test_the_cycle_reports_the_run_id(data_dir: Path) -> None:
     result = run_cycle(make_automation(), runner)
     assert result.run_id == "run-7"
     assert result.as_dict()["runId"] == "run-7"
+
+
+def _make_sequential_runner(
+    results: list[RoundResult],
+) -> tuple[Callable[[RoundRequest], RoundResult], list[RoundRequest]]:
+    """造一个按顺序返回不同结果的假「跑一轮」。
+
+    每次调用弹出列表头部的结果；用完后一直返回最后一个。
+
+    Returns:
+        ``(跑一轮, 收到的请求列表)``。
+    """
+    requests: list[RoundRequest] = []
+    remaining = list(results)
+
+    def run(request: RoundRequest) -> RoundResult:
+        requests.append(request)
+        if len(remaining) > 1:
+            return remaining.pop(0)
+        return remaining[0]
+
+    return run, requests
+
+
+def test_inner_loop_retries_when_verification_fails(data_dir: Path) -> None:
+    """验证未通过时内层循环立即重试，并把反馈带进下一次指令。"""
+    set_budget(AUTOMATION_ID, max_inner_iterations=3)
+    runner, requests = _make_sequential_runner([
+        RoundResult(outcome="succeeded", summary="第一次尝试", tokens=100),
+        RoundResult(outcome="succeeded", summary="第二次尝试", tokens=100),
+        RoundResult(outcome="succeeded", summary="第三次尝试", tokens=100),
+    ])
+    automation = make_automation(checks=[FAILING_CHECK])
+    check_runner = make_check_runner(failing=(FAILING_CHECK,))
+
+    result = run_cycle(automation, runner, check_runner=check_runner)
+
+    assert len(requests) == 3
+    assert result.inner_iterations == 3
+    assert "上一轮的验证没有通过" in requests[1].prompt
+    assert FAILING_CHECK in requests[1].prompt
+
+
+def test_inner_loop_stops_at_the_iteration_limit(data_dir: Path) -> None:
+    """达到内层迭代上限时退出循环，不再多跑。"""
+    set_budget(AUTOMATION_ID, max_inner_iterations=2)
+    runner, requests = _make_sequential_runner([
+        RoundResult(outcome="succeeded", tokens=50),
+        RoundResult(outcome="succeeded", tokens=50),
+        RoundResult(outcome="succeeded", tokens=50),
+    ])
+    automation = make_automation(checks=[FAILING_CHECK])
+    check_runner = make_check_runner(failing=(FAILING_CHECK,))
+
+    result = run_cycle(automation, runner, check_runner=check_runner)
+
+    assert len(requests) == 2
+    assert result.inner_iterations == 2
+
+
+def test_inner_loop_exits_immediately_when_verification_passes(
+    data_dir: Path,
+) -> None:
+    """验证一次就过时不多跑 —— 内层循环的目的是修正错误，不是刷次数。"""
+    set_budget(AUTOMATION_ID, max_inner_iterations=3)
+    runner, requests = _make_sequential_runner([
+        RoundResult(outcome="succeeded", tokens=80),
+    ])
+    automation = make_automation(checks=[PASSING_CHECK])
+
+    result = run_cycle(automation, runner, check_runner=make_check_runner())
+
+    assert len(requests) == 1
+    assert result.inner_iterations == 1
+    assert result.verification is not None
+    assert result.verification["passed"] is True
+
+
+def test_inner_loop_does_not_retry_on_execution_failure(data_dir: Path) -> None:
+    """执行失败时不迭代 —— 重试没有意义，问题不在验证反馈能修正的范围内。"""
+    set_budget(AUTOMATION_ID, max_inner_iterations=3)
+    runner, requests = _make_sequential_runner([
+        RoundResult(outcome="failed", summary="模型超时", tokens=30),
+        RoundResult(outcome="succeeded", tokens=30),
+    ])
+    automation = make_automation(checks=[FAILING_CHECK])
+    check_runner = make_check_runner(failing=(FAILING_CHECK,))
+
+    result = run_cycle(automation, runner, check_runner=check_runner)
+
+    assert len(requests) == 1
+    assert result.inner_iterations == 1
+    assert result.outcome == "failed"
+
+
+def test_inner_loop_does_not_retry_when_awaiting_approval(
+    data_dir: Path,
+) -> None:
+    """等审批时不迭代 —— 循环停下来等人，不是靠重试能解决的。"""
+    set_budget(AUTOMATION_ID, max_inner_iterations=3)
+    runner, requests = _make_sequential_runner([
+        RoundResult(outcome="succeeded", waiting_approval=True, tokens=40),
+        RoundResult(outcome="succeeded", tokens=40),
+    ])
+    automation = make_automation(checks=[FAILING_CHECK])
+    check_runner = make_check_runner(failing=(FAILING_CHECK,))
+
+    result = run_cycle(automation, runner, check_runner=check_runner)
+
+    assert len(requests) == 1
+    assert result.inner_iterations == 1
+    assert result.summary == ""
+
+
+def test_inner_loop_accumulates_tokens_across_iterations(data_dir: Path) -> None:
+    """token 用量要累加所有迭代，不是只记最后一次。"""
+    set_budget(AUTOMATION_ID, max_inner_iterations=3)
+    runner, _ = _make_sequential_runner([
+        RoundResult(outcome="succeeded", tokens=200),
+        RoundResult(outcome="succeeded", tokens=300),
+        RoundResult(outcome="succeeded", tokens=150),
+    ])
+    automation = make_automation(checks=[FAILING_CHECK])
+    check_runner = make_check_runner(failing=(FAILING_CHECK,))
+
+    run_cycle(automation, runner, check_runner=check_runner)
+
+    state = load_state(AUTOMATION_ID)
+    assert state["budget"]["tokensUsed"] == 650
+
+
+def test_inner_loop_only_records_the_final_result(data_dir: Path) -> None:
+    """运行历史只记最终结果，不记中间迭代 —— 避免历史膨胀。"""
+    set_budget(AUTOMATION_ID, max_inner_iterations=3)
+    runner, _ = _make_sequential_runner([
+        RoundResult(outcome="succeeded", summary="第一次", tokens=10),
+        RoundResult(outcome="succeeded", summary="第二次", tokens=10),
+        RoundResult(outcome="succeeded", summary="最终结果", tokens=10),
+    ])
+    automation = make_automation(checks=[FAILING_CHECK])
+    check_runner = make_check_runner(failing=(FAILING_CHECK,))
+
+    run_cycle(automation, runner, check_runner=check_runner)
+
+    state = load_state(AUTOMATION_ID)
+    assert len(state["runs"]) == 1
+    assert state["runs"][0]["summary"] == "最终结果"
+    assert state["runs"][0]["innerIterations"] == 3
+
+
+def test_inner_loop_resets_iteration_count_each_trigger(data_dir: Path) -> None:
+    """每次触发开始时迭代计数要清零，不受上一次触发的影响。"""
+    set_budget(AUTOMATION_ID, max_inner_iterations=2)
+    automation = make_automation(checks=[FAILING_CHECK])
+    check_runner = make_check_runner(failing=(FAILING_CHECK,))
+
+    runner_a, _ = _make_sequential_runner([
+        RoundResult(outcome="succeeded", tokens=10),
+        RoundResult(outcome="succeeded", tokens=10),
+    ])
+    first = run_cycle(automation, runner_a, check_runner=check_runner)
+    assert first.inner_iterations == 2
+
+    runner_b, _ = _make_sequential_runner([
+        RoundResult(outcome="succeeded", tokens=10),
+        RoundResult(outcome="succeeded", tokens=10),
+    ])
+    second = run_cycle(automation, runner_b, check_runner=check_runner)
+    assert second.inner_iterations == 2

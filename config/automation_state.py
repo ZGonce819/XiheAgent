@@ -394,6 +394,8 @@ def initial_state(automation_id: Any) -> dict[str, Any]:
             "maxTokens": 0,
             "tokensUsed": 0,
             "maxConsecutiveFailures": 0,
+            "maxInnerIterations": 0,
+            "innerIterationsUsed": 0,
         },
         "stop": {"reached": False, "reason": None, "at": None},
         "runs": [],
@@ -424,7 +426,15 @@ def _normalize(raw: Any, automation_id: str) -> dict[str, Any]:
 
     budget = raw.get("budget")
     if isinstance(budget, dict):
-        for key in ("maxRuns", "runsUsed", "maxTokens", "tokensUsed", "maxConsecutiveFailures"):
+        for key in (
+            "maxRuns",
+            "runsUsed",
+            "maxTokens",
+            "tokensUsed",
+            "maxConsecutiveFailures",
+            "maxInnerIterations",
+            "innerIterationsUsed",
+        ):
             with contextlib.suppress(TypeError, ValueError):
                 state["budget"][key] = max(0, int(budget.get(key) or 0))
 
@@ -631,6 +641,7 @@ def record_run(
     approval_votes: Any = None,
     started_at: str | None = None,
     finished_at: str | None = None,
+    inner_iterations: int = 1,
 ) -> dict[str, Any]:
     """记录一轮运行的结果，并把这轮的用量计入预算。
 
@@ -656,6 +667,7 @@ def record_run(
             这一轮没有任何人工介入。
         started_at: 本轮开始时间；不传则留空。
         finished_at: 本轮结束时间；不传则用当前时间。
+        inner_iterations: 本次触发内的迭代次数（内层循环），默认 1。
 
     Returns:
         写入后的完整状态。
@@ -681,12 +693,14 @@ def record_run(
             "verification": _normalize_verification(verification),
             "waitingApproval": bool(waiting_approval),
             "approvalVotes": _normalize_approval_votes(approval_votes),
+            "innerIterations": max(1, int(inner_iterations)),
         },
     )
     del state["runs"][MAX_RUNS_KEPT:]
 
     budget = state["budget"]
     budget["runsUsed"] = int(budget["runsUsed"]) + 1
+    budget["innerIterationsUsed"] = max(1, int(inner_iterations))
     with contextlib.suppress(TypeError, ValueError):
         budget["tokensUsed"] = int(budget["tokensUsed"]) + max(0, int(tokens))
     return save_state(automation_id, state)
@@ -751,6 +765,26 @@ def set_last_feedback(automation_id: Any, text: str) -> dict[str, Any]:
     return save_state(automation_id, state)
 
 
+def reset_inner_iterations(automation_id: Any) -> dict[str, Any]:
+    """把内层迭代计数清零。
+
+    每次触发开始时调用：``innerIterationsUsed`` 记的是**本次触发内**迭代了几次，
+    下一次触发必须从 0 开始重新计。
+
+    Args:
+        automation_id: 自动化任务 id。
+
+    Returns:
+        写入后的完整状态。
+
+    Raises:
+        ValueError: id 非法。
+    """
+    state = load_state(automation_id)
+    state["budget"]["innerIterationsUsed"] = 0
+    return save_state(automation_id, state)
+
+
 def set_cursor(automation_id: Any, values: dict[str, Any]) -> dict[str, Any]:
     """更新游标，也就是「上一轮看到哪」。
 
@@ -780,6 +814,7 @@ def set_budget(
     max_runs: int | None = None,
     max_tokens: int | None = None,
     max_consecutive_failures: int | None = None,
+    max_inner_iterations: int | None = None,
 ) -> dict[str, Any]:
     """设置停止条件的预算上限。
 
@@ -790,6 +825,7 @@ def set_budget(
         max_runs: 最多跑多少轮；``None`` 表示不改。
         max_tokens: 最多累计消耗多少 token；``None`` 表示不改。
         max_consecutive_failures: 连续多少轮未通过验证就停下交给人；``None`` 表示不改。
+        max_inner_iterations: 一次触发内最多迭代几次；``None`` 表示不改。
 
     Returns:
         写入后的完整状态。
@@ -802,6 +838,7 @@ def set_budget(
         ("maxRuns", max_runs, "最多运行轮数"),
         ("maxTokens", max_tokens, "最多消耗 token 数"),
         ("maxConsecutiveFailures", max_consecutive_failures, "连续未通过次数上限"),
+        ("maxInnerIterations", max_inner_iterations, "内层迭代次数上限"),
     ):
         if value is None:
             continue
@@ -941,17 +978,17 @@ def _waiting_approval_reason(run: dict[str, Any]) -> str:
 def stop_decision(automation_id: Any) -> tuple[str | None, str | None]:
     """算出循环是**因为哪一条**停下的，以及给人看的原因。
 
-    停止判定有五个来源，恢复方式各不相同：显式标记和「停在等人工确认」可以直接
-    清掉；轮数 / token / 连续未通过这三条要改预算上限才有效。只把「停了」告诉
-    用户，他会去点一个点了没反应的按钮。
+    停止判定有六个来源，恢复方式各不相同：显式标记和「停在等人工确认」可以直接
+    清掉；轮数 / token / 连续未通过 / 内层迭代上限这四条要改预算上限才有效。
+    只把「停了」告诉用户，他会去点一个点了没反应的按钮。
 
     Args:
         automation_id: 自动化任务 id。
 
     Returns:
         ``(来源, 原因)``。来源是 ``"marked"`` / ``"awaiting_approval"`` /
-        ``"max_runs"`` / ``"max_tokens"`` / ``"failures"`` 之一；不该停时两者
-        都是 ``None``。
+        ``"max_runs"`` / ``"max_tokens"`` / ``"failures"`` /
+        ``"max_inner_iterations"`` 之一；不该停时两者都是 ``None``。
 
     Raises:
         ValueError: id 非法。
@@ -979,14 +1016,18 @@ def stop_decision(automation_id: Any) -> tuple[str | None, str | None]:
     max_failures = int(budget.get("maxConsecutiveFailures") or 0)
     if max_failures and failure_streak(automation_id) >= max_failures:
         return "failures", f"已连续 {max_failures} 轮未通过验证，需要人工介入"
+
+    max_inner = int(budget.get("maxInnerIterations") or 0)
+    if max_inner and int(budget.get("innerIterationsUsed") or 0) >= max_inner:
+        return "max_inner_iterations", f"本次触发已达内层迭代上限（{max_inner} 次）"
     return None, None
 
 
 def stop_status(automation_id: Any) -> tuple[bool, str | None]:
     """判断循环是否应该停下。
 
-    五个来源合在一起判断：显式标记、停在等人工确认、轮数上限、token 上限、连续
-    未通过次数。需要知道是哪一条触发的，用 :func:`stop_decision`。
+    六个来源合在一起判断：显式标记、停在等人工确认、轮数上限、token 上限、连续
+    未通过次数、内层迭代上限。需要知道是哪一条触发的，用 :func:`stop_decision`。
 
     Args:
         automation_id: 自动化任务 id。

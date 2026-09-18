@@ -33,6 +33,7 @@ from config.automation_state import (
     load_state,
     record_run,
     render_state,
+    reset_inner_iterations,
     set_last_feedback,
     stop_status,
 )
@@ -179,6 +180,8 @@ class CycleResult:
     """本轮发生的审批表决，供调度器判断有没有需要写进定义的异常。"""
     run_id: str | None = None
     """本轮在运行记录里的 id，供调用方写回定义的 ``lastRunId``。"""
+    inner_iterations: int = 1
+    """本次触发内的迭代次数。大于 1 表示内层循环跑了多次（验证未通过后重试）。"""
 
     def as_dict(self) -> dict[str, Any]:
         """转成可以直接返回给前端的字典。
@@ -197,6 +200,7 @@ class CycleResult:
             "skippedReason": self.skipped_reason,
             "approvalVotes": [dict(item) for item in self.approval_votes],
             "runId": self.run_id,
+            "innerIterations": self.inner_iterations,
         }
 
 
@@ -325,11 +329,13 @@ def run_cycle(
     check_runner: Runner | None = None,
     workspace: Path | str | None = None,
 ) -> CycleResult:
-    """跑一轮完整循环。
+    """跑一轮完整循环（含内层反馈迭代）。
 
-    顺序是：先看该不该停 → 读状态 → 拼指令 → 跑一轮 → 独立验证 → 写状态 →
-    再看该不该停。**跑之前也要检查一次**：上一轮可能已经把循环跑停了，这一轮
-    不该再启动。
+    顺序是：先看该不该停 → 读状态 → **循环** {拼指令 → 跑一轮 → 独立验证 →
+    判断是否继续} → 写状态 → 再看该不该停。内层循环在验证未通过时立即把反馈
+    交回模型重试，而不是等下一次 cron 触发。
+
+    **跑之前也要检查一次**：上一轮可能已经把循环跑停了，这一轮不该再启动。
 
     Args:
         automation: 自动化定义，字段与 :mod:`config.automation_config` 一致。
@@ -348,6 +354,11 @@ def run_cycle(
     if not identifier:
         return CycleResult(automation_id="", ran=False, skipped_reason="自动化任务缺少 id")
 
+    # 每次触发开始时先重置内层迭代计数 —— 必须在 stop_status 之前，否则上一次触发
+    # 留下的 innerIterationsUsed 会让 max_inner_iterations 这条停止条件误判，
+    # 把这一次触发直接拦在门外。
+    reset_inner_iterations(identifier)
+
     stopped, reason = stop_status(identifier)
     if stopped:
         return CycleResult(
@@ -364,56 +375,96 @@ def run_cycle(
     state = load_state(identifier)
     round_number = int(state["budget"]["runsUsed"]) + 1
     instruction = str(automation.get("prompt") or "")
-    request = RoundRequest(
-        automation_id=identifier,
-        name=str(automation.get("name") or ""),
-        prompt=build_round_prompt(
-            instruction,
-            round_number=round_number,
-            state_text=render_state(identifier),
-            feedback=str(state.get("lastFeedback") or ""),
-        ),
-        instruction=instruction,
-        repo=automation.get("repo") or None,
-        model_id=str(automation.get("model") or "__builtin__"),
-        round_number=round_number,
-        # 开关只在定义里显式为真时才算开；缺字段、字符串 "false" 之类一律按关。
-        auto_approve=automation.get("autoApprove") is True,
-        checks=checks,
-    )
+    initial_feedback = str(state.get("lastFeedback") or "")
+    state_text = render_state(identifier)
 
-    try:
-        result = round_runner(request)
-    except Exception as exc:
-        # 「跑一轮」可能连着真实的 Agent 运行时，任何异常都不该让状态停在半路。
-        # 记成一次失败，交给连续未通过次数这条停止条件去升级。
-        result = RoundResult(
-            outcome="failed",
-            summary=f"这一轮没能跑完：{type(exc).__name__}: {exc}",
+    # 内层循环：执行→验证→反馈→再执行
+    result: RoundResult | None = None
+    verification: VerificationResult | None = None
+    feedback = initial_feedback
+    total_tokens = 0
+    inner_iterations = 0
+
+    while True:
+        inner_iterations += 1
+
+        request = RoundRequest(
+            automation_id=identifier,
+            name=str(automation.get("name") or ""),
+            prompt=build_round_prompt(
+                instruction,
+                round_number=round_number,
+                state_text=state_text,
+                feedback=feedback,
+            ),
+            instruction=instruction,
+            repo=automation.get("repo") or None,
+            model_id=str(automation.get("model") or "__builtin__"),
+            round_number=round_number,
+            # 开关只在定义里显式为真时才算开；缺字段、字符串 "false" 之类一律按关。
+            auto_approve=automation.get("autoApprove") is True,
+            checks=checks,
         )
 
-    verification: VerificationResult | None = None
-    if checks:
-        # 验证命令必须在**目标仓库**里跑。调用方没指定工作目录时用「跑一轮」报上来的
-        # 那个；两者都没有就**不跑** —— 退回进程当前目录会在后端自己的仓库里跑检查项，
-        # 得到一份与目标仓库无关的结论，比「没验证」更糟。
-        effective_workspace = workspace or result.workspace
-        executor = check_runner
-        if executor is None and result.container_exec is not None:
-            # 仓库在沙箱容器里：本机 subprocess 到不了，改在容器内、容器里的仓库目录下执行。
-            executor = make_container_runner(result.container_exec)
-        if effective_workspace is None and executor is None:
-            verification = unverified(
-                _no_workspace_reason(backend_type, result.outcome), checks
-            )
-        else:
-            verification = run_checks(
-                checks,
-                backend_type=backend_type,
-                workspace=effective_workspace,
-                runner=executor,
+        try:
+            result = round_runner(request)
+        except Exception as exc:
+            # 「跑一轮」可能连着真实的 Agent 运行时，任何异常都不该让状态停在半路。
+            # 记成一次失败，交给连续未通过次数这条停止条件去升级。
+            result = RoundResult(
+                outcome="failed",
+                summary=f"这一轮没能跑完：{type(exc).__name__}: {exc}",
             )
 
+        total_tokens += result.tokens
+        verification = None
+        if checks:
+            # 验证命令必须在**目标仓库**里跑。调用方没指定工作目录时用「跑一轮」报上来的
+            # 那个；两者都没有就**不跑** —— 退回进程当前目录会在后端自己的仓库里跑检查项，
+            # 得到一份与目标仓库无关的结论，比「没验证」更糟。
+            effective_workspace = workspace or result.workspace
+            executor = check_runner
+            if executor is None and result.container_exec is not None:
+                # 仓库在沙箱容器里：本机 subprocess 到不了，改在容器内、容器里的仓库目录下执行。
+                executor = make_container_runner(result.container_exec)
+            if effective_workspace is None and executor is None:
+                verification = unverified(
+                    _no_workspace_reason(backend_type, result.outcome), checks
+                )
+            else:
+                verification = run_checks(
+                    checks,
+                    backend_type=backend_type,
+                    workspace=effective_workspace,
+                    runner=executor,
+                )
+
+        # 判断是否继续内层循环
+        should_continue = False
+        if verification is not None and not verification.passed:
+            # 验证未通过：检查是否应该继续迭代
+            if result.outcome not in ("failed", "blocked") and not result.waiting_approval:
+                # 更新反馈给下一次迭代
+                feedback = verification.feedback()
+                # 用本地计数器判断内层上限 —— stop_status 读的是磁盘上的
+                # innerIterationsUsed，而那个值要等循环退出后才由 record_run 写入，
+                # 循环期间它一直是 0，靠它判断会永远不到上限。
+                # max_inner 为 0 时不启用内层循环，退回「跑一次就返回」的原有行为。
+                max_inner = int(state["budget"].get("maxInnerIterations") or 0)
+                if max_inner <= 0:
+                    should_continue = False
+                elif inner_iterations >= max_inner:
+                    should_continue = False
+                else:
+                    stopped_now, _ = stop_status(identifier)
+                    if not stopped_now:
+                        should_continue = True
+
+        if not should_continue:
+            break
+
+    # 循环结束，写入最终结果
+    assert result is not None
     record_run(
         identifier,
         outcome=result.outcome,
@@ -422,9 +473,10 @@ def run_cycle(
         changed=result.changed,
         next_steps=result.next_steps,
         verification=verification.as_state_dict() if verification else None,
-        tokens=result.tokens,
+        tokens=total_tokens,
         waiting_approval=result.waiting_approval,
         approval_votes=result.approval_votes,
+        inner_iterations=inner_iterations,
     )
     set_last_feedback(
         identifier,
@@ -444,4 +496,5 @@ def run_cycle(
         stop_reason=reason,
         approval_votes=result.approval_votes,
         run_id=result.run_id,
+        inner_iterations=inner_iterations,
     )

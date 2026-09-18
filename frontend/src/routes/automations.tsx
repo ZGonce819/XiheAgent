@@ -40,6 +40,7 @@ import {
 import type { AgentSchedule, AutomationRunReceipt } from "@/lib/agents/types"
 import { useModelOptions } from "@/lib/agents/useModelOptions"
 import { useSession } from "@/lib/session"
+import { detectRepoProvider, type RepoProvider } from "@/lib/repo"
 import { cn } from "@/lib/utils"
 
 export const Route = createFileRoute("/automations")({
@@ -52,6 +53,7 @@ type FormState = {
   schedule: string
   preset: "hourly" | "daily" | "weekly" | "custom"
   repo: string
+  platform: RepoProvider
   modelId: string
   autoApprove: boolean
 }
@@ -62,6 +64,7 @@ const EMPTY_FORM: FormState = {
   schedule: "0 9 * * *",
   preset: "daily",
   repo: "",
+  platform: "github",
   modelId: "",
   autoApprove: false,
 }
@@ -120,6 +123,7 @@ function AutomationManager() {
       schedule: schedule.schedule,
       preset: presetForCron(schedule.schedule),
       repo: schedule.repo ?? "",
+      platform: detectRepoProvider(schedule.repo ?? "") ?? "github",
       modelId: schedule.model,
       autoApprove: schedule.autoApprove === true,
     })
@@ -256,14 +260,40 @@ function AutomationManager() {
                   />
                 </Field>
                 <Field label="代码仓库" htmlFor="automation-repo" hint="可选">
-                  <Input
-                    id="automation-repo"
-                    value={form.repo}
-                    placeholder="owner/repository"
-                    onChange={(event) =>
-                      setForm({ ...form, repo: event.target.value })
-                    }
-                  />
+                  <div className="flex gap-2">
+                    <Select
+                      value={form.platform}
+                      onValueChange={(next) =>
+                        setForm({ ...form, platform: next as RepoProvider })
+                      }
+                    >
+                      <SelectTrigger
+                        id="automation-platform"
+                        className="w-28 shrink-0 bg-background"
+                      >
+                        <span className="flex flex-1 text-left">
+                          {form.platform === "github"
+                            ? "GitHub"
+                            : form.platform === "gitee"
+                              ? "Gitee"
+                              : "Codeup"}
+                        </span>
+                      </SelectTrigger>
+                      <SelectContent align="start" alignItemWithTrigger={false}>
+                        <SelectItem value="github">GitHub</SelectItem>
+                        <SelectItem value="gitee">Gitee</SelectItem>
+                        <SelectItem value="codeup">Codeup</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      id="automation-repo"
+                      value={form.repo}
+                      placeholder="owner/repository"
+                      onChange={(event) =>
+                        setForm({ ...form, repo: event.target.value })
+                      }
+                    />
+                  </div>
                 </Field>
               </div>
               <Field label="任务指令" htmlFor="automation-prompt">

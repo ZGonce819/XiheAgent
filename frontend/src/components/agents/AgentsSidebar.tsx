@@ -117,13 +117,25 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
   // 最近一次发送消息后需要播放出现动画的对话（发送瞬间标记，无需等后端）
   const revealKey = useSentThreadReveal(threads, activeThreadId)
 
-  // 按项目名分组，无项目的对话直接显示在顶层
-  const { projectGroups, ungroupedThreads } = useMemo(() => {
+  // 先把自动化任务产生的对话（source === "schedule"）单独分出来，
+  // 剩余的再按项目名分组，无项目的对话显示在「最近」里
+  const { projectGroups, recentThreads, automationThreads } = useMemo(() => {
     const sorted = [...threads].sort((a, b) => b.updatedAt - a.updatedAt)
+    const automation: Array<AgentThread> = []
+    const rest: Array<AgentThread> = []
+
+    for (const thread of sorted) {
+      if (thread.source === "schedule") {
+        automation.push(thread)
+      } else {
+        rest.push(thread)
+      }
+    }
+
     const projectMap = new Map<string, Array<AgentThread>>()
     const ungrouped: Array<AgentThread> = []
 
-    for (const thread of sorted) {
+    for (const thread of rest) {
       const projectName = thread.projectName?.trim()
       if (projectName) {
         if (!projectMap.has(projectName)) {
@@ -144,11 +156,12 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
 
     return {
       projectGroups: sortedProjects,
-      ungroupedThreads: ungrouped,
+      recentThreads: ungrouped,
+      automationThreads: automation,
     }
   }, [threads])
 
-  const hasAnyContent = projectGroups.length > 0 || ungroupedThreads.length > 0
+  const hasAnyContent = projectGroups.length > 0 || recentThreads.length > 0 || automationThreads.length > 0
 
   return (
     <SidebarFrame
@@ -217,12 +230,28 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
         ))}
 
         {/* 最近对话 */}
-        {ungroupedThreads.length > 0 && (
+        {recentThreads.length > 0 && (
           <div className="px-2 py-1 text-[0.625rem] font-semibold tracking-wide text-[var(--ui-text-dim)] uppercase">
             最近
           </div>
         )}
-        {ungroupedThreads.map((thread) => (
+        {recentThreads.map((thread) => (
+          <ThreadRow
+            key={thread.id}
+            thread={thread}
+            isActive={thread.id === activeThreadId}
+            onNavigate={layout.closeOnMobile}
+            revealKey={revealKey}
+          />
+        ))}
+
+        {/* 自动化任务产生的对话 */}
+        {automationThreads.length > 0 && (
+          <div className="px-2 py-1 text-[0.625rem] font-semibold tracking-wide text-[var(--ui-text-dim)] uppercase">
+            自动化任务
+          </div>
+        )}
+        {automationThreads.map((thread) => (
           <ThreadRow
             key={thread.id}
             thread={thread}
