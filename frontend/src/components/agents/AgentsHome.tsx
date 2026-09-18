@@ -5,6 +5,7 @@ import type { ModelSelection } from "@/lib/agents/useModelOptions"
 import type { ImageChunk } from "@/lib/agents/types"
 import { AgentPromptBar } from "@/components/agents/AgentPromptBar"
 import { useCreateAgentThread } from "@/lib/agents/queries"
+import { markThreadReveal } from "@/lib/agents/threadReveal"
 import { useModelOptions } from "@/lib/agents/useModelOptions"
 import { useProfile, useRepos } from "@/lib/profile"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
@@ -132,6 +133,9 @@ export function AgentsHome({ initialProject = null }: { initialProject?: string 
                   return false
                 }
                 setSubmission({ prompt, images })
+                // 新任务页此刻还没有 threadId：先标记一次匿名出现信号，
+                // 侧边栏/顶部栏拿到新建对话后立即补播动画，不等流式响应
+                markThreadReveal("")
                 createThread.mutate(
                   {
                     prompt,

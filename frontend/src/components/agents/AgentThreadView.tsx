@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { SessionUser } from "@/lib/api";
 import type { PendingPrompt } from "@/lib/agents/pendingPrompts";
@@ -14,6 +14,7 @@ import { normalizeThreadHistory } from "@/lib/agents/useThreadStream";
 import { useModelOptions } from "@/lib/agents/useModelOptions";
 import { useProfile } from "@/lib/profile";
 import { agentsApi } from "@/lib/agents/api";
+import { markThreadReveal } from "@/lib/agents/threadReveal";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { CommandApprovalDialog } from "@/components/agents/CommandApprovalDialog";
 import { useDecideCommandApproval, useExplainCommandApproval } from "@/lib/agents/queries";
@@ -130,6 +131,9 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   const [pageDialog, setPageDialog] = useState<PageDialog | null>(null);
   const [viewedVersionIndexes, setViewedVersionIndexes] = useState<Record<string, number>>({});
   const [sendTransition, setSendTransition] = useState(false);
+  // 每次发送消息时递增；用于重播顶部栏已有的出现动画（不等后端响应）
+  const [headerRevealSeq, setHeaderRevealSeq] = useState(0);
+  const headerRef = useRef<HTMLElement>(null);
   const [editingTitle, setEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
   const updateTitle = useUpdateAgentThreadTitle(thread.id);
@@ -183,6 +187,17 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   useEffect(() => {
     if (thread.status === "running") setViewedVersionIndexes({});
   }, [thread.status]);
+
+  // 重播顶部栏已有的出现动画：先移除类并强制回流，再加回类。
+  // 不用重新挂载的方式，避免标题编辑等内部状态被重置。
+  useLayoutEffect(() => {
+    if (headerRevealSeq === 0) return;
+    const el = headerRef.current;
+    if (!el) return;
+    el.classList.remove("new-thread-header-reveal");
+    void el.offsetWidth;
+    el.classList.add("new-thread-header-reveal");
+  }, [headerRevealSeq]);
 
   useEffect(() => {
     setPendingPrompts((prev) => {
@@ -348,6 +363,9 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
     if (!confirmed) return;
     setSendTransition(true);
     window.setTimeout(() => setSendTransition(false), 1100);
+    // 发送瞬间就通知侧边栏与顶部栏播放出现动画，不等后端响应
+    setHeaderRevealSeq((seq) => seq + 1);
+    markThreadReveal(thread.id);
     const insertAt = Math.max(0, displayMessages.findIndex((item) => item.id === message.id));
     setPendingPrompts(addPendingPrompt(thread.id, content, insertAt, message.chunks.filter((chunk): chunk is ImageChunk => chunk.kind === "image")));
     sendMessage.mutate({
@@ -370,6 +388,9 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
     }
     setSendTransition(true);
     window.setTimeout(() => setSendTransition(false), 1100);
+    // 发送瞬间就通知侧边栏与顶部栏播放出现动画，不等后端响应
+    setHeaderRevealSeq((seq) => seq + 1);
+    markThreadReveal(thread.id);
     const insertAt = displayMessages.length;
     const nextPendingPrompts = addPendingPrompt(thread.id, content, insertAt, images);
     setPendingPrompts(nextPendingPrompts);
@@ -386,10 +407,13 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
   return (
     <AgentsShell user={user} activeThreadId={thread.id}>
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className={cn(
-          "flex min-h-14 shrink-0 items-center justify-between border-b border-[var(--ui-border)] px-6 py-2 max-md:pl-14",
-          newThreadHandoff && "new-thread-header-reveal"
-        )}>
+        <header
+          ref={headerRef}
+          className={cn(
+            "flex min-h-14 shrink-0 items-center justify-between border-b border-[var(--ui-border)] px-6 py-2 max-md:pl-14",
+            newThreadHandoff && "new-thread-header-reveal"
+          )}
+        >
           <div className="min-w-0 flex-1">
             {editingTitle ? (
               <input

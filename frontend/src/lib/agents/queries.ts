@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router"
 
 import { agentsApi } from "./api"
 import { addPendingPrompt } from "./pendingPrompts"
+import { claimAnonymousThreadReveal } from "./threadReveal"
 import {
   handleStreamPart,
   normalizeThreadHistory,
@@ -172,28 +173,41 @@ export function useCreateAgentThread() {
                 addPendingPrompt(capturedThreadId, body.prompt, 0, body.images)
                 const now = Date.now()
                 const repo = body.repo ?? ""
+                const optimisticThread: AgentThread = {
+                  id: capturedThreadId,
+                  title: body.prompt || "新任务",
+                  repo,
+                  repoFullName: repo,
+                  repoUrl: repo,
+                  platform: "",
+                  platformDisplay: "",
+                  branch: "",
+                  model: body.model_id ?? "",
+                  effort: body.effort ?? null,
+                  status: "running",
+                  backendType: body.backend_type ?? "local",
+                  projectName: body.project_name ?? null,
+                  createdAt: now,
+                  updatedAt: now,
+                  messages: [],
+                  runEvents: [],
+                }
                 queryClient.setQueryData<AgentThread>(
                   agentThreadKeys.detail(capturedThreadId),
-                  {
-                    id: capturedThreadId,
-                    title: body.prompt || "新任务",
-                    repo,
-                    repoFullName: repo,
-                    repoUrl: repo,
-                    platform: "",
-                    platformDisplay: "",
-                    branch: "",
-                    model: body.model_id ?? "",
-                    effort: body.effort ?? null,
-                    status: "running",
-                    backendType: body.backend_type ?? "local",
-                    projectName: body.project_name ?? null,
-                    createdAt: now,
-                    updatedAt: now,
-                    messages: [],
-                    runEvents: [],
+                  optimisticThread
+                )
+                // 立即把新对话插进侧边栏列表缓存，让导航项在发送后立刻出现并播放动画，
+                // 不必等到 stream 结束才刷新列表
+                queryClient.setQueryData<Array<AgentThread>>(
+                  agentThreadKeys.all,
+                  (threads) => {
+                    if (!threads) return threads
+                    if (threads.some((thread) => thread.id === capturedThreadId)) return threads
+                    return [optimisticThread, ...threads]
                   }
                 )
+                // 新任务页发送时留下的匿名出现信号，此刻转交给真实的 threadId
+                claimAnonymousThreadReveal(capturedThreadId)
                 if (typeof window !== "undefined") {
                   try {
                     window.sessionStorage.setItem(

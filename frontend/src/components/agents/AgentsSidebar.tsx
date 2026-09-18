@@ -12,7 +12,7 @@ import {
 import { IoLogoGithub, IoLogoSlack } from "react-icons/io5"
 import { SiLinear } from "react-icons/si"
 import { Dialog } from "@base-ui/react/dialog"
-import { useState, useMemo, type ComponentType, type SVGProps } from "react"
+import { useEffect, useState, useMemo, type ComponentType, type SVGProps } from "react"
 
 import type { SessionUser } from "@/lib/api"
 import type { AgentSource, AgentThread } from "@/lib/agents/types"
@@ -23,6 +23,12 @@ import {
   useSidebarLayout,
 } from "@/components/sidebar-layout"
 import { useAgentThreads, useDeleteAgentThread, useRenameProject } from "@/lib/agents/queries"
+import {
+  claimAnonymousThreadReveal,
+  consumeThreadReveal,
+  hasAnonymousThreadReveal,
+  subscribeThreadReveal,
+} from "@/lib/agents/threadReveal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
@@ -49,10 +55,59 @@ const NAV = [
   { to: "/skills", label: "技能接口", icon: WrenchIcon },
 ] as const
 
+/**
+ * 取走「刚发送消息」的对话 id，用于给侧边栏对话导航项播放出现动画。
+ * 信号在用户按下发送时就会到达，因此动画立即触发，不等后端响应。
+ *
+ * 订阅只用于触发一次重渲染，真正的消费放在 effect 里：
+ * 每次信号到达（signal 变化）或列表变化时尝试消费一次，
+ * 只有真正消费到信号才会更新需要播放动画的 id。
+ */
+function useSentThreadReveal(
+  threads: Array<AgentThread>,
+  activeThreadId?: string
+): string | null {
+  const [signal, setSignal] = useState(0)
+  const [revealed, setRevealed] = useState<{ id: string; seq: number } | null>(null)
+
+  useEffect(
+    () =>
+      subscribeThreadReveal(() => {
+        setSignal((tick) => tick + 1)
+      }),
+    []
+  )
+
+  useEffect(() => {
+    // 1) 直接命中：发送时已经知道 threadId（在已有对话里继续发消息）
+    if (activeThreadId) {
+      const seq = consumeThreadReveal(activeThreadId)
+      if (seq !== null) {
+        setRevealed({ id: activeThreadId, seq })
+        return
+      }
+    }
+    // 2) 匿名信号兜底：新任务页首次发送时还没有 threadId，
+    //    正常路径已由 queries.ts 在拿到 threadId 时认领；这里作为兜底，
+    //    等侧边栏列表出现新对话后交给最新的一条。
+    if (hasAnonymousThreadReveal() && threads.length > 0) {
+      const newest = [...threads].sort((a, b) => b.updatedAt - a.updatedAt)[0]
+      if (newest && claimAnonymousThreadReveal(newest.id)) {
+        setRevealed({ id: newest.id, seq: 1 })
+      }
+    }
+  }, [signal, threads, activeThreadId])
+
+  // 用 `${id}\0${seq}` 让同一条对话的多次发送也能各自重播动画
+  return revealed ? `${revealed.id}\u0000${revealed.seq}` : null
+}
+
 export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
   const threadsQuery = useAgentThreads()
   const threads = threadsQuery.data ?? []
   const layout = useSidebarLayout()
+  // 最近一次发送消息后需要播放出现动画的对话（发送瞬间标记，无需等后端）
+  const revealKey = useSentThreadReveal(threads, activeThreadId)
 
   // 按项目名分组，无项目的对话直接显示在顶层
   const { projectGroups, ungroupedThreads } = useMemo(() => {
@@ -149,6 +204,7 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
             threads={projectThreads}
             activeThreadId={activeThreadId}
             onNavigate={layout.closeOnMobile}
+            revealKey={revealKey}
           />
         ))}
 
@@ -164,6 +220,7 @@ export function AgentsSidebar({ user, activeThreadId }: AgentsSidebarProps) {
             thread={thread}
             isActive={thread.id === activeThreadId}
             onNavigate={layout.closeOnMobile}
+            revealKey={revealKey}
           />
         ))}
 
@@ -196,11 +253,13 @@ function ProjectGroup({
   threads,
   activeThreadId,
   onNavigate,
+  revealKey,
 }: {
   projectName: string
   threads: Array<AgentThread>
   activeThreadId?: string
   onNavigate?: () => void
+  revealKey?: string | null
 }) {
   const [expanded, setExpanded] = useState(false)
   const hasMore = threads.length > MAX_VISIBLE_PER_PROJECT
@@ -284,6 +343,7 @@ function ProjectGroup({
             onNavigate={onNavigate}
             animate={animate}
             animateDelay={animate ? (idx - MAX_VISIBLE_PER_PROJECT) * 40 : undefined}
+            revealKey={revealKey}
           />
         )
       })}
@@ -392,12 +452,15 @@ function ThreadRow({
   onNavigate,
   animate,
   animateDelay,
+  revealKey,
 }: {
   thread: AgentThread
   isActive: boolean
   onNavigate?: () => void
   animate?: boolean
   animateDelay?: number
+  /** 发送消息后需要播放出现动画的标识（`${threadId}\u0000${seq}`）。 */
+  revealKey?: string | null
 }) {
   const deleteThread = useDeleteAgentThread()
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -442,9 +505,16 @@ function ThreadRow({
   }, [displayRepo])
   const envLabel = thread.backendType === "sandbox" ? "沙箱" : "本地"
 
+  // 用户发送消息那一刻标记的导航项出现动画；用 seq 作 key 让重复发送能重播
+  const sentRevealSeq = revealKey?.startsWith(`${thread.id}\u0000`)
+    ? revealKey.slice(thread.id.length + 1)
+    : null
+  const playSentReveal = sentRevealSeq !== null && !exiting
+
   return (
     <>
       <Link
+        key={playSentReveal ? sentRevealSeq : undefined}
         to="/agents/$threadId"
         params={{ threadId: thread.id }}
         onClick={onNavigate}
@@ -453,7 +523,7 @@ function ThreadRow({
           isActive
             ? "bg-[var(--ui-accent-bubble)] text-[var(--ui-text)]"
             : "text-[var(--ui-text-muted)] hover:bg-[var(--ui-sidebar-hover)]",
-          animate && !exiting && "sidebar-thread-reveal",
+          (animate || playSentReveal) && !exiting && "sidebar-thread-reveal",
           exiting && "sidebar-thread-exit"
         )}
         style={
