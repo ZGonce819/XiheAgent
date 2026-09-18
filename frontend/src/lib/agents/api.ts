@@ -160,6 +160,11 @@ export const agentsApi = {
       `/schedules/${encodeURIComponent(scheduleId)}/run`,
       { method: "POST" }
     ),
+  resumeSchedule: (scheduleId: string) =>
+    agentsRequest<AutomationStateResponse>(
+      `/schedules/${encodeURIComponent(scheduleId)}/resume`,
+      { method: "POST" }
+    ),
   getThread: (threadId: string) =>
     agentsRequest<AgentThread>(`/threads/${encodeURIComponent(threadId)}`),
   saveViewSnapshot: (threadId: string, messages: Array<Message>) =>

@@ -25,6 +25,7 @@ import {
   useAgentSchedules,
   useCreateAgentSchedule,
   useDeleteAgentSchedule,
+  useResumeAgentSchedule,
   useRunAgentSchedule,
   useUpdateAgentSchedule,
 } from "@/lib/agents/queries"
@@ -425,9 +426,11 @@ function AutomationRow({
   onToggle: (enabled: boolean) => void
 }) {
   const runSchedule = useRunAgentSchedule()
+  const resumeSchedule = useResumeAgentSchedule()
   const [stateOpen, setStateOpen] = useState(false)
   const [receipt, setReceipt] = useState<AutomationRunReceipt | null>(null)
   const [runError, setRunError] = useState<string | null>(null)
+  const [resumeError, setResumeError] = useState<string | null>(null)
   const loopState = useAgentScheduleState(schedule.id, { enabled: stateOpen })
 
   const run = () => {
@@ -566,10 +569,45 @@ function AutomationRow({
           ) : (
             <>
               {loopState.data?.stopped && (
-                <p className="mb-2 text-xs text-destructive">
-                  这个循环已经停了：
-                  {loopState.data.stopReason ?? "原因未知"}
-                </p>
+                <div className="mb-2 space-y-1">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <p className="text-xs text-destructive">
+                      这个循环已经停了：
+                      {loopState.data.stopReason ?? "原因未知"}
+                    </p>
+                    {loopState.data.stopSource === "marked" ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={resumeSchedule.isPending}
+                        title="清掉停止标记，让这个循环重新可以触发"
+                        onClick={() => {
+                          setResumeError(null)
+                          resumeSchedule.mutate(schedule.id, {
+                            onError: (reason) =>
+                              setResumeError(
+                                reason instanceof Error
+                                  ? reason.message
+                                  : "恢复失败，请稍后重试。"
+                              ),
+                          })
+                        }}
+                      >
+                        {resumeSchedule.isPending ? "正在恢复" : "继续运行"}
+                      </Button>
+                    ) : (
+                      <span className="text-[0.625rem] text-muted-foreground">
+                        这条不是手动停的，清标记没用 ——
+                        要调高对应的预算上限才会重新跑起来。
+                      </span>
+                    )}
+                  </div>
+                  {resumeError && (
+                    <p className="text-[0.625rem] text-destructive">
+                      {resumeError}
+                    </p>
+                  )}
+                </div>
               )}
               <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[0.6875rem] leading-relaxed text-muted-foreground">
                 {loopState.data?.text ?? ""}

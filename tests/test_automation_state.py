@@ -35,6 +35,7 @@ from config.automation_state import (
     set_cursor,
     state_dir,
     state_path,
+    stop_decision,
     stop_status,
 )
 
@@ -479,3 +480,33 @@ def test_render_state_lists_the_failure_limit(data_dir: Path) -> None:
     """预算里配了连续失败上限时要在文本里体现。"""
     set_budget(AUTOMATION_ID, max_consecutive_failures=3)
     assert "连续 3 轮未通过就停" in render_state(AUTOMATION_ID)
+
+
+def test_stop_decision_names_the_source(data_dir: Path) -> None:
+    """停止来源要能分清 —— 四种来源的恢复方式不一样。
+
+    只有显式标记能直接清掉；轮数、token、连续未通过这三条得改预算上限才有效。
+    分不清来源，界面就只能给一个点了没反应的「继续运行」。
+    """
+    assert stop_decision(AUTOMATION_ID) == (None, None)
+
+    mark_stopped(AUTOMATION_ID, "手动停的")
+    assert stop_decision(AUTOMATION_ID) == ("marked", "手动停的")
+    # 两个函数对「停没停」的判断必须一致，不能各算各的。
+    assert stop_status(AUTOMATION_ID) == (True, "手动停的")
+
+    clear_stopped(AUTOMATION_ID)
+    set_budget(AUTOMATION_ID, max_runs=1)
+    record_run(AUTOMATION_ID, outcome="succeeded")
+    source, reason = stop_decision(AUTOMATION_ID)
+    assert source == "max_runs"
+    assert "最多运行轮数" in str(reason)
+
+
+def test_stop_decision_marks_a_failure_stop(data_dir: Path) -> None:
+    """连续未通过导致的停止，来源要认成 ``failures`` 而不是预算。"""
+    set_budget(AUTOMATION_ID, max_consecutive_failures=1)
+    record_run(AUTOMATION_ID, outcome="failed")
+    source, reason = stop_decision(AUTOMATION_ID)
+    assert source == "failures"
+    assert "人工介入" in str(reason)

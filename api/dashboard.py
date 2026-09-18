@@ -35,7 +35,12 @@ from config.automation_config import (
     mark_automation_triggered,
     update_automation,
 )
-from config.automation_state import load_state, render_state, stop_status
+from config.automation_state import (
+    clear_stopped,
+    load_state,
+    render_state,
+    stop_decision,
+)
 from config.env_config import get_env
 from config.model_config import (
     create_custom_model,
@@ -343,6 +348,22 @@ def dashboard_delete_schedule(schedule_id: str) -> None:
         raise HTTPException(status_code=404, detail="自动化任务不存在")
 
 
+def _schedule_state_payload(schedule_id: str) -> dict[str, Any]:
+    """拼出循环状态的响应体。
+
+    带上 ``stopSource`` 是因为四个停止来源的恢复方式不同：只有显式标记能直接清掉，
+    其余三条要调高预算上限。前端据此决定给「继续运行」按钮还是给一句提示。
+    """
+    source, reason = stop_decision(schedule_id)
+    return {
+        "state": load_state(schedule_id),
+        "text": render_state(schedule_id),
+        "stopped": source is not None,
+        "stopReason": reason,
+        "stopSource": source,
+    }
+
+
 @dashboard_router.get("/schedules/{schedule_id}/state")
 def dashboard_schedule_state(schedule_id: str) -> dict[str, Any]:
     """返回某个自动化任务的循环状态。
@@ -353,20 +374,50 @@ def dashboard_schedule_state(schedule_id: str) -> dict[str, Any]:
         schedule_id: 自动化任务 id。
 
     Returns:
-        含原始 ``state``、给人看的 ``text``，以及是否已停止的字段。
+        含原始 ``state``、给人看的 ``text``，以及停止状态与来源。
 
     Raises:
         HTTPException: 自动化任务不存在时返回 404。
     """
     if get_automation(schedule_id) is None:
         raise HTTPException(status_code=404, detail="自动化任务不存在")
-    stopped, reason = stop_status(schedule_id)
-    return {
-        "state": load_state(schedule_id),
-        "text": render_state(schedule_id),
-        "stopped": stopped,
-        "stopReason": reason,
-    }
+    return _schedule_state_payload(schedule_id)
+
+
+@dashboard_router.post("/schedules/{schedule_id}/resume")
+def dashboard_resume_schedule(schedule_id: str) -> dict[str, Any]:
+    """清除停止标记，让一个被停下的循环重新可以触发。
+
+    只能救「被显式标记停止」的循环。因轮数 / token / 连续未通过而停下的，清标记
+    没有用 —— 那三条的恢复办法是调高对应的预算上限，所以这里直接返回 409 说明原因，
+    而不是让用户点一个点了没反应的按钮。
+
+    没停过的循环调用它是安全的，相当于什么都没做。
+
+    Args:
+        schedule_id: 自动化任务 id。
+
+    Returns:
+        与 GET ``/schedules/{id}/state`` 同样的状态结构，前端可直接替换。
+
+    Raises:
+        HTTPException: 自动化任务不存在返回 404；停止原因不是显式标记返回 409。
+    """
+    if get_automation(schedule_id) is None:
+        raise HTTPException(status_code=404, detail="自动化任务不存在")
+
+    source, reason = stop_decision(schedule_id)
+    if source is not None and source != "marked":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"这个循环不是被手动停的，清掉标记也不会恢复：{reason}。"
+                "请调高对应的预算上限。"
+            ),
+        )
+
+    clear_stopped(schedule_id)
+    return _schedule_state_payload(schedule_id)
 
 
 @dashboard_router.post("/schedules/{schedule_id}/run", status_code=202)
@@ -394,8 +445,8 @@ def dashboard_run_schedule(
     if automation is None:
         raise HTTPException(status_code=404, detail="自动化任务不存在")
 
-    stopped, reason = stop_status(schedule_id)
-    if stopped:
+    stop_source, reason = stop_decision(schedule_id)
+    if stop_source is not None:
         raise HTTPException(status_code=409, detail=f"这个循环已经停了：{reason}")
 
     refusal = read_only_refusal(str(automation.get("prompt") or ""))

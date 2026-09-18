@@ -161,6 +161,26 @@ export function useRunAgentSchedule() {
   })
 }
 
+/**
+ * 清掉停止标记，让一个被手动停下的循环重新可以触发。
+ *
+ * 只有「被手动停」能这样救回来。因为轮数 / token / 连续未通过而停的，服务端会返回
+ * 409 并说明该调哪个上限，界面把这句话原样显示给用户。
+ */
+export function useResumeAgentSchedule() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (scheduleId: string) => agentsApi.resumeSchedule(scheduleId),
+    onSuccess: (_state, scheduleId) => {
+      queryClient.invalidateQueries({ queryKey: agentScheduleKeys.all })
+      queryClient.invalidateQueries({
+        queryKey: agentScheduleKeys.state(scheduleId),
+      })
+    },
+  })
+}
+
 export function useCreateAgentThread() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()

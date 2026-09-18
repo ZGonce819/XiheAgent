@@ -191,12 +191,25 @@ export interface AutomationLoopState {
   lastFeedback: string
 }
 
+/** 循环是因为哪一条停下的。恢复方式按来源不同，界面要分开处置。 */
+export type AutomationStopSource =
+  /** 被显式标记停止，可以清掉标记继续跑。 */
+  | "marked"
+  /** 轮数用完了，要调高最多运行轮数。 */
+  | "max_runs"
+  /** token 用完了，要调高最多消耗 token 数。 */
+  | "max_tokens"
+  /** 连续未通过验证，要先看卡在哪，再决定要不要放宽上限。 */
+  | "failures"
+
 export interface AutomationStateResponse {
   state: AutomationLoopState
   /** 服务端渲染好的多行纯文本，直接展示即可。 */
   text: string
   stopped: boolean
   stopReason: string | null
+  /** 没停时为 null。 */
+  stopSource: AutomationStopSource | null
 }
 
 /** 手动触发一轮的受理回执。 */

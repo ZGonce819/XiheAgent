@@ -1,7 +1,8 @@
 """自动化任务的循环状态接口与手动触发接口的测试。
 
-覆盖 ``GET /dashboard/api/schedules/{id}/state`` 与
-``POST /dashboard/api/schedules/{id}/run``。
+覆盖 ``GET /dashboard/api/schedules/{id}/state``、
+``POST /dashboard/api/schedules/{id}/run`` 与
+``POST /dashboard/api/schedules/{id}/resume``。
 
 Note:
     「能不能跑」的判断要调模型（任务类型判定），所以这里**一律打桩**，测的是接口
@@ -19,7 +20,13 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from config.automation_config import create_automation, get_automation
-from config.automation_state import mark_stopped, state_path
+from config.automation_state import (
+    clear_stopped,
+    mark_stopped,
+    record_run,
+    set_budget,
+    state_path,
+)
 
 REPO = "https://example.com/a/b.git"
 
@@ -168,3 +175,73 @@ def test_run_refuses_when_the_loop_is_stopped(
 
     state = dashboard.get(f"/dashboard/api/schedules/{automation['id']}/state")
     assert state.json()["stopped"] is True
+
+
+def test_resume_returns_404_for_unknown_automation(dashboard: TestClient) -> None:
+    """恢复接口对不存在的任务返回 404。"""
+    assert dashboard.post("/dashboard/api/schedules/nope/resume").status_code == 404
+
+
+def test_resume_clears_the_stop_and_makes_the_loop_runnable_again(
+    dashboard: TestClient, dispatched: list[dict[str, Any]]
+) -> None:
+    """手动停下的循环，恢复之后要真的能再触发 —— 不能只是状态变好看。"""
+    automation = make_automation()
+    mark_stopped(automation["id"], "先停一下看看")
+
+    assert (
+        dashboard.post(f"/dashboard/api/schedules/{automation['id']}/run").status_code
+        == 409
+    )
+
+    resumed = dashboard.post(f"/dashboard/api/schedules/{automation['id']}/resume")
+    assert resumed.status_code == 200
+    assert resumed.json()["stopped"] is False
+    assert resumed.json()["stopSource"] is None
+
+    assert (
+        dashboard.post(f"/dashboard/api/schedules/{automation['id']}/run").status_code
+        == 202
+    )
+    assert len(dispatched) == 1
+
+
+def test_resume_on_a_running_loop_is_harmless(dashboard: TestClient) -> None:
+    """没停过的循环调恢复接口不该报错 —— 按钮和状态之间本来就有窗口期。"""
+    automation = make_automation()
+    response = dashboard.post(f"/dashboard/api/schedules/{automation['id']}/resume")
+    assert response.status_code == 200
+    assert response.json()["stopped"] is False
+
+
+def test_resume_refuses_when_the_stop_came_from_the_budget(
+    dashboard: TestClient,
+) -> None:
+    """轮数用完而停下的，清标记没有用 —— 要说清该改哪里，不能假装恢复成功。"""
+    automation = make_automation()
+    set_budget(automation["id"], max_runs=1)
+    record_run(automation["id"], outcome="succeeded")
+
+    response = dashboard.post(f"/dashboard/api/schedules/{automation['id']}/resume")
+    assert response.status_code == 409
+    assert "预算上限" in response.json()["detail"]
+
+    # 状态没被动过，仍然是停着的 —— 不能因为恢复失败就把它清成没停。
+    body = dashboard.get(f"/dashboard/api/schedules/{automation['id']}/state").json()
+    assert body["stopped"] is True
+    assert body["stopSource"] == "max_runs"
+
+
+def test_state_reports_where_the_stop_came_from(dashboard: TestClient) -> None:
+    """四种停止来源的恢复方式不同，所以来源要一起给出来。"""
+    automation = make_automation()
+
+    mark_stopped(automation["id"], "手动停的")
+    body = dashboard.get(f"/dashboard/api/schedules/{automation['id']}/state").json()
+    assert body["stopSource"] == "marked"
+
+    clear_stopped(automation["id"])
+    set_budget(automation["id"], max_consecutive_failures=1)
+    record_run(automation["id"], outcome="failed")
+    body = dashboard.get(f"/dashboard/api/schedules/{automation['id']}/state").json()
+    assert body["stopSource"] == "failures"

@@ -16,9 +16,10 @@ Note:
     ``agent.middleware``），模块级导入会炸。
 
 Note:
-    **token 用量目前拿不到**，``RoundResult.tokens`` 恒为 0。也就是说
-    :func:`config.automation_state.set_budget` 里的 ``maxTokens`` 上限现在不起作用，
-    真正生效的只有轮数上限与连续未通过次数。要补这个得先让运行时把用量报出来。
+    这一轮消耗的 token 数从模型返回消息的 ``usage_metadata`` 里累加得到（见
+    :func:`_tokens_used`），随 :func:`config.automation_state.record_run` 计入预算，
+    ``maxTokens`` 上限据此生效。拿不到用量时按 0 记 —— 统计不上不该把一轮好活
+    判成失败。
 
 Note:
     本模块不负责「什么时候跑」。触发时机由
@@ -30,7 +31,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from services.automation_loop import RoundRequest, RoundResult, RoundRunner
@@ -213,6 +214,30 @@ def resolve_workspace(thread_id: str, repo_url: str, *, backend_type: str) -> st
     return str(path)
 
 
+def _tokens_used(messages: Sequence[object]) -> int:
+    """把一轮里各条消息的 token 用量加起来。
+
+    模型每次调用都会在返回的消息上带 ``usage_metadata``。一轮里通常不止一次调用
+    （工具调用要来回几趟），所以要把整轮的消息都过一遍。
+
+    **拿不到用量时按 0 记，不能因此把这一轮判成失败。** 用量统计是给预算用的旁路
+    信息，缺了它只是预算算不准，活儿本身可能干得好好的。
+
+    Args:
+        messages: 这一轮结束时线程里的消息。
+
+    Returns:
+        累计 token 数；一条都拿不到时为 0。
+    """
+    total = 0
+    for message in messages:
+        usage = getattr(message, "usage_metadata", None)
+        if isinstance(usage, dict):
+            with contextlib.suppress(TypeError, ValueError):
+                total += max(0, int(usage.get("total_tokens") or 0))
+    return total
+
+
 def make_agent_round_runner(
     *,
     thread_id: str | None = None,
@@ -309,6 +334,7 @@ def make_agent_round_runner(
             outcome=_outcome_from_status(status),
             summary=summary,
             thread_id=current_thread,
+            tokens=_tokens_used(list(result.get("messages") or [])),
             # 跑完才解析：仓库是这一轮才 clone 下来的，跑之前那个目录还不存在。
             workspace=resolve_workspace(
                 current_thread, request.repo, backend_type=environment

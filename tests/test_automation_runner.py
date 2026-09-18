@@ -4,7 +4,8 @@
 
 1. :func:`services.automation_runner.read_only_refusal` 的放行与拒绝边界；
 2. 运行状态到循环结果的映射（未知状态一律算 ``blocked``，不能算成功）；
-3. 「跑一轮」在超出范围、没配仓库时**在碰运行时之前就返回**。
+3. 「跑一轮」在超出范围、没配仓库时**在碰运行时之前就返回**；
+4. token 用量的累加（拿不到时按 0 记，不影响这一轮的成败判定）。
 
 Note:
     任务类型判定要调模型（实测一次约 5 秒，且结果随模型变）。所以这里**一律把判定
@@ -24,6 +25,7 @@ from services.automation_loop import RoundRequest
 from services.automation_runner import (
     READ_ONLY_KINDS,
     _outcome_from_status,
+    _tokens_used,
     make_agent_round_runner,
     read_only_refusal,
     resolve_backend_type,
@@ -524,3 +526,23 @@ def test_resolve_workspace_swallows_lookup_failures(
         resolve_workspace("t1", "https://github.com/o/r.git", backend_type="local")
         is None
     )
+
+
+def test_token_usage_is_summed_across_the_round() -> None:
+    """一轮里模型可能被调用多次，用量要全加起来 —— 只算最后一条会严重低估。"""
+    messages = [
+        SimpleNamespace(usage_metadata={"total_tokens": 120}),
+        SimpleNamespace(usage_metadata={"total_tokens": 35}),
+        # 工具返回之类的消息没有用量，跳过即可。
+        SimpleNamespace(),
+    ]
+    assert _tokens_used(messages) == 155
+
+
+def test_missing_token_usage_counts_as_zero() -> None:
+    """拿不到用量按 0 记 —— 统计是旁路信息，缺了不该把一轮好活判成失败。"""
+    assert _tokens_used([]) == 0
+    assert _tokens_used([SimpleNamespace(usage_metadata=None)]) == 0
+    assert _tokens_used([SimpleNamespace(usage_metadata="不是字典")]) == 0
+    assert _tokens_used([SimpleNamespace(usage_metadata={"total_tokens": "坏值"})]) == 0
+    assert _tokens_used([SimpleNamespace(usage_metadata={"total_tokens": -5})]) == 0

@@ -645,10 +645,48 @@ def failure_streak(automation_id: Any) -> int:
     return streak
 
 
+def stop_decision(automation_id: Any) -> tuple[str | None, str | None]:
+    """算出循环是**因为哪一条**停下的，以及给人看的原因。
+
+    停止判定有四个来源，恢复方式各不相同：显式标记可以直接清掉；轮数 / token /
+    连续未通过这三条要改预算上限才有效。只把「停了」告诉用户，他会去点一个点了
+    没反应的按钮。
+
+    Args:
+        automation_id: 自动化任务 id。
+
+    Returns:
+        ``(来源, 原因)``。来源是 ``"marked"`` / ``"max_runs"`` / ``"max_tokens"``
+        / ``"failures"`` 之一；不该停时两者都是 ``None``。
+
+    Raises:
+        ValueError: id 非法。
+    """
+    state = load_state(automation_id)
+    stop = state["stop"]
+    if stop.get("reached"):
+        return "marked", str(stop.get("reason") or "已标记停止")
+
+    budget = state["budget"]
+    max_runs = int(budget.get("maxRuns") or 0)
+    if max_runs and int(budget.get("runsUsed") or 0) >= max_runs:
+        return "max_runs", f"已达最多运行轮数（{max_runs} 轮）"
+
+    max_tokens = int(budget.get("maxTokens") or 0)
+    if max_tokens and int(budget.get("tokensUsed") or 0) >= max_tokens:
+        return "max_tokens", f"已达最多 token 数（{max_tokens}）"
+
+    max_failures = int(budget.get("maxConsecutiveFailures") or 0)
+    if max_failures and failure_streak(automation_id) >= max_failures:
+        return "failures", f"已连续 {max_failures} 轮未通过验证，需要人工介入"
+    return None, None
+
+
 def stop_status(automation_id: Any) -> tuple[bool, str | None]:
     """判断循环是否应该停下。
 
     四个来源合在一起判断：显式标记、轮数上限、token 上限、连续未通过次数。
+    需要知道是哪一条触发的，用 :func:`stop_decision`。
 
     Args:
         automation_id: 自动化任务 id。
@@ -659,24 +697,8 @@ def stop_status(automation_id: Any) -> tuple[bool, str | None]:
     Raises:
         ValueError: id 非法。
     """
-    state = load_state(automation_id)
-    stop = state["stop"]
-    if stop.get("reached"):
-        return True, str(stop.get("reason") or "已标记停止")
-
-    budget = state["budget"]
-    max_runs = int(budget.get("maxRuns") or 0)
-    if max_runs and int(budget.get("runsUsed") or 0) >= max_runs:
-        return True, f"已达最多运行轮数（{max_runs} 轮）"
-
-    max_tokens = int(budget.get("maxTokens") or 0)
-    if max_tokens and int(budget.get("tokensUsed") or 0) >= max_tokens:
-        return True, f"已达最多 token 数（{max_tokens}）"
-
-    max_failures = int(budget.get("maxConsecutiveFailures") or 0)
-    if max_failures and failure_streak(automation_id) >= max_failures:
-        return True, f"已连续 {max_failures} 轮未通过验证，需要人工介入"
-    return False, None
+    source, reason = stop_decision(automation_id)
+    return source is not None, reason
 
 
 def render_state(automation_id: Any) -> str:
