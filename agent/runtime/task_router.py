@@ -72,6 +72,7 @@ def initialize_task_record(
     record_user_message: bool = True,
     backend_type: str | None = None,
     project_name: str | None = None,
+    source: str | None = None,
 ) -> str:
     """先创建 dashboard 可见的 thread 记录。
 
@@ -97,6 +98,7 @@ def initialize_task_record(
         latest_run_status="running",
         backend_type=backend_type,
         project_name=project_name,
+        source=source,
     )
     record_event(thread_id, "created", "任务已创建", status="completed")
     return thread_id

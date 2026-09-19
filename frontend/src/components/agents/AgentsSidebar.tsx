@@ -562,6 +562,16 @@ function formatLastMessageTime(messages: Array<{ timestamp: string }>): string {
   return `${date.getMonth() + 1}/${date.getDate()} ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
+function formatThreadCreatedTime(timestamp: number): string {
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) return ""
+  const pad = (n: number) => String(n).padStart(2, "0")
+  const now = new Date()
+  return date.toDateString() === now.toDateString()
+    ? `${pad(date.getHours())}:${pad(date.getMinutes())}`
+    : `${date.getMonth() + 1}/${date.getDate()} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
 function getDisplayRepo(repo: string): string {
   if (!/^https?:\/\//i.test(repo)) return repo
   try {
@@ -615,8 +625,11 @@ function ThreadRow({
   const SourceIcon = source?.icon
 
   const lastMessageTime = useMemo(
-    () => formatLastMessageTime(thread.messages),
-    [thread.messages]
+    () =>
+      thread.source === "schedule"
+        ? formatThreadCreatedTime(thread.createdAt)
+        : formatLastMessageTime(thread.messages),
+    [thread.createdAt, thread.messages, thread.source]
   )
   const displayRepo = useMemo(
     () => getDisplayRepo(thread.repoFullName || thread.repo || ""),

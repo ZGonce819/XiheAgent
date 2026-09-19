@@ -75,6 +75,7 @@ class LocalMySQLStore:
         latest_run_status: str = "pending",
         backend_type: str | None = None,
         project_name: str | None = None,
+        source: str | None = None,
     ) -> None:
         """创建或更新一条 thread 记录。
 
@@ -90,6 +91,7 @@ class LocalMySQLStore:
             latest_run_status: 最近一次运行状态，默认 ``"pending"``。
             backend_type: 执行环境类型（``"local"`` 或 ``"sandbox"``）。
             project_name: 关联的项目名称（来自 ProjectSelector）。
+            source: 会话来源（``"dashboard"`` / ``"schedule"`` 等）。
         """
         self.thread_repo.upsert_thread(
             thread_id=thread_id,
@@ -103,6 +105,7 @@ class LocalMySQLStore:
             latest_run_status=latest_run_status,
             backend_type=backend_type,
             project_name=project_name,
+            source=source,
         )
 
     def get_thread(self, thread_id: str) -> dict[str, Any] | None:
@@ -126,6 +129,13 @@ class LocalMySQLStore:
             thread 字典列表。
         """
         return self.thread_repo.list_threads(limit)
+
+    def list_thread_ids_by_source(
+        self, source: str, *, repo_url: str | None = None, user_prompt: str | None = None
+    ) -> list[str]:
+        return self.thread_repo.list_thread_ids_by_source(
+            source, repo_url=repo_url, user_prompt=user_prompt
+        )
 
     def update_thread_status(
         self,

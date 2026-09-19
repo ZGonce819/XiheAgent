@@ -77,6 +77,17 @@ def test_write_kinds_need_checks(monkeypatch: pytest.MonkeyPatch, kind: str) -> 
     assert "验证检查项" in refusal
 
 
+@pytest.mark.parametrize("kind", sorted(WRITE_KINDS))
+def test_auto_approve_allows_write_kinds_without_checks(
+    monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    """开启全流程自动化后，表决流程替代验证检查项作为无人值守闸门。"""
+    _stub_kind(monkeypatch, kind)
+    assert loop_scope_refusal(
+        "随便一句指令", has_checks=False, auto_approve=True
+    ) is None
+
+
 @pytest.mark.parametrize("kind", sorted(REFUSED_KINDS))
 def test_refused_kinds_say_it_will_stall(
     monkeypatch: pytest.MonkeyPatch, kind: str
@@ -739,7 +750,12 @@ def _stub_store(statuses: list[str]) -> tuple[Any, list[int]]:
 
     class FakeStore:
         def get_thread(self, thread_id: str) -> dict[str, str]:
-            index = min(reads[0], len(statuses) - 1)
+            # runner 会先探测手动触发接口已经建好的会话；这次读不属于运行
+            # 状态采样，不能消耗 statuses，否则会把 awaiting_approval 跳过去。
+            if reads[0] == 0:
+                reads[0] += 1
+                return {"thread_id": thread_id, "latest_run_status": "running"}
+            index = min(reads[0] - 1, len(statuses) - 1)
             reads[0] += 1
             return {"latest_run_status": statuses[index]}
 

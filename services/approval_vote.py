@@ -38,7 +38,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from backends.command_policy import evaluate_command
 
@@ -70,6 +70,21 @@ class ApprovalVote(BaseModel):
     reason: str = Field(
         description="简体中文一句话理由，不超过 80 字。反对时必须写清卡在哪一点。"
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_reason_aliases(cls, value: Any) -> Any:
+        """兼容模型偶尔返回的中文字段名，避免无关的人工接管。
+
+        Structured output 通常会返回 ``reason``，但部分模型会把提示中的中文
+        “理由”直接用作 JSON key。两种写法语义相同，统一成 schema 字段即可。
+        """
+        if isinstance(value, dict) and "reason" not in value:
+            for alias in ("理由", "原因", "explanation"):
+                if alias in value:
+                    value = {**value, "reason": value[alias]}
+                    break
+        return value
 
     @field_validator("reason")
     @classmethod

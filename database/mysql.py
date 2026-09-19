@@ -144,13 +144,18 @@ class ConnectionManager:
         """
 
         with self._lock:
-            cursor = self.conn.cursor()
+            connection = self.conn
+            cursor = connection.cursor()
             try:
                 cursor.execute(sql, params)
                 row = cursor.fetchone()
                 return dict(row) if row else None
             finally:
                 cursor.close()
+                # autocommit=False + REPEATABLE READ 会让后续轮询一直读到
+                # 首次查询的快照。读取方法自成事务，释放快照后才能看到
+                # 事件写入专用连接提交的新进度；写入方法仍自行 commit。
+                connection.rollback()
 
     def fetch_all(self, sql: str, params: tuple | None = None) -> list[dict[str, Any]]:
         """执行查询并返回全部结果。
@@ -164,12 +169,14 @@ class ConnectionManager:
         """
 
         with self._lock:
-            cursor = self.conn.cursor()
+            connection = self.conn
+            cursor = connection.cursor()
             try:
                 cursor.execute(sql, params)
                 return [dict(row) for row in cursor.fetchall()]
             finally:
                 cursor.close()
+                connection.rollback()
 
     def executemany(self, sql: str, params_list: list[tuple]) -> int:
         """批量执行写操作，返回受影响行数。

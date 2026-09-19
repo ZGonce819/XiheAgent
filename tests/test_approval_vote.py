@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 
 from services.approval_vote import (
+    ApprovalVote,
     MAX_COMMANDS,
     VOTER_ROLES,
     VoteAnswer,
@@ -46,6 +47,12 @@ def make_pending(*commands: str, backend_type: str = "local") -> dict[str, Any]:
         "backendType": backend_type,
         "actions": [{"name": "execute", "command": item} for item in commands],
     }
+
+
+def test_vote_accepts_chinese_reason_key() -> None:
+    """模型返回中文 JSON key 时仍应得到可用的评审结论。"""
+    vote = ApprovalVote.model_validate({"approve": True, "理由": "命令只做本地依赖检查"})
+    assert vote.reason == "命令只做本地依赖检查"
 
 
 def make_voter(answers: Mapping[str, Any]) -> tuple[Voter, list[tuple[str, str]]]:

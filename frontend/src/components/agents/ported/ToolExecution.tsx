@@ -279,6 +279,7 @@ export const ToolExecution = memo(function ToolExecution({
     status === "error" || status === "rejected"
       ? "text-[color:var(--ui-danger)]"
       : "text-[color:var(--ui-text-muted)]";
+  const failureLabel = toolKind === "execute" ? "命令执行失败" : "操作执行失败";
 
   return (
     <div className="my-0.5 text-[0.75rem] leading-5">
@@ -291,11 +292,13 @@ export const ToolExecution = memo(function ToolExecution({
         )}
         {status === "error" && toolKind === "execute" && (
           <span className="shrink-0 px-1.5 py-0.5 text-[0.625rem] leading-3 rounded bg-[color:var(--ui-danger)]/10 text-[color:var(--ui-danger)]">
-            命令执行失败
+            {failureLabel}
           </span>
         )}
-        {status === "error" && toolKind !== "execute" && output && (
-          <span className="truncate text-[color:var(--ui-danger)] opacity-80">{output.slice(0, 80)}</span>
+        {status === "error" && toolKind !== "execute" && (
+          <span className="shrink-0 px-1.5 py-0.5 text-[0.625rem] leading-3 rounded bg-[color:var(--ui-danger)]/10 text-[color:var(--ui-danger)]">
+            {failureLabel}
+          </span>
         )}
       </div>
       {(output || input) && (

@@ -325,7 +325,7 @@ class OpenSandboxBackend(BaseSandbox):
 
             try:
                 content_str = _to_text(content)
-                upload_entries.append(WriteEntry(path=path, data=content_str, mode=0o644))
+                upload_entries.append(WriteEntry(path=path, data=content_str, mode=644))
                 responses.append(FileUploadResponse(path=path, error=None))
                 logger.debug("文件已加入上传队列：%s", path)
 
@@ -387,11 +387,11 @@ class OpenSandboxBackend(BaseSandbox):
         directories = set(roots)
         directories.update(str(PurePosixPath(path).parent) for path, _ in files)
         self._sandbox.files.create_directories(
-            [WriteEntry(path=path, mode=0o755) for path in sorted(directories)]
+            [WriteEntry(path=path, mode=755) for path in sorted(directories)]
         )
 
         entries = [
-            WriteEntry(path=path, data=_to_text(content), mode=0o644)
+            WriteEntry(path=path, data=_to_text(content), mode=644)
             for path, content in files
         ]
         if entries:

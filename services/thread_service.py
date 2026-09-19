@@ -322,7 +322,7 @@ def thread_payload(
         "branch": thread.get("branch_name") or "master",
         "model": get_env("MAIN_MODEL", "deepseek-v4-pro"),
         "effort": None,
-        "source": "dashboard",
+        "source": thread.get("source") or "dashboard",
         "status": status_for_frontend(thread.get("latest_run_status")),
         "backendType": thread.get("backend_type") or "local",
         "projectName": thread.get("project_name"),

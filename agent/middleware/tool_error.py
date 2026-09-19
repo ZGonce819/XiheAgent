@@ -41,6 +41,26 @@ from utils.gitee_utils import mask_token
 logger = logging.getLogger(__name__)
 
 
+def _backend_workspace_label(backend: Any) -> str:
+    """返回本地或远程后端可供模型理解的工作区标识。"""
+    workspace = getattr(backend, "workspace", None)
+    root = getattr(workspace, "root", None)
+    if root:
+        return str(root)
+    getter = getattr(backend, "get_workspace_root", None)
+    if callable(getter):
+        try:
+            value = getter()
+            if value:
+                return str(value)
+        except Exception:
+            logger.debug("读取 backend 工作区路径失败", exc_info=True)
+    sandbox_id = getattr(backend, "sandbox_id", None) or getattr(backend, "id", None)
+    if sandbox_id:
+        return f"/workspace（远程沙盒 {sandbox_id}）"
+    return "（工作区路径不可用）"
+
+
 def tool_error_result(
     error: Exception,
     *,
@@ -80,7 +100,7 @@ def tool_error_result(
         "tool": tool_name,
         "error_type": error.__class__.__name__,
         "error": error_text,
-        "workspace": str(backend.workspace.root),
+        "workspace": _backend_workspace_label(backend),
         "hint": hint,
     }
 

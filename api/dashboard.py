@@ -14,6 +14,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
@@ -21,6 +22,7 @@ from pydantic import BaseModel
 
 from agent.graph.graph import get_store
 from agent.runtime import delete_task, get_task, list_tasks
+from agent.runtime.task_router import initialize_task_record
 from config.app_config import get_settings
 from config.approval_config import (
     get_command_approval_preferences,
@@ -86,7 +88,7 @@ from services.thread_service import (
     fetch_visible_messages,
     thread_payload,
 )
-from utils.platform_utils import normalize_repo_url
+from utils.platform_utils import UnsupportedPlatformError, normalize_repo_url
 from utils.redis_utils import cleanup_stream
 
 dashboard_router = APIRouter(prefix="/dashboard/api")
@@ -108,6 +110,27 @@ def _validate_automation_payload(body: dict[str, Any], partial: bool = False) ->
     # 前端传成 "false" 字符串这种写法必须当场报错，不能让它在别处静默解析。
     if body.get("autoApprove") is not None and not isinstance(body["autoApprove"], bool):
         raise HTTPException(status_code=400, detail="审批表决开关必须是布尔值")
+
+
+def _normalize_schedule_repo(body: dict[str, Any]) -> dict[str, Any]:
+    """规范化自动化任务仓库字段，兼容 ``owner/repo`` 简写。"""
+    normalized = dict(body)
+    raw = normalized.get("repo")
+    if not raw:
+        return normalized
+    text = str(raw).strip()
+    try:
+        normalized["repo"] = normalize_repo_url(text)
+    except ValueError:
+        # 保留未知完整 URL，让后台 runner 按原有执行路径给出明确的平台错误；
+        # 简写则必须在保存前拒绝，避免把本可识别的 Gitee 仓库存成不可执行值。
+        if not text.startswith(("http://", "https://")):
+            raise HTTPException(
+                status_code=400,
+                detail="仓库地址格式不正确，请输入完整仓库 URL 或 owner/repo。",
+            )
+        normalized["repo"] = text
+    return normalized
 
 
 def _skill_summary(skill_file: Path) -> dict[str, Any]:
@@ -336,7 +359,7 @@ def dashboard_schedules() -> list[dict[str, Any]]:
 def dashboard_create_schedule(body: dict[str, Any]) -> dict[str, Any]:
     """Create an automation definition."""
     _validate_automation_payload(body)
-    return create_automation(body)
+    return create_automation(_normalize_schedule_repo(body))
 
 
 @dashboard_router.patch("/schedules/{schedule_id}")
@@ -345,7 +368,7 @@ def dashboard_update_schedule(
 ) -> dict[str, Any]:
     """Update an automation definition."""
     _validate_automation_payload(body, partial=True)
-    result = update_automation(schedule_id, body)
+    result = update_automation(schedule_id, _normalize_schedule_repo(body))
     if result is None:
         raise HTTPException(status_code=404, detail="自动化任务不存在")
     return result
@@ -358,6 +381,19 @@ def dashboard_delete_schedule(schedule_id: str) -> None:
     定义与状态分两处存（见 :mod:`config.automation_state`），只删定义的话状态目录
     会只增不减：界面上一个任务都没有，磁盘上却堆着一批点不进去的历史。
     """
+    automation = get_automation(schedule_id)
+    if automation is None:
+        raise HTTPException(status_code=404, detail="自动化任务不存在")
+    thread_ids = set()
+    if automation.get("lastThreadId"):
+        thread_ids.add(str(automation["lastThreadId"]))
+    thread_ids.update(
+        get_store().list_thread_ids_by_source(
+            "schedule",
+            repo_url=str(automation.get("repo") or "") or None,
+            user_prompt=str(automation.get("prompt") or "") or None,
+        )
+    )
     if not delete_automation(schedule_id):
         raise HTTPException(status_code=404, detail="自动化任务不存在")
     # 状态文件已经没用了。清不掉也不让删除失败 —— 用户要删的任务已经删掉了，
@@ -366,6 +402,11 @@ def dashboard_delete_schedule(schedule_id: str) -> None:
         delete_state(schedule_id)
     except OSError:
         logger.warning("删除自动化任务的状态文件失败：%s", schedule_id, exc_info=True)
+    for thread_id in thread_ids:
+        try:
+            delete_task(thread_id)
+        except Exception:
+            logger.warning("删除自动化任务关联会话失败：%s", thread_id, exc_info=True)
 
 
 def _schedule_state_payload(schedule_id: str) -> dict[str, Any]:
@@ -566,7 +607,9 @@ def dashboard_run_schedule(
         raise HTTPException(status_code=400, detail=f"检查项配置有误：{exc}") from exc
 
     refusal = loop_scope_refusal(
-        str(automation.get("prompt") or ""), has_checks=bool(checks)
+        str(automation.get("prompt") or ""),
+        has_checks=bool(checks),
+        auto_approve=automation.get("autoApprove") is True,
     )
     if refusal:
         raise HTTPException(status_code=400, detail=refusal)
@@ -583,20 +626,53 @@ def dashboard_run_schedule(
             detail="这个任务已经有一轮在跑（也可能是上一次运行没能正常收尾），等它结束再触发",
         )
 
+    # 先把会话索引写入业务 Store，再交给后台执行。这样前端拿到回执后立即打开详情
+    # 时，GET /threads/{thread_id} 已经有稳定记录，不会和后台任务建档发生竞态。
+    environment = resolve_backend_type()
     try:
         # 会话 id 在这里就定下来：触发时间要连同它一起记进定义，前端也能立刻跳过去。
         thread_id = str(uuid.uuid4())
         mark_automation_triggered(schedule_id, thread_id=thread_id)
+        repo_url = str(automation["repo"])
+        try:
+            normalized_repo_url = normalize_repo_url(repo_url)
+        except ValueError:
+            normalized_repo_url = repo_url
+        if normalized_repo_url != repo_url:
+            repo_url = normalized_repo_url
+            automation = {**automation, "repo": repo_url}
+            update_automation(schedule_id, {"repo": repo_url})
+        prompt = str(automation.get("prompt") or "")
+        try:
+            initialize_task_record(
+                repo_url=repo_url,
+                prompt=prompt,
+                thread_id=thread_id,
+                backend_type=environment,
+                source="schedule",
+            )
+        except UnsupportedPlatformError:
+            # 保留受理回执对应的可打开会话；真正执行时仍会按原有规则报告仓库平台错误。
+            parts = [part for part in urlsplit(repo_url).path.split("/") if part]
+            owner = parts[-2] if len(parts) >= 2 else ""
+            repo_name = parts[-1].removesuffix(".git") if parts else ""
+            get_store().upsert_thread(
+                thread_id=thread_id,
+                title=prompt[:80] or repo_name,
+                user_prompt=prompt,
+                repo_url=repo_url,
+                repo_owner=owner,
+                repo_name=repo_name,
+                latest_run_status="running",
+                backend_type=environment,
+                source="schedule",
+            )
         round_number = int(load_state(schedule_id)["budget"]["runsUsed"]) + 1
     except Exception:
         # 受理这一步失败就放掉登记。留着自己手里的话，这个任务在登记超时之前
         # 谁都点不动 —— 用户看到的会是一个永远说「已经在跑」的任务。
         guard.release(schedule_id, run_token)
         raise
-
-    # 执行环境要显式定下来传下去：验证门的审批策略按它判断，缺省值 "local" 在
-    # 开了沙箱的部署里会用错一套策略。
-    environment = resolve_backend_type()
 
     def run_once() -> None:
         try:
@@ -616,7 +692,15 @@ def dashboard_run_schedule(
             # 无论跑成什么样都要放掉登记：留着的话这个任务再也点不动了。
             guard.release(schedule_id, run_token)
 
-    background.add_task(run_once)
+    # FastAPI 的 ``BackgroundTasks`` 仍绑定在本次响应生命周期上：在同步部署或
+    # TestClient 中，任务执行期间响应不会真正返回，前端就会一直处于 pending，
+    # 也就无法立刻把回执对应的会话放进侧边栏。用独立守护线程把长任务与请求
+    # 解耦，接口在会话建档完成后即可返回 202。
+    threading.Thread(
+        target=run_once,
+        name=f"automation-{schedule_id}",
+        daemon=True,
+    ).start()
     return {
         "automationId": schedule_id,
         "accepted": True,
@@ -1277,7 +1361,30 @@ def dashboard_threads(limit: int = 50) -> list[dict[str, Any]]:
     Returns:
         会话摘要字典列表。
     """
-    return [thread_payload(thread) for thread in list_tasks(limit=limit)]
+    active_automation_defs = list_automations()
+    active_automations = {
+        (str(item.get("repo") or ""), str(item.get("prompt") or ""))
+        for item in active_automation_defs
+    }
+    active_thread_ids = {
+        str(item.get("lastThreadId"))
+        for item in active_automation_defs
+        if item.get("lastThreadId")
+    }
+    visible_threads = []
+    for thread in list_tasks(limit=limit):
+        if thread.get("source") == "schedule":
+            signature = (
+                str(thread.get("repo_url") or ""),
+                str(thread.get("user_prompt") or ""),
+            )
+            if (
+                str(thread.get("thread_id") or "") not in active_thread_ids
+                and signature not in active_automations
+            ):
+                continue
+        visible_threads.append(thread)
+    return [thread_payload(thread) for thread in visible_threads]
 
 
 @dashboard_router.get("/threads/{thread_id}")

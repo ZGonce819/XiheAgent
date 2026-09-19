@@ -138,3 +138,17 @@ def test_plain_commands_are_untouched(backend: str, data_root: object) -> None:
     assert evaluate_command("ls -la", backend).action == "allow"
     assert evaluate_command("", backend).action == "deny"
     assert evaluate_command("sudo rm -rf /", backend).action == "deny"
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_maven_dependency_commands_use_build_policy(
+    backend: str, data_root: object
+) -> None:
+    """Maven 依赖检查不能因未识别而无条件落到人工审批。"""
+    result = evaluate_command(
+        "cd /workspace/projects/xihe-agent-test; mvn -B dependency:list "
+        "-DincludeScope=runtime -DoutputFile=/tmp/deps.txt",
+        backend,
+    )
+    assert result.action == ("approval" if backend == "local" else "allow")
+    assert result.category == "run_build"

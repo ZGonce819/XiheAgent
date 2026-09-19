@@ -37,6 +37,7 @@ class ThreadRepo(ConnectionManager):
                 latest_run_status VARCHAR(32) NOT NULL DEFAULT 'pending',
                 backend_type VARCHAR(16) NOT NULL DEFAULT 'local',
                 project_name VARCHAR(256),
+                source VARCHAR(32) NOT NULL DEFAULT 'dashboard',
                 created_at VARCHAR(32) NOT NULL,
                 updated_at VARCHAR(32) NOT NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
@@ -47,6 +48,7 @@ class ThreadRepo(ConnectionManager):
             "ALTER TABLE runs ADD COLUMN head_commit VARCHAR(64) NULL",
             "ALTER TABLE threads ADD COLUMN backend_type VARCHAR(16) NOT NULL DEFAULT 'local'",
             "ALTER TABLE threads ADD COLUMN project_name VARCHAR(256) NULL",
+            "ALTER TABLE threads ADD COLUMN source VARCHAR(32) NOT NULL DEFAULT 'dashboard'",
         ):
             try:
                 self.execute(ddl)
@@ -67,6 +69,7 @@ class ThreadRepo(ConnectionManager):
         latest_run_status: str = "pending",
         backend_type: str | None = None,
         project_name: str | None = None,
+        source: str | None = None,
     ) -> None:
         """创建或更新一条 thread 记录。
 
@@ -86,6 +89,8 @@ class ThreadRepo(ConnectionManager):
                 默认 ``None`` 表示不更新此字段。
             project_name: 关联的项目名称（来自 ProjectSelector），
                 默认 ``None`` 表示不更新此字段。
+            source: 会话来源（``"dashboard"`` / ``"schedule"`` 等），
+                默认 ``None`` 表示不更新此字段。
 
         Returns:
             无返回值。
@@ -96,13 +101,14 @@ class ThreadRepo(ConnectionManager):
         # 新建时使用传入值或默认 local；更新时保留原值（除非显式传入）
         effective_backend = backend_type or (existing.get("backend_type") if existing else None) or "local"
         effective_project = project_name or (existing.get("project_name") if existing else None)
+        effective_source = source or (existing.get("source") if existing else None) or "dashboard"
 
         self.execute(
             """
             INSERT INTO threads
                 (thread_id, title, user_prompt, repo_url, repo_owner, repo_name,
-                 branch_name, pr_url, latest_run_status, backend_type, project_name, created_at, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 branch_name, pr_url, latest_run_status, backend_type, project_name, source, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
                 user_prompt = COALESCE(VALUES(user_prompt), user_prompt),
                 repo_url = COALESCE(VALUES(repo_url), repo_url),
@@ -113,11 +119,12 @@ class ThreadRepo(ConnectionManager):
                 latest_run_status = VALUES(latest_run_status),
                 backend_type = VALUES(backend_type),
                 project_name = COALESCE(VALUES(project_name), project_name),
+                source = COALESCE(VALUES(source), source),
                 updated_at = VALUES(updated_at)
             """,
             (
                 thread_id, title, user_prompt, repo_url, repo_owner, repo_name,
-                branch_name, pr_url, latest_run_status, effective_backend, effective_project, created_at, now,
+                branch_name, pr_url, latest_run_status, effective_backend, effective_project, effective_source, created_at, now,
             ),
         )
 
@@ -146,6 +153,24 @@ class ThreadRepo(ConnectionManager):
         return self.fetch_all(
             "SELECT * FROM threads ORDER BY updated_at DESC LIMIT %s", (limit,)
         )
+
+    def list_thread_ids_by_source(
+        self, source: str, *, repo_url: str | None = None, user_prompt: str | None = None
+    ) -> list[str]:
+        """按来源及任务内容找出可级联清理的会话。"""
+        clauses = ["source = %s"]
+        params: list[Any] = [source]
+        if repo_url is not None:
+            clauses.append("repo_url = %s")
+            params.append(repo_url)
+        if user_prompt is not None:
+            clauses.append("user_prompt = %s")
+            params.append(user_prompt)
+        rows = self.fetch_all(
+            f"SELECT thread_id FROM threads WHERE {' AND '.join(clauses)}",
+            tuple(params),
+        )
+        return [str(row["thread_id"]) for row in rows]
 
     def update_thread_status(
         self,

@@ -40,7 +40,9 @@ _CATEGORY_PATTERNS: tuple[tuple[str, str], ...] = (
     ("modify_workspace_files", r"^(?:cp|copy|xcopy|robocopy|mv|move|ren|rename|mkdir|md|touch|new-item)\b"),
     ("install_dependencies", r"^(?:(?:python(?:3)?\s+-m\s+)?pip(?:3)?\s+(?:install|uninstall)|npm\s+(?:install|i|uninstall|ci)|pnpm\s+(?:install|add|remove)|yarn\s+(?:install|add|remove))\b"),
     ("run_tests", r"^(?:pytest\b|python(?:3)?\s+-m\s+pytest\b|npm\s+(?:test|run\s+test)\b|pnpm\s+test\b|yarn\s+test\b)"),
-    ("run_build", r"^(?:ruff|mypy|flake8|black|isort|tsc|vite|webpack|rollup)\b|^(?:npm|pnpm|yarn)\s+(?:run\s+)?(?:build|lint|format|typecheck)\b"),
+    # Maven/Gradle commands cover both dependency inspection and project builds.
+    # They are still governed by the user's backend preference for run_build.
+    ("run_build", r"^(?:mvn|mvnw|gradle|gradlew)\b|^(?:ruff|mypy|flake8|black|isort|tsc|vite|webpack|rollup)\b|^(?:npm|pnpm|yarn)\s+(?:run\s+)?(?:build|lint|format|typecheck)\b"),
     ("run_project_script", r"^(?:python(?:3)?\s+(?!-m\s+(?:pip|pytest)\b).+|node\s+.+|(?:npm|pnpm|yarn)\s+run\s+.+)$"),
     ("git_commit", r"^git\s+(?:add|commit|merge|rebase|cherry-pick|revert|stash)\b"),
     ("git_branch_change", r"^git\s+(?:checkout|switch|pull|fetch|branch|tag)\b"),
@@ -155,7 +157,11 @@ def evaluate_command(command: str, backend_type: str) -> CommandPolicyResult:
     if any(item.action == "approval" for item in decisions):
         item = next(item for item in decisions if item.action == "approval")
         return CommandPolicyResult("approval", item.category, item.reason)
-    return CommandPolicyResult("allow", decisions[0].category, decisions[0].reason)
+    # Compound commands commonly start with ``cd``.  Preserve the meaningful
+    # category of the actual operation instead of reporting the navigation step
+    # as ``read_only``.
+    chosen = next((item for item in reversed(decisions) if item.category != "read_only"), decisions[0])
+    return CommandPolicyResult("allow", chosen.category, chosen.reason)
 
 
 def command_requires_approval(command: str, backend_type: str) -> bool:

@@ -32,6 +32,18 @@ from config.automation_state import (
 REPO = "https://example.com/a/b.git"
 
 
+def wait_until(predicate: Any, timeout: float = 1.0) -> None:
+    """等待独立手动触发线程完成一个可观察状态变更。"""
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(0.005)
+    assert predicate()
+
+
 @pytest.fixture
 def run_guard(monkeypatch: pytest.MonkeyPatch) -> Any:
     """把全局运行登记换成只在本进程内互斥的一份，并交给用例。
@@ -123,6 +135,19 @@ def test_run_refuses_write_tasks_without_checks(
     assert dispatched == []
 
 
+def test_run_allows_write_tasks_without_checks_when_auto_approve_is_on(
+    dashboard: TestClient, dispatched: list[dict[str, Any]]
+) -> None:
+    """全流程自动化开启时，不再因未配置验证命令拒绝写入任务。"""
+    automation = make_automation(
+        prompt="实现一个登录页并提交代码",
+        autoApprove=True,
+    )
+    response = dashboard.post(f"/dashboard/api/schedules/{automation['id']}/run")
+    assert response.status_code == 202
+    wait_until(lambda: bool(dispatched))
+
+
 def test_run_allows_write_tasks_with_checks(
     dashboard: TestClient, monkeypatch: pytest.MonkeyPatch, dispatched: list[dict[str, Any]]
 ) -> None:
@@ -196,7 +221,7 @@ def test_a_finished_round_frees_the_registration(
     first = dashboard.post(f"/dashboard/api/schedules/{automation['id']}/run")
     assert first.status_code == 202
     assert dispatched != []
-    assert run_guard.held() == frozenset()
+    wait_until(lambda: run_guard.held() == frozenset())
 
     # 放掉之后马上能再点一轮。
     second = dashboard.post(f"/dashboard/api/schedules/{automation['id']}/run")
@@ -218,7 +243,7 @@ def test_a_failed_round_still_frees_the_registration(
     response = dashboard.post(f"/dashboard/api/schedules/{automation['id']}/run")
 
     assert response.status_code == 202
-    assert run_guard.held() == frozenset()
+    wait_until(lambda: run_guard.held() == frozenset())
 
 
 def test_a_broken_acceptance_releases_the_registration(
@@ -275,10 +300,18 @@ def test_run_accepts_and_dispatches(
     assert body["threadId"]
 
     assert [item["automation"]["id"] for item in dispatched] == [automation["id"]]
+    wait_until(
+        lambda: (get_automation(automation["id"]) or {}).get("lastThreadId")
+        == body["threadId"]
+    )
     saved = get_automation(automation["id"]) or {}
-    assert saved["lastThreadId"] == body["threadId"]
     assert saved["lastTriggeredAt"]
     assert saved["lastError"] is None
+
+    # 受理响应返回前已经建好会话索引，前端可立即打开详情，不依赖后台 runner 的启动时机。
+    detail = dashboard.get(f"/dashboard/api/threads/{body['threadId']}")
+    assert detail.status_code == 200
+    assert detail.json()["source"] == "schedule"
 
 
 def test_run_passes_the_execution_environment_to_the_cycle(

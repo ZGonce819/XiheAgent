@@ -131,12 +131,16 @@ def resolve_task_kind(instruction: str) -> str:
     return str(classify_task_kind(instruction))
 
 
-def refusal_for_kind(kind: str, *, has_checks: bool) -> str | None:
+def refusal_for_kind(
+    kind: str, *, has_checks: bool, auto_approve: bool = False
+) -> str | None:
     """判断一个已经判好的任务类型能不能在循环里跑。
 
     Args:
         kind: 任务类型取值。
         has_checks: 这个任务有没有配验证检查项。
+        auto_approve: 是否开启全流程自动化表决。开启后由表决流程承担无人值守
+            的安全闸门，不再因为缺少验证命令拒绝写入任务。
 
     Returns:
         不能跑时返回给人看的原因；可以执行时返回 ``None``。
@@ -144,7 +148,7 @@ def refusal_for_kind(kind: str, *, has_checks: bool) -> str | None:
     if kind in READ_ONLY_KINDS:
         return None
     if kind in WRITE_KINDS:
-        if has_checks:
+        if has_checks or auto_approve:
             return None
         return (
             "写入任务必须至少配一条验证检查项：循环改完代码时没有人在旁边看，"
@@ -161,7 +165,9 @@ def refusal_for_kind(kind: str, *, has_checks: bool) -> str | None:
     return f"暂不支持的任务类型：{label}"
 
 
-def loop_scope_refusal(instruction: str, *, has_checks: bool) -> str | None:
+def loop_scope_refusal(
+    instruction: str, *, has_checks: bool, auto_approve: bool = False
+) -> str | None:
     """判断一条任务指令能不能在循环里跑。
 
     传进来的应该是**用户写的原始任务指令**，不是拼上循环状态与验证反馈之后的那份 ——
@@ -170,11 +176,16 @@ def loop_scope_refusal(instruction: str, *, has_checks: bool) -> str | None:
     Args:
         instruction: 原始任务指令。
         has_checks: 这个任务有没有配验证检查项。
+        auto_approve: 是否开启全流程自动化表决。
 
     Returns:
         不能跑时返回给人看的原因；可以执行时返回 ``None``。
     """
-    return refusal_for_kind(resolve_task_kind(instruction), has_checks=has_checks)
+    return refusal_for_kind(
+        resolve_task_kind(instruction),
+        has_checks=has_checks,
+        auto_approve=auto_approve,
+    )
 
 
 def _outcome_from_status(status: str) -> str:
@@ -343,7 +354,11 @@ def _settle_approvals(
             break
 
         messages = list(resumed.get("messages") or [])
-        status = str((store.get_thread(thread_id) or {}).get("latest_run_status") or "")
+        status = str(
+            resumed.get("status")
+            or (store.get_thread(thread_id) or {}).get("latest_run_status")
+            or ""
+        )
         if status != "awaiting_approval":
             break
     else:
@@ -572,7 +587,11 @@ def make_agent_round_runner(
         # 等用户确认的分支停住，而循环还会把这一轮记成「没做完但没报错」。
         instruction = request.instruction or request.prompt
         kind = resolve_task_kind(instruction)
-        refusal = refusal_for_kind(kind, has_checks=bool(request.checks))
+        refusal = refusal_for_kind(
+            kind,
+            has_checks=bool(request.checks),
+            auto_approve=request.auto_approve,
+        )
         if refusal:
             return RoundResult(outcome="blocked", summary=refusal)
         if not request.repo:
@@ -592,12 +611,22 @@ def make_agent_round_runner(
 
         # 会话记录里存**原始任务指令**而不是拼上状态与反馈的那份：任务列表是给人看的，
         # 标题里塞进一整段循环状态没有意义。模型那边拿到的仍然是完整指令。
-        initialize_task_record(
-            repo_url=request.repo,
-            prompt=instruction,
-            thread_id=current_thread,
-            backend_type=environment,
+        # 手动触发时 API 已经提前建好索引，让详情页在收到回执后立即可读；
+        # 调度器直接调用 runner 时仍由这里负责首次建档。
+        store = get_store()
+        existing_thread = (
+            store.get_thread(current_thread)
+            if hasattr(store, "get_thread")
+            else None
         )
+        if existing_thread is None:
+            initialize_task_record(
+                repo_url=request.repo,
+                prompt=instruction,
+                thread_id=current_thread,
+                backend_type=environment,
+                source="schedule",
+            )
         try:
             result = run_agent_task(
                 repo_url=request.repo,
@@ -631,7 +660,8 @@ def make_agent_round_runner(
 
         store = get_store()
         thread = store.get_thread(current_thread) or {}
-        status = str(thread.get("latest_run_status") or "")
+        # 本次调用返回的状态直接决定是否继续审批，避免额外查询改变判断依据。
+        status = str(result.get("status") or thread.get("latest_run_status") or "")
         messages = list(result.get("messages") or [])
 
         # 开着表决的任务，撞上审批就地处理掉，不再把「等一个没人会点的确认」留给下一轮。

@@ -12,6 +12,7 @@ import {
 import { useEffect, useState, type ReactNode } from "react"
 
 import { AppShell, SettingsSection } from "@/components/AppShell"
+import { Markdown } from "@/components/agents/ported/Markdown"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { Input } from "@/components/ui/input"
@@ -552,7 +553,7 @@ export function AutomationRow({
   const run = () => {
     setReceipt(null)
     setRunError(null)
-    runSchedule.mutate(schedule.id, {
+    runSchedule.mutate(schedule, {
       onSuccess: (data) => setReceipt(data),
       onError: (reason) =>
         setRunError(
@@ -663,7 +664,7 @@ export function AutomationRow({
           className="surface-inline-note flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground"
         >
           <span>
-            已开始第 {receipt.roundNumber} 轮，跑完会出现在会话列表里。
+            已开始第 {receipt.roundNumber} 轮，并已出现在会话列表里。
           </span>
           <Link
             to="/agents/$threadId"
@@ -741,9 +742,11 @@ export function AutomationRow({
                   )}
                 </div>
               )}
-              <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[0.6875rem] leading-relaxed text-muted-foreground">
-                {loopState.data?.text ?? ""}
-              </pre>
+              {loopState.data?.text ? (
+                <Markdown content={loopState.data.text} />
+              ) : (
+                <p className="text-xs text-muted-foreground">还没有运行记录。</p>
+              )}
               {loopState.data && (
                 <div className="mt-3 border-t border-border pt-3">
                   <p className="text-[0.625rem] font-medium">预算上限</p>

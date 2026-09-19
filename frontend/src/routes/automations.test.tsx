@@ -170,7 +170,7 @@ describe("自动化任务页的动画约定", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /立即跑一轮/ }))
 
-    const note = screen.getByText(/已开始第 2 轮/)
+    const note = screen.getByText(/已开始第 2 轮，并已出现在会话列表里/)
     expect(note.parentElement?.className).toContain("surface-inline-note")
   })
 
@@ -202,10 +202,10 @@ describe("表单里的下拉与项目统一", () => {
     // 原生 select 是那次不一致的根源：系统外观、系统箭头、系统菜单，
     // 三样都插不进项目约定（agents.css 里 [data-popup-open] 的箭头旋转它也吃不到）。
     expect(container.querySelector("select")).toBeNull()
-    // 共享组件的触发器恰好两个：执行频率 + 模型。箭头与弹出动画都挂在 data-slot 上。
+    // 共享组件的触发器包含平台、执行频率和模型。箭头与弹出动画都挂在 data-slot 上。
     expect(
       container.querySelectorAll('[data-slot="select-trigger"]')
-    ).toHaveLength(2)
+    ).toHaveLength(3)
     // 触发器直接渲染当前选项的中文标签（执行频率的默认预设是「每天」）。
     expect(screen.getByText("每天")).toBeTruthy()
   })

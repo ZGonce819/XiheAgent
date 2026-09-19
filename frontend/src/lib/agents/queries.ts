@@ -1,9 +1,14 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 
 import { agentsApi } from "./api"
 import { addPendingPrompt } from "./pendingPrompts"
-import { claimAnonymousThreadReveal } from "./threadReveal"
+import { claimAnonymousThreadReveal, markThreadReveal } from "./threadReveal"
 import {
   handleStreamPart,
   normalizeThreadHistory,
@@ -11,7 +16,13 @@ import {
   processStreamResponse,
 } from "./useThreadStream"
 import type { ScheduleBudgetRequest, ScheduleUpdateRequest } from "./api"
-import type { AgentThread, ImageChunk, Message } from "./types"
+import type {
+  AgentSchedule,
+  AgentThread,
+  AutomationRunReceipt,
+  ImageChunk,
+  Message,
+} from "./types"
 
 export const agentThreadKeys = {
   all: ["agent-threads"] as const,
@@ -62,8 +73,10 @@ export function useAgentThread(
         agentThreadKeys.detail(threadId)
       )
 
-      // 缓存正在运行 → SSE 正在实时更新，不能拉服务端（checkpoint 可能还没写入本轮）
-      if (cached?.status === "running") {
+      // 普通会话运行时由 SSE 实时更新，不能拿可能滞后的 checkpoint 覆盖缓存。
+      // 自动化会话没有绑定当前页面的请求流，必须轮询服务端；否则第一次读到
+      // “构建 Agent 运行图”后会永远返回这份 running 缓存。
+      if (cached?.status === "running" && cached.source !== "schedule") {
         return cached
       }
 
@@ -72,13 +85,25 @@ export function useAgentThread(
       const cachedAfterCheck = queryClient.getQueryData<AgentThread>(key)
       if (!cachedAfterCheck) return normalizeThreadHistory(serverThread)
 
-      if (cachedAfterCheck.status === "running") {
+      if (
+        cachedAfterCheck.status === "running" &&
+        cachedAfterCheck.source !== "schedule"
+      ) {
         return cachedAfterCheck
       }
 
       return normalizeThreadHistory(serverThread)
     },
-    refetchInterval: options?.refetchInterval,
+    refetchInterval: (query) => {
+      const thread = query.state.data
+      // 自动表决会短暂进入 interrupted，再由后台恢复；此时停掉轮询
+      // 就再也收不到恢复和完成状态。
+      if (thread?.source === "schedule" &&
+          (thread.status === "running" || thread.status === "interrupted")) {
+        return 3_000
+      }
+      return options?.refetchInterval ?? false
+    },
   })
 }
 
@@ -142,6 +167,49 @@ export function useAgentScheduleState(
 }
 
 /**
+ * 把已经受理、但后台还没来得及写完业务记录的自动化会话先放进侧边栏。
+ * 服务端已经为这一轮分配了稳定的 threadId，因此这里不是临时 id；后续列表刷新会
+ * 用同一个 id 的真实记录自然替换它。
+ */
+export function cacheAcceptedAutomationThread(
+  queryClient: QueryClient,
+  schedule: AgentSchedule,
+  receipt: AutomationRunReceipt,
+  now = Date.now()
+) {
+  const repo = schedule.repo ?? ""
+  const thread: AgentThread = {
+    id: receipt.threadId,
+    title: schedule.prompt.slice(0, 80) || schedule.name || "自动化任务",
+    repo,
+    repoFullName: repo,
+    repoUrl: repo,
+    platform: "",
+    platformDisplay: "",
+    branch: "",
+    model: schedule.model,
+    source: "schedule",
+    status: "running",
+    createdAt: now,
+    updatedAt: now,
+    messages: [],
+    runEvents: [],
+  }
+
+  let inserted = false
+  queryClient.setQueryData<Array<AgentThread>>(
+    agentThreadKeys.all,
+    (threads) => {
+      const current = threads ?? []
+      if (current.some((item) => item.id === receipt.threadId)) return current
+      inserted = true
+      return [thread, ...current]
+    }
+  )
+  if (inserted) markThreadReveal(receipt.threadId)
+}
+
+/**
  * 手动跑一轮。
  *
  * 接口是受理式的：返回 202 表示这一轮已经派到后台，真正跑完要几分钟。所以这里
@@ -151,11 +219,12 @@ export function useRunAgentSchedule() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (scheduleId: string) => agentsApi.runSchedule(scheduleId),
-    onSuccess: (_receipt, scheduleId) => {
+    mutationFn: (schedule: AgentSchedule) => agentsApi.runSchedule(schedule.id),
+    onSuccess: (receipt, schedule) => {
+      cacheAcceptedAutomationThread(queryClient, schedule, receipt)
       queryClient.invalidateQueries({ queryKey: agentScheduleKeys.all })
       queryClient.invalidateQueries({
-        queryKey: agentScheduleKeys.state(scheduleId),
+        queryKey: agentScheduleKeys.state(schedule.id),
       })
     },
   })

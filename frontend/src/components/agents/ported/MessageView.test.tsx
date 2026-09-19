@@ -340,6 +340,30 @@ describe("history and stream completion", () => {
     expect(screen.getByText(/fatal: not a git repository/)).toBeTruthy();
   });
 
+  it("shows a failure badge instead of leaking a non-command error into the main row", () => {
+    const failedDirectory: RunEvent = {
+      id: "run:tool:failed-directory",
+      thread_id: "thread",
+      kind: "search",
+      title: "查看目录(/projects)",
+      status: "error",
+      detail: JSON.stringify({
+        tool: "ls",
+        args: { path: "/projects" },
+        output: "Error: Path '/projects': path_not_found",
+      }),
+      created_at: "2026-09-13T11:12:00Z",
+    };
+
+    const restored = normalizeThreadHistory(history([failedDirectory]));
+    render(<MessageView messages={restored.messages} isStreaming={false} />);
+    fireEvent.click(screen.getByRole("button", { name: /任务失败/ }));
+    expect(screen.getByText("操作执行失败")).toBeTruthy();
+    expect(screen.queryByText("Error: Path '/projects': path_not_found")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "显示细节" }));
+    expect(screen.getByText("Error: Path '/projects': path_not_found")).toBeTruthy();
+  });
+
   it("does not promote the last tool preamble to a final answer when the run ends on a tool", () => {
     const restored = normalizeThreadHistory(history(events.slice(0, 3)));
     const rows = groupConversationMessages(restored.messages);
