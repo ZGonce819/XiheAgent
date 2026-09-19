@@ -41,11 +41,23 @@ function languageLabel(language: string): string {
   return language;
 }
 
+function isDarkMode(): boolean {
+  return document.documentElement.classList.contains("dark");
+}
+
 export function CodeBlock({ text, language }: CodeBlockProps) {
   const [tokens, setTokens] = useState<ThemedToken[][] | null>(null);
   const [copied, setCopied] = useState(false);
+  const [dark, setDark] = useState(() => isDarkMode());
   const normalizedLanguage = useMemo(() => normalizeLanguage(language), [language]);
   const displayLanguage = useMemo(() => languageLabel(normalizedLanguage), [normalizedLanguage]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const observer = new MutationObserver(() => setDark(isDarkMode()));
+    observer.observe(root, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,7 +65,8 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
 
     if (normalizedLanguage === "text") return;
 
-    const cacheKey = `${normalizedLanguage}::${text}`;
+    const theme = dark ? "github-dark" : "github-light";
+    const cacheKey = `${theme}::${normalizedLanguage}::${text}`;
     const cached = TOKEN_CACHE.get(cacheKey);
     if (cached) {
       setTokens(cached);
@@ -61,7 +74,7 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
     }
 
     getSingletonHighlighter({
-      themes: ["github-dark"],
+      themes: [theme],
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       langs: [normalizedLanguage as any],
     })
@@ -70,7 +83,7 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
         const result = highlighter.codeToTokens(text, {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           lang: normalizedLanguage as any,
-          theme: "github-dark",
+          theme,
         });
         if (TOKEN_CACHE.size >= 500) TOKEN_CACHE.clear();
         TOKEN_CACHE.set(cacheKey, result.tokens);
@@ -86,7 +99,7 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
     return () => {
       cancelled = true;
     };
-  }, [text, normalizedLanguage]);
+  }, [text, normalizedLanguage, dark]);
 
   const handleCopy = async () => {
     try {

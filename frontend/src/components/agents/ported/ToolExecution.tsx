@@ -276,7 +276,7 @@ export const ToolExecution = memo(function ToolExecution({
 
   const displayName = formatToolDisplay(title, toolKind, input, projectPath);
   const statusTextClass =
-    status === "error"
+    status === "error" || status === "rejected"
       ? "text-[color:var(--ui-danger)]"
       : "text-[color:var(--ui-text-muted)]";
 
@@ -284,7 +284,17 @@ export const ToolExecution = memo(function ToolExecution({
     <div className="my-0.5 text-[0.75rem] leading-5">
       <div className="flex items-center gap-2 min-w-0">
         <span className={`${statusTextClass} truncate`}>{displayName}</span>
-        {status === "error" && output && (
+        {status === "rejected" && (
+          <span className="shrink-0 px-1.5 py-0.5 text-[0.625rem] leading-3 rounded bg-[color:var(--ui-danger)]/10 text-[color:var(--ui-danger)]">
+            已被用户拒绝执行
+          </span>
+        )}
+        {status === "error" && toolKind === "execute" && (
+          <span className="shrink-0 px-1.5 py-0.5 text-[0.625rem] leading-3 rounded bg-[color:var(--ui-danger)]/10 text-[color:var(--ui-danger)]">
+            命令执行失败
+          </span>
+        )}
+        {status === "error" && toolKind !== "execute" && output && (
           <span className="truncate text-[color:var(--ui-danger)] opacity-80">{output.slice(0, 80)}</span>
         )}
       </div>

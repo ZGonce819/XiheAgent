@@ -38,13 +38,21 @@ export function RepoSelector({
   const [open, setOpen] = useState(false)
   const [owner, setOwner] = useState("")
   const [repoName, setRepoName] = useState("")
+  const [codeupOrgId, setCodeupOrgId] = useState("")
   const [provider, setProvider] = useState<RepoProvider>("github")
   const [validationError, setValidationError] = useState<string | null>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const ownerRef = useRef<HTMLInputElement>(null)
   const repoRef = useRef<HTMLInputElement>(null)
+  const orgIdRef = useRef<HTMLInputElement>(null)
 
-  const query = owner || repoName ? `${owner}/${repoName}`.replace(/^\/|\/$/g, "").replace(/\/+/g, "/") : ""
+  const query = useMemo(() => {
+    if (provider === "codeup" && codeupOrgId.trim()) {
+      const parts = [codeupOrgId.trim(), owner, repoName].filter(Boolean)
+      return parts.join("/").replace(/\/+/g, "/")
+    }
+    return (owner || repoName ? `${owner}/${repoName}` : "").replace(/^\/|\/$/g, "").replace(/\/+/g, "/")
+  }, [owner, repoName, provider, codeupOrgId])
 
   const filteredRepos = useMemo(() => {
     const all = repos ?? []
@@ -56,6 +64,14 @@ export function RepoSelector({
   const customRepo = useMemo(() => {
     const trimmed = query.trim()
     if (!trimmed) return null
+
+    // Codeup: 三个独立字段拼出完整 URL（normalizeRepoFullName 对无 host 的 3 段路径返回 null）
+    if (provider === "codeup" && codeupOrgId.trim() && owner.trim() && repoName.trim()) {
+      const fullUrl = `https://codeup.aliyun.com/${codeupOrgId.trim()}/${owner.trim()}/${repoName.trim()}`
+      const exists = (repos ?? []).some((repo) => repo.full_name === `${codeupOrgId.trim()}/${owner.trim()}/${repoName.trim()}`)
+      if (!exists) return fullUrl
+    }
+
     const normalized = normalizeRepoFullName(trimmed)
     if (!normalized) return null
     const exists = (repos ?? []).some((repo) => repo.full_name === normalized)
@@ -63,13 +79,13 @@ export function RepoSelector({
     if (detectRepoProvider(trimmed)) return trimmed
     const parts = normalized.split("/")
     if (parts.length === 2) {
-      const host = provider === "github" ? "https://github.com" : provider === "codeup" ? "https://codeup.aliyun.com" : "https://gitee.com"
+      const host = provider === "github" ? "https://github.com" : "https://gitee.com"
       return `${host}/${normalized}`
     }
     return trimmed
-  }, [query, repos, provider])
+  }, [query, repos, provider, codeupOrgId, owner, repoName])
 
-  const clearInputs = () => { setOwner(""); setRepoName(""); setValidationError(null) }
+  const clearInputs = () => { setOwner(""); setRepoName(""); setCodeupOrgId(""); setValidationError(null) }
 
   // 触发器标签拆分为「前缀（协议/主机/owner）」与「仓库名」，用于分阶段截断：
   // 先前缀从前往后出前置省略号（保留 repo 前的 /），再仓库名从后往前出尾部省略号
@@ -82,12 +98,18 @@ export function RepoSelector({
   }, [selectedRepo])
 
   const handleEnterKey = useCallback(() => {
+    if (provider === "codeup" && !codeupOrgId.trim()) {
+      setValidationError("请填写组织 ID")
+      return
+    }
     if (!owner.trim() || !repoName.trim()) {
       setValidationError(!owner.trim() && !repoName.trim() ? "请填写 owner 和 repo" : !owner.trim() ? "请填写 owner" : "请填写 repo")
       return
     }
     setValidationError(null)
-    const trimmed = `${owner.trim()}/${repoName.trim()}`
+    const trimmed = provider === "codeup" && codeupOrgId.trim()
+      ? `${codeupOrgId.trim()}/${owner.trim()}/${repoName.trim()}`
+      : `${owner.trim()}/${repoName.trim()}`
     const normalized = normalizeRepoFullName(trimmed)
     const existing = (repos ?? []).find((repo) => repo.full_name === normalized)
     if (existing) {
@@ -99,13 +121,16 @@ export function RepoSelector({
     }
     setOpen(false)
     clearInputs()
-  }, [owner, repoName, repos, customRepo, onRepoChange])
+  }, [owner, repoName, codeupOrgId, provider, repos, customRepo, onRepoChange])
 
   useEffect(() => {
     if (open) {
-      requestAnimationFrame(() => ownerRef.current?.focus())
+      requestAnimationFrame(() => {
+        if (provider === "codeup") orgIdRef.current?.focus()
+        else ownerRef.current?.focus()
+      })
     }
-  }, [open])
+  }, [open, provider])
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -132,7 +157,9 @@ export function RepoSelector({
                 if (parts.length === 2 && parts[0] && parts[1]) {
                   setOwner(parts[0])
                   setRepoName(parts[1])
-                } else if (parts.length === 3 && parts[1] && parts[2]) {
+                  setCodeupOrgId("")
+                } else if (parts.length === 3 && parts[0] && parts[1] && parts[2]) {
+                  setCodeupOrgId(parts[0])
                   setOwner(parts[1])
                   setRepoName(parts[2])
                 }
@@ -197,13 +224,29 @@ export function RepoSelector({
             ))}
           </div>
           <div className="flex items-center gap-0 border-b border-border px-3 py-2.5">
+            {provider === "codeup" && (
+              <>
+                <input
+                  ref={orgIdRef}
+                  value={codeupOrgId}
+                  onChange={(e) => { setCodeupOrgId(e.target.value.replace(/\//g, "")); setValidationError(null) }}
+                  onKeyDown={(e) => {
+                    if (e.key === "/" || e.key === "ArrowRight") { e.preventDefault(); ownerRef.current?.focus() }
+                    else if (e.key === "Enter") { e.preventDefault(); handleEnterKey() }
+                  }}
+                  placeholder={validationError === "请填写组织 ID" ? "请填写组织 ID" : "org id"}
+                  className={cn("w-20 bg-transparent text-foreground outline-none", validationError === "请填写组织 ID" ? "placeholder:text-[color:var(--ui-danger)]" : "placeholder:text-muted-foreground")}
+                />
+                <span className="mx-1 rounded bg-muted px-1.5 py-0.5 text-[0.6875rem] font-medium text-muted-foreground select-none">/</span>
+              </>
+            )}
             <input
               ref={ownerRef}
-              autoFocus
               value={owner}
               onChange={(e) => { setOwner(e.target.value.replace(/\//g, "")); setValidationError(null) }}
               onKeyDown={(e) => {
                 if (e.key === "/" || e.key === "ArrowRight") { e.preventDefault(); repoRef.current?.focus() }
+                else if (e.key === "ArrowLeft" && !owner) { e.preventDefault(); if (provider === "codeup") orgIdRef.current?.focus() }
                 else if (e.key === "Enter") { e.preventDefault(); handleEnterKey() }
               }}
               placeholder={validationError && !owner ? "请填写 owner" : "owner"}

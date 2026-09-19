@@ -74,6 +74,37 @@ def _safe_detail_args(args: dict[str, Any]) -> dict[str, Any]:
     return {str(key): _safe_detail_value(value) for key, value in args.items()}
 
 
+def _tool_result_succeeded(result: ToolMessage | Command, tool_name: str) -> bool:
+    """判断工具返回值是否真的成功，包括命令的非零退出码。"""
+
+    if not isinstance(result, ToolMessage):
+        return True
+    if result.status == "error":
+        return False
+    if tool_name not in {"execute", "run_command"}:
+        return True
+    artifact = result.artifact
+    if isinstance(artifact, dict):
+        exit_code = artifact.get("exit_code")
+        if isinstance(exit_code, int):
+            return exit_code == 0
+    content = str(result.content or "")
+    return "[Command failed with exit code " not in content
+
+
+def _tool_result_output(result: ToolMessage | Command, *, limit: int = 8_000) -> str | None:
+    """提取可持久化的脱敏工具输出，避免刷新后丢失失败原因。"""
+
+    if not isinstance(result, ToolMessage) or not result.content:
+        return None
+    if isinstance(result.content, str):
+        output = result.content
+    else:
+        output = json.dumps(result.content, ensure_ascii=False, default=str)
+    output = mask_token(output)
+    return output if len(output) <= limit else output[:limit] + "\n…输出已截断"
+
+
 def _map_tool_to_kind(tool_name: str) -> str:
     """根据工具名映射到前端展示的 toolKind。"""
     mapping = {
@@ -82,6 +113,7 @@ def _map_tool_to_kind(tool_name: str) -> str:
         "read_file": "read",
         "write_file": "edit",
         "edit_file": "edit",
+        "delete": "delete",
         "execute": "execute",
         "run_command": "execute",
         "web_search": "search",
@@ -116,6 +148,9 @@ def _build_tool_title(tool_name: str, args: dict[str, Any]) -> str:
     elif tool_name in ("write_file", "edit_file"):
         path = args.get("path") or args.get("file_path", "")
         return f"编辑文件({path})"
+    elif tool_name == "delete":
+        path = args.get("path") or args.get("file_path", "")
+        return f"删除文件({path})"
     elif tool_name in ("execute", "run_command"):
         command = args.get("command", "")
         if len(command) > 50:
@@ -193,23 +228,28 @@ class ToolTrackingMiddleware(AgentMiddleware):
         args: dict[str, Any],
         elapsed_ms: int,
         success: bool,
+        output: str | None = None,
     ) -> None:
         """记录工具执行完成。"""
         kind = _map_tool_to_kind(tool_name)
         title = _build_tool_title(tool_name, args)
         status = "completed" if success else "error"
         
+        detail: dict[str, Any] = {
+            "tool": tool_name,
+            "args": _safe_detail_args(args),
+            "elapsed_ms": elapsed_ms,
+        }
+        if not success and output:
+            detail["output"] = output
+
         record_event(
             thread_id,
             key,
             title,
             kind=kind,
             status=status,
-            detail=json.dumps({
-                "tool": tool_name,
-                "args": _safe_detail_args(args),
-                "elapsed_ms": elapsed_ms,
-            }, ensure_ascii=False),
+            detail=json.dumps(detail, ensure_ascii=False),
         )
 
     def wrap_tool_call(
@@ -239,19 +279,20 @@ class ToolTrackingMiddleware(AgentMiddleware):
             result = handler(request)
             elapsed_ms = int((time.time() - start_time) * 1000)
             
+            success = _tool_result_succeeded(result, tool_name)
             self._record_tool_end(
                 thread_id,
                 key=key,
                 tool_name=tool_name,
                 args=args,
                 elapsed_ms=elapsed_ms,
-                success=True,
+                success=success,
+                output=_tool_result_output(result) if not success else None,
             )
             
             return result
         except Exception:
             elapsed_ms = int((time.time() - start_time) * 1000)
-            
             self._record_tool_end(
                 thread_id,
                 key=key,
@@ -289,14 +330,16 @@ class ToolTrackingMiddleware(AgentMiddleware):
         try:
             result = await handler(request)
             elapsed_ms = int((time.time() - start_time) * 1000)
-            
+
+            success = _tool_result_succeeded(result, tool_name)
             self._record_tool_end(
                 thread_id,
                 key=key,
                 tool_name=tool_name,
                 args=args,
                 elapsed_ms=elapsed_ms,
-                success=True,
+                success=success,
+                output=_tool_result_output(result) if not success else None,
             )
             
             return result

@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from deepagents.backends.protocol import (
+    DeleteResult,
     EditResult,
     ExecuteResponse,
     FileDownloadResponse,
@@ -41,6 +42,7 @@ from deepagents.backends.sandbox import BaseSandbox
 from .command_policy import evaluate_command
 from .permissions import normalize_safe_command
 from .workspace import Workspace
+from utils.recycle_bin import move_to_recycle_bin
 
 logger = logging.getLogger("agent.run.shell")
 
@@ -522,6 +524,37 @@ class LocalShellBackend(BaseSandbox):
             return EditResult(path=file_path, occurrences=count if replace_all else 1)
         except PermissionError as exc:
             return EditResult(error=str(exc))
+
+    def delete(self, file_path: str) -> DeleteResult:
+        """Move a project file or directory into the global workspace recycle bin."""
+
+        try:
+            resolved = self._resolve_virtual_path(file_path)
+            denied = self._write_deny_reason(resolved)
+            if denied:
+                return DeleteResult(error=denied)
+            if not resolved.exists() and not resolved.is_symlink():
+                return DeleteResult(error=f"文件不存在：{file_path}")
+
+            if self.local_folder_mode:
+                project_root = self.root
+            else:
+                try:
+                    project_relative = resolved.relative_to(self.projects_dir.resolve())
+                except ValueError:
+                    return DeleteResult(error="只能删除项目目录中的文件")
+                if not project_relative.parts:
+                    return DeleteResult(error="不能删除项目目录根节点")
+                project_root = self.projects_dir / project_relative.parts[0]
+
+            move_to_recycle_bin(
+                resolved,
+                project_root=project_root,
+                workspace_root=self.global_workspace_root,
+            )
+            return DeleteResult(path=file_path)
+        except (FileNotFoundError, PermissionError, OSError) as exc:
+            return DeleteResult(error=str(exc))
 
     def glob(self, pattern: str, path: str | None = None) -> GlobResult:
         """递归搜索匹配模式的文件路径（支持 fnmatch 通配符）。
@@ -1401,13 +1434,19 @@ _BACKEND: LocalShellBackend | None = None
 
 def get_local_shell_backend() -> LocalShellBackend:
     """获取全局唯一的 LocalShellBackend 实例（单例）。
+
+    工作区可在设置页运行时修改。缓存的 backend 若仍指向旧目录，就必须重建，
+    否则新会话仍会把仓库创建到应用启动时的默认工作区。
     
     Returns:
         全局 ``LocalShellBackend`` 实例。
     """
     global _BACKEND
-    if _BACKEND is None:
-        _BACKEND = LocalShellBackend()
+    from config.app_config import get_settings
+
+    configured_root = get_settings().workspace_root.expanduser().resolve()
+    if _BACKEND is None or _BACKEND.root != configured_root:
+        _BACKEND = LocalShellBackend(workspace=configured_root)
     return _BACKEND
 
 

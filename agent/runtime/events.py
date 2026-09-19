@@ -99,3 +99,38 @@ def record_event(
             key,
             title,
         )
+
+
+def mark_tool_events_rejected(thread_id: str) -> None:
+    """将处于 in_progress 状态的工具事件标记为已拒绝。
+
+    用户拒绝命令审批时调用，把仍在等待执行的工具事件状态改为 rejected，
+    前端据此展示「已拒绝」徽章。
+
+    Args:
+        thread_id: 当前线程 ID。
+    """
+
+    try:
+        store = _get_event_store()
+        events = store.list_run_events(thread_id)
+        for event in events:
+            # RunEventRepo.list_run_events() returns the database column as ``id``.
+            # Keep the fallback for lightweight stores/tests that expose ``event_id``.
+            event_id = str(event.get("id") or event.get("event_id") or "")
+            status = str(event.get("status") or "")
+            if event_id.startswith(f"{thread_id}:tool:") and status in {"pending", "in_progress"}:
+                key = event_id[len(f"{thread_id}:"):]
+                kind = str(event.get("kind") or "execute")
+                title = str(event.get("title") or "")
+                detail = event.get("detail")
+                record_event(
+                    thread_id,
+                    key,
+                    title,
+                    kind=kind,
+                    status="rejected",
+                    detail=str(detail) if detail else None,
+                )
+    except Exception:
+        logger.exception("标记工具事件为已拒绝失败：thread_id=%s", thread_id)

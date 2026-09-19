@@ -21,7 +21,7 @@ from agent.runtime._helpers import ensure_repo_memory_for_repo
 from agent.runtime.events import record_event
 from backends.local_shell import LocalShellBackend
 from backends.workspace import Workspace
-from config.constants import PROJECTS_DIR, WORKSPACE_ROOT
+from config.app_config import get_settings
 from utils.gitee_utils import mask_token
 from utils.platform_utils import parse_repo_url
 
@@ -64,11 +64,12 @@ def run_workspace_listing_task(
     store.clear_run_events(thread_id)
     run_id = str(uuid.uuid4())
     store.record_run(run_id=run_id, thread_id=thread_id, status="running")
-    workspace = Workspace(WORKSPACE_ROOT)
+    settings = get_settings()
+    workspace = Workspace(settings.workspace_root)
     backend = LocalShellBackend(workspace)
     try:
         # 所有可见步骤都通过 record_event 写入 run_events，前端可以复用同一套事件展示组件。
-        record_event(thread_id, "workspace", "定位本地工作区", status="completed", detail=str(WORKSPACE_ROOT))
+        record_event(thread_id, "workspace", "定位本地工作区", status="completed", detail=str(settings.workspace_root))
         record_event(
             thread_id, "list:projects", "查看项目目录",
             kind="search", status="in_progress", detail="projects",
@@ -178,17 +179,18 @@ def run_pull_only_task(
     repo = parse_repo_url(repo_url)
     from agent.runtime._helpers import resolve_project_local_folder
 
+    settings = get_settings()
     local_folder = resolve_project_local_folder(thread_id)
     local_folder_mode = bool(local_folder)
     if local_folder:
         # 本地文件夹模式：文件夹即项目根，仓库目录为 "."，全局工作区只读提供基础设施。
         workspace = Workspace(local_folder)
         backend = LocalShellBackend(
-            workspace, local_folder_mode=True, global_workspace_root=WORKSPACE_ROOT,
+            workspace, local_folder_mode=True, global_workspace_root=settings.workspace_root,
         )
         project_dir = "."
     else:
-        workspace = Workspace(WORKSPACE_ROOT)
+        workspace = Workspace(settings.workspace_root)
         backend = LocalShellBackend(workspace)
         project_dir = repo_project_dir(repo)
     ensure_repo_memory_for_repo(repo, project_dir)
@@ -202,10 +204,10 @@ def run_pull_only_task(
         if local_folder_mode:
             target.mkdir(parents=True, exist_ok=True)
         else:
-            PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
+            settings.projects_dir.mkdir(parents=True, exist_ok=True)
         if target.exists() and (target / ".git").exists():
-            # 本地已经存在 Git 仓库时，只更新远程地址并快进拉取 master。
-            # 这里使用 --ff-only，避免自动产生 merge commit，保持教学项目历史清晰。
+            # 本地已经存在 Git 仓库时，只更新远程地址并拉取 master。
+            # 使用 --rebase 将本地提交变基到远程最新提交之上，避免产生 merge commit。
             record_event(thread_id, "workspace", "准备本地工作区", status="completed")
             record_event(thread_id, "sync", "同步远程仓库", kind="execute", status="in_progress")
             remote_result = backend.run(
@@ -216,7 +218,7 @@ def run_pull_only_task(
                 backend, "git fetch --all", cwd=str(relative_dir), timeout=300,
             )
             pull_result = _run_git_with_fetch_head_retry(
-                backend, "git pull origin master --ff-only", cwd=str(relative_dir), timeout=300,
+                backend, "git pull --rebase origin master", cwd=str(relative_dir), timeout=300,
             )
             outputs = [remote_result, checkout_result, fetch_result, pull_result]
         else:

@@ -34,6 +34,18 @@ const messages = [user, message("plan", [text("任务计划"), plan]),
   message("answer", [text("请确认目标仓库。")])];
 
 describe("task execution and answer boundaries", () => {
+  it("keeps streaming body text structurally stable until the reply completes", () => {
+    const streaming = [user, message("streaming-markdown", [text("**正在输出**\n\n- 第一项")])];
+    const { container, rerender } = render(<MessageView messages={streaming} isStreaming />);
+
+    expect(container.querySelector("[data-streaming-text]")).toBeTruthy();
+    expect(container.querySelector("strong")).toBeNull();
+
+    rerender(<MessageView messages={streaming} isStreaming={false} />);
+    expect(container.querySelector("[data-streaming-text]")).toBeNull();
+    expect(container.querySelector("strong")?.textContent).toBe("正在输出");
+  });
+
   it("keeps narrations and unfinished TODO inside one completed execution group, leaving only the answer outside", () => {
     render(<MessageView messages={messages} isStreaming={false} />);
     expect(screen.queryByText("先核实仓库")).toBeNull();
@@ -201,6 +213,93 @@ const event = (id: string, detail: object): RunEvent => ({
 const history = (runEvents: RunEvent[]) => ({ id: "thread", status: "finished", messages, runEvents }) as AgentThread;
 
 describe("history and stream completion", () => {
+  it("keeps preceding commands mounted and the execution scroll position through failure and approval", () => {
+    const client = new QueryClient();
+    client.setQueryData(["threads", "thread"], { ...history([]), messages: [user] });
+    const update = (id: string, status: string) => handleStreamPart("thread", {
+      event: "tool_update", data: {
+        event_id: `thread:tool:${id}`, run_id: "run", tool_group_id: "group",
+        title: id, kind: "execute", status,
+        detail: JSON.stringify({ tool: "execute", args: { command: id }, output: status === "error" ? "failure detail" : "" }),
+      },
+    }, client);
+    update("first", "completed");
+    update("second", "in_progress");
+    const current = () => client.getQueryData<AgentThread>(["threads", "thread"])!.messages;
+    const { rerender } = render(<MessageView messages={current()} isStreaming />);
+    const first = screen.getByText("终端(first)");
+    const details = screen.getByRole("region", { name: "任务执行详情" });
+    details.scrollTop = 30;
+    fireEvent.scroll(details);
+    update("second", "error");
+    rerender(<MessageView messages={current()} isStreaming />);
+    expect(screen.getByText("终端(first)")).toBe(first);
+    expect(details.scrollTop).toBe(30);
+    expect(screen.getByText("命令执行失败")).toBeTruthy();
+    expect(screen.queryByText("failure detail")).toBeNull();
+    handleStreamPart("thread", { event: "text_delta", data: {
+      message_id: "thread-live-assistant-run-2", run_id: "run", content: "准备重试",
+    } }, client);
+    update("third", "pending");
+    rerender(<MessageView messages={current()} isStreaming />);
+    expect(screen.getByText("终端(first)")).toBe(first);
+    expect(screen.getByText("终端(second)")).toBeTruthy();
+    client.clear();
+  });
+
+  it.each(["rejected", "completed"] as const)("keeps an approval command after %s and resumed text", (status) => {
+    const client = new QueryClient();
+    client.setQueryData(["threads", "thread"], { ...history([]), messages: [user] });
+    for (const state of ["pending", status]) {
+      handleStreamPart("thread", { event: "tool_update", data: {
+        event_id: "thread:tool:approval", run_id: "run", title: "执行命令(test)",
+        kind: "execute", status: state,
+        detail: JSON.stringify({ tool: "execute", args: { command: "test" } }),
+      } }, client);
+    }
+    handleStreamPart("thread", { event: "text_delta", data: {
+      message_id: "thread-live-assistant-run-resumed", run_id: "run", content: "最终说明", mode: "replace",
+    } }, client);
+    const current = client.getQueryData<AgentThread>(["threads", "thread"])!;
+    const tools = current.messages.flatMap(m => m.chunks).filter(c => c.kind === "tool-execution");
+    expect(tools).toHaveLength(1);
+    expect(tools[0]?.status).toBe(status);
+    expect(current.messages.at(-1)?.chunks).toEqual([{ kind: "text", text: "最终说明" }]);
+    client.clear();
+  });
+
+  it("retains earlier tools when a command fails and metadata omits a live tool", () => {
+    const client = new QueryClient();
+    client.setQueryData(["threads", "thread"], { ...history([]), messages: [user] });
+    for (const [id, status] of [["first", "completed"], ["second", "pending"], ["second", "error"]]) {
+      handleStreamPart("thread", { event: "tool_update", data: {
+        event_id: `thread:tool:${id}`, run_id: "run", title: id, kind: "execute", status,
+        detail: JSON.stringify({ tool: "execute", args: { command: id } }),
+      } }, client);
+    }
+    const current = client.getQueryData<AgentThread>(["threads", "thread"])!;
+    const restored = normalizeThreadHistory({ ...current, runEvents: current.runEvents!.slice(1) });
+    const tools = restored.messages.flatMap(m => m.chunks).filter(c => c.kind === "tool-execution");
+    expect(tools.map(c => [c.toolCallId, c.status])).toEqual([
+      ["thread:tool:first", "completed"], ["thread:tool:second", "error"],
+    ]);
+    client.clear();
+  });
+
+  it("clears the previous plan events when a confirmation starts a new turn", () => {
+    const client = new QueryClient();
+    client.setQueryData(["threads", "thread"], history([
+      event("thread:stream:old:assistant:1", { text: "旧方案" }),
+    ]));
+    handleStreamPart("thread", { event: "user_message", data: {
+      message_id: "thread-user-new", content: "确认执行", run_id: "new",
+    } }, client);
+    const current = client.getQueryData<AgentThread>(["threads", "thread"])!;
+    expect(current.runEvents).toEqual([]);
+    expect(normalizeThreadHistory(current).messages.at(-1)?.author).toBe("user");
+    client.clear();
+  });
+
   const events = [event("run:stream:assistant:1", { text: "先核实仓库" }),
     event("run:tool:a", { tool: "read" }), event("run:tool:b", { tool: "search" }),
     event("run:stream:assistant:2", { text: "请确认目标仓库。" })];
@@ -214,6 +313,31 @@ describe("history and stream completion", () => {
     expect(screen.getByText("请确认目标仓库。")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /任务完成/ }));
     expect(within(screen.getByRole("region")).getByText("1 / 2 项任务已完成")).toBeTruthy();
+  });
+
+  it("restores a failed command and its output after refreshing history", () => {
+    const failedCommand: RunEvent = {
+      id: "run:tool:failed-command",
+      thread_id: "thread",
+      kind: "execute",
+      title: "执行命令(git status)",
+      status: "error",
+      detail: JSON.stringify({
+        tool: "execute",
+        args: { command: "git status" },
+        output: "fatal: not a git repository\n[Command failed with exit code 128]",
+      }),
+      created_at: "2026-09-13T11:12:00Z",
+    };
+
+    const restored = normalizeThreadHistory(history([failedCommand]));
+    render(<MessageView messages={restored.messages} isStreaming={false} />);
+    fireEvent.click(screen.getByRole("button", { name: /任务失败/ }));
+    expect(screen.getByText("终端(git status)")).toBeTruthy();
+    expect(screen.getByText("命令执行失败")).toBeTruthy();
+    expect(screen.queryByText(/fatal: not a git repository/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "显示细节" }));
+    expect(screen.getByText(/fatal: not a git repository/)).toBeTruthy();
   });
 
   it("does not promote the last tool preamble to a final answer when the run ends on a tool", () => {

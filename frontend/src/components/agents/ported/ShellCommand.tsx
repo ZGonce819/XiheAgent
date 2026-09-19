@@ -11,7 +11,8 @@ function getHeaderText(chunk: ToolExecutionChunk): string {
   const truncated = cmd.length > 80 ? cmd.slice(0, 80) + "..." : cmd;
   if (chunk.status === "in_progress") return `正在运行 ${truncated}`;
   if (chunk.status === "pending") return `准备运行 ${truncated}`;
-  if (chunk.status === "error") return `命令失败：${truncated}`;
+  if (chunk.status === "rejected") return `命令已拒绝：${truncated}`;
+  if (chunk.status === "error") return truncated;
   return `命令完成：${truncated}`;
 }
 
@@ -53,9 +54,14 @@ export const ShellCommand = memo(function ShellCommand({
         onClick={() => setExpanded((prev) => !prev)}
         className="w-full flex items-center gap-2 py-1 text-left hover:opacity-90 transition-opacity"
       >
-        <span className="text-[color:var(--ui-text-muted)] text-[0.75rem] truncate flex-1 min-w-0">
+        <span className={`text-[0.75rem] truncate flex-1 min-w-0 ${chunk.status === "rejected" ? "text-[color:var(--ui-danger)]" : "text-[color:var(--ui-text-muted)]"}`}>
           {headerText}
         </span>
+        {(chunk.status === "rejected" || chunk.status === "error") && (
+          <span className="shrink-0 rounded bg-[color:var(--ui-danger)]/10 px-1.5 py-0.5 text-[0.625rem] leading-3 text-[color:var(--ui-danger)]">
+            {chunk.status === "error" ? "命令执行失败" : "已被用户拒绝执行"}
+          </span>
+        )}
         <span
           className="text-[color:var(--ui-text-dim)] text-xs shrink-0 transition-transform"
           style={{ transform: expanded ? "rotate(180deg)" : "rotate(0deg)" }}
@@ -98,6 +104,9 @@ export const ShellCommand = memo(function ShellCommand({
             )}
             {chunk.status === "pending" && (
               <span className="text-xs text-[color:var(--ui-warning)]">等待批准...</span>
+            )}
+            {chunk.status === "rejected" && (
+              <span className="text-xs text-[color:var(--ui-danger)]">未执行 · 已被用户拒绝执行</span>
             )}
           </div>
         </div>

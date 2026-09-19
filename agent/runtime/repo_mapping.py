@@ -111,8 +111,13 @@ def _candidate_remote_urls(repo_url: str) -> set[str]:
         candidates.add(f"git@github.com:{repo.owner}/{repo.repo}.git".lower())
         candidates.add(f"git@github.com:{repo.owner}/{repo.repo}".lower())
     elif hostname == "codeup.aliyun.com":
-        candidates.add(f"git@codeup.aliyun.com:{repo.owner}/{repo.repo}.git".lower())
-        candidates.add(f"git@codeup.aliyun.com:{repo.owner}/{repo.repo}".lower())
+        org_id = getattr(repo, "org_id", "")
+        if org_id:
+            candidates.add(f"git@codeup.aliyun.com:{org_id}/{repo.owner}/{repo.repo}.git".lower())
+            candidates.add(f"git@codeup.aliyun.com:{org_id}/{repo.owner}/{repo.repo}".lower())
+        else:
+            candidates.add(f"git@codeup.aliyun.com:{repo.owner}/{repo.repo}.git".lower())
+            candidates.add(f"git@codeup.aliyun.com:{repo.owner}/{repo.repo}".lower())
     return candidates
 
 

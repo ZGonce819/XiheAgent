@@ -17,6 +17,7 @@ from utils.intent_utils import (
     classify_task_kind,
     is_pull_only_task,
     is_read_only_task,
+    is_simple_coding_task,
     is_workspace_listing_task,
 )
 
@@ -26,5 +27,6 @@ __all__ = [
     "classify_task_kind",
     "is_pull_only_task",
     "is_read_only_task",
+    "is_simple_coding_task",
     "is_workspace_listing_task",
 ]

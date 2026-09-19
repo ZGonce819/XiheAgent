@@ -243,8 +243,11 @@ function applyTextDelta(
   const messages = thread.messages.slice()
   const planIndex = findRunMessageIndex(messages, runId, "plan")
   const userIndex = findRunMessageIndex(messages, runId, "user")
+  const assistantIndex = findRunMessageIndex(messages, runId, "assistant")
   const insertAt =
-    planIndex >= 0
+    assistantIndex >= 0
+      ? assistantIndex + 1
+      : planIndex >= 0
       ? planIndex + 1
       : userIndex >= 0
         ? userIndex + 1
@@ -286,6 +289,7 @@ function applyUserMessage(
         : messages.length
   return {
     ...thread,
+    runEvents: [],
     messages: insertOrReplaceAt(messages, userMessage, insertAt),
   }
 }
@@ -408,6 +412,7 @@ function toolChunkFromEvent(
   }
 
   const elapsed = Number(detail.elapsed_ms)
+  const rawOutput = detail.output ?? detail.error
   return {
     kind: "tool-execution",
     toolCallId: event.id,
@@ -415,6 +420,10 @@ function toolChunkFromEvent(
     toolKind,
     status: event.status,
     input,
+    output:
+      typeof rawOutput === "string" && rawOutput
+        ? rawOutput
+        : undefined,
     elapsedMs: Number.isFinite(elapsed) ? elapsed : undefined,
     groupId: event.tool_group_id || undefined,
   }
@@ -550,6 +559,21 @@ export function normalizeThreadHistory(thread: AgentThread): AgentThread {
           || (!hasAssistantEvents && chunk.kind === "text" && !message.executionNarration)
       )
   )
+  // A metadata snapshot can lag behind the live stream. Never drop a tool
+  // already received in this turn just because that snapshot omitted it.
+  const rebuiltToolIds = new Set(rebuiltMessages.flatMap((message) =>
+    message.chunks.flatMap((chunk) => chunk.kind === "tool-execution" ? [chunk.toolCallId] : [])))
+  const missingTools = suffix.flatMap((message) => message.chunks.filter(
+    (chunk): chunk is ToolExecutionChunk => chunk.kind === "tool-execution"
+      && chunk.toolCallId.includes(":tool:")
+      && !rebuiltToolIds.has(chunk.toolCallId)))
+  if (missingTools.length) {
+    rebuiltMessages.unshift({
+      id: `history-tools-retained-${missingTools[0]!.toolCallId}`,
+      author: "agent", timestamp: suffix[0]?.timestamp || "",
+      chunks: missingTools, executionNarration: true,
+    })
+  }
 
   return {
     ...thread,
@@ -826,9 +850,12 @@ export function handleStreamPart(
       )
       const updatedChunks = msg.chunks.slice()
       if (existingChunkIndex >= 0) {
+        const previous = updatedChunks[existingChunkIndex] as ToolExecutionChunk
         updatedChunks[existingChunkIndex] = {
-          ...updatedChunks[existingChunkIndex],
+          ...previous,
           ...toolChunk,
+          input: toolChunk.input ?? previous.input,
+          output: toolChunk.output ?? previous.output,
         }
       } else {
         updatedChunks.push(toolChunk)

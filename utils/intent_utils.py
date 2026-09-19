@@ -109,7 +109,7 @@ def is_pull_only_task(prompt: str) -> bool:
 def is_workspace_listing_task(prompt: str) -> bool:
     """判断用户是否只是询问本地工作区有哪些项目。
 
-    只有明确要求列出项目时才走本地直达分支。单独询问“工作目录在哪里”
+    只有明确要求列出项目时才走本地直达分支。单独询问"工作目录在哪里"
     需要交给 Agent 回答，因为它可能是在询问当前会话绑定的项目目录，不能
     被误判成全局工作区项目列表。
 
@@ -127,6 +127,47 @@ def is_workspace_listing_task(prompt: str) -> bool:
     ]
     change_keywords = ["修改", "修复", "创建", "提交", "push", "pr", "实现", "开发"]
     return _contains_any(normalized, list_keywords) and not _contains_any(normalized, change_keywords)
+
+
+def is_simple_coding_task(prompt: str) -> bool:
+    """判断是否为简单编码任务，可以跳过方案规划直接执行。
+
+    简单任务包括：创建空文件、删除单个文件、重命名文件等不需要复杂设计的操作。
+    这些任务太简单，不值得消耗一次模型调用来生成方案。
+
+    Args:
+        prompt: 用户原始输入。
+
+    Returns:
+        是简单编码任务时返回 ``True``。
+    """
+
+    normalized = _normalize_prompt(prompt)
+
+    # 创建空文件的模式
+    create_empty_patterns = [
+        "创建空", "新建空", "创建一个空", "新建一个空",
+        "创建.*空文件", "新建.*空文件", "创建.*空的", "新建.*空的",
+    ]
+    if _contains_any(normalized, create_empty_patterns):
+        return True
+
+    # 简单的文件操作（删除、重命名）
+    simple_file_ops = [
+        "删除文件", "删除这个文件", "删掉文件", "移除文件",
+        "重命名文件", "改名文件", "文件改名",
+    ]
+    if _contains_any(normalized, simple_file_ops):
+        return True
+
+    # 非常短的指令（通常很简单）
+    if len(normalized) < 20:
+        # 但要排除明确需要方案的词
+        planning_words = ["方案", "计划", "设计", "怎么做", "如何实现"]
+        if not _contains_any(normalized, planning_words):
+            return True
+
+    return False
 
 
 @lru_cache(maxsize=1)

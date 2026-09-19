@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from uuid import uuid4
 from collections.abc import Callable, Iterable
 from typing import Any
 
@@ -734,7 +735,8 @@ def _consume_raw_event_stream(
 
     tool_call_index = 0
     subagent_index = 0
-    assistant_message_index = 0
+    # 审批恢复沿用 run_id；每次消费必须使用新的段落编号，避免覆盖先前正文和工具。
+    assistant_message_index = uuid4().int
     current_assistant_index = 0
     current_assistant_text = ""
     saw_assistant_text = False
@@ -890,6 +892,31 @@ def _consume_raw_event_stream(
     return tool_call_index if saw_write_todos else 0, subagent_index, saw_assistant_text
 
 
+def _record_pending_commands(thread_id: str, output: Any, approval: Any) -> None:
+    """审批可在追踪中间件之前暂停；使用真实调用 ID 保存待执行命令。"""
+    if not isinstance(output, dict) or not isinstance(approval, dict):
+        return
+    actions = list(approval.get("action_requests") or [])
+    for message in reversed(output.get("messages") or []):
+        calls = _safe_field(message, "tool_calls", []) or []
+        if not calls:
+            continue
+        from agent.middleware.tool_tracking import _build_tool_title, _map_tool_to_kind, _safe_detail_args
+
+        for call in calls:
+            name = _safe_field(call, "name", "")
+            args = _safe_field(call, "args", {})
+            call_id = _safe_field(call, "id", "")
+            match = next((a for a in actions if a.get("name") == name and a.get("args") == args), None)
+            if not call_id or match is None:
+                continue
+            actions.remove(match)
+            record_event(thread_id, f"tool:{call_id}", _build_tool_title(name, args),
+                         kind=_map_tool_to_kind(name), status="pending",
+                         detail=json.dumps({"tool": name, "args": _safe_detail_args(args)}, ensure_ascii=False))
+        break
+
+
 def run_agent_with_event_stream(
     *,
     agent: Any,
@@ -975,6 +1002,7 @@ def run_agent_with_event_stream(
             interrupts = list(getattr(snapshot, "interrupts", ()) or ())
     if interrupts:
         approval = _safe_field(interrupts[0], "value")
+        _record_pending_commands(thread_id, output, approval)
         record_event(thread_id, "model", "等待人工审批", kind="other", status="pending")
         return {
             "messages": _messages_from_output(output),
@@ -990,12 +1018,15 @@ def run_agent_with_event_stream(
     if not interrupts and not saw_assistant_text:
         from utils.message_utils import extract_final_assistant_text
 
-        final_text = extract_final_assistant_text(final_messages)
+        last_message = final_messages[-1] if final_messages else {}
+        final_text = (extract_final_assistant_text([last_message])
+                      if last_message.get("type", last_message.get("role")) in {"ai", "assistant"}
+                      else "")
         if final_text:
             _record_assistant_stream_message(
                 thread_id,
                 run_id,
-                1,
+                uuid4().int,
                 final_text,
                 event_sink=event_sink,
             )

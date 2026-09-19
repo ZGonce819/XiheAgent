@@ -48,9 +48,23 @@ class Settings:
         self.log_dir: Path = Path(
             get_env("XIHE_AGENT_LOG_DIR", str(PROJECT_ROOT / "logs"))
         ).resolve()
-        self.workspace_root: Path = WORKSPACE_ROOT
+
+        # 从持久化配置加载工作区路径（优先于环境变量默认值）
+        from config.workspace_config import load_workspace_config
+        persisted = load_workspace_config()
+
+        if "workspace_root" in persisted:
+            self.workspace_root: Path = Path(persisted["workspace_root"]).resolve()
+        else:
+            self.workspace_root = WORKSPACE_ROOT
+
         self._projects_dir: Path | None = None
         self._skills_dir: Path | None = None
+
+        if "projects_dir" in persisted:
+            self._projects_dir = Path(persisted["projects_dir"]).resolve()
+        if "skills_dir" in persisted:
+            self._skills_dir = Path(persisted["skills_dir"]).resolve()
 
         # ── 日志 ──────────────────────────────────────────────
         self.log_level: str = get_env("XIHE_AGENT_LOG_LEVEL", "INFO").upper()

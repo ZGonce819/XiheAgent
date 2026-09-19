@@ -21,6 +21,7 @@ from langgraph.store.base import BaseStore
 
 from agent.graph.graph import get_checkpointer, get_langgraph_store
 from agent.graph.model import make_main_model
+from agent.middleware.final_response import FinalResponseMiddleware
 from agent.memory.repo import (
     build_repo_memory_namespace,
     ensure_repo_memory_initialized,
@@ -525,6 +526,7 @@ def get_agent(config: RunnableConfig):
             SanitizeToolInputsMiddleware(backend=backend),
             TodoListMiddleware(),
             ToolTrackingMiddleware(backend=backend),
+            FinalResponseMiddleware(main_model),
             create_summarization_tool_middleware(main_model, agent_backend),
             ModelCallLimitMiddleware(
                 run_limit=MODEL_CALL_RECURSION_LIMIT,

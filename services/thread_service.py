@@ -250,9 +250,10 @@ def _local_work_dirs(thread: dict[str, Any]) -> tuple[str, str] | None:
         return None
     try:
         from agent.graph.graph import get_store
-        from config.constants import WORKSPACE_ROOT
+        from config.app_config import get_settings
 
         store = get_store()
+        workspace_root = get_settings().workspace_root.resolve()
         thread_id = str(thread.get("thread_id") or "")
 
         # 优先取项目绑定的本地文件夹（与运行时 resolve_project_local_folder 对齐）
@@ -264,7 +265,7 @@ def _local_work_dirs(thread: dict[str, Any]) -> tuple[str, str] | None:
                 if isinstance(folder, str) and folder.strip():
                     abs_path = Path(folder)
                     try:
-                        relative = abs_path.resolve().relative_to(Path(WORKSPACE_ROOT).resolve()).as_posix()
+                        relative = abs_path.resolve().relative_to(workspace_root).as_posix()
                     except ValueError:
                         relative = abs_path.name
                     return relative, str(abs_path)
@@ -276,7 +277,7 @@ def _local_work_dirs(thread: dict[str, Any]) -> tuple[str, str] | None:
 
         abs_path = repository_path(repo_url, store)
         try:
-            relative = abs_path.resolve().relative_to(Path(WORKSPACE_ROOT).resolve()).as_posix()
+            relative = abs_path.resolve().relative_to(workspace_root).as_posix()
         except ValueError:
             relative = abs_path.name
         return relative, str(abs_path)
@@ -315,7 +316,7 @@ def thread_payload(
         "title": thread.get("title") or "XiheAgent Task",
         "repo": full_name,
         "repoFullName": full_name,
-        "repoUrl": repo_url,
+        "repoUrl": repo_url.removesuffix(".git"),
         "platform": platform,
         "platformDisplay": platform_display,
         "branch": thread.get("branch_name") or "master",

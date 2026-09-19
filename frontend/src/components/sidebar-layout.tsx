@@ -77,40 +77,47 @@ export function SidebarFrame({
   className,
   children,
 }: SidebarFrameProps) {
-  if (collapsed) {
-    return (
-      <div
-        className={cn(
-          "relative flex h-svh w-12 shrink-0 items-start justify-center border-r border-border bg-background",
-          "max-md:pointer-events-none max-md:w-0 max-md:border-0 max-md:bg-transparent",
-          className
-        )}
-      >
-        <button
-          type="button"
-          aria-label="展开侧栏"
-          onClick={toggle}
-          className="group pointer-events-auto mt-3 inline-flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm transition-[transform,background-color,color,box-shadow] duration-200 ease-out hover:scale-105 hover:bg-accent hover:text-foreground hover:shadow-md active:scale-95 max-md:fixed max-md:top-3 max-md:left-3 max-md:mt-0"
-        >
-          <SidebarSimpleIcon className="size-4 transition-transform duration-200 ease-out group-hover:scale-110" />
-        </button>
-      </div>
-    )
-  }
+  const collapsedWidth = 48
+  const currentWidth = collapsed ? collapsedWidth : width
 
   return (
     <aside
-      style={{ width: `${width / 16}rem` }}
+      style={{ width: `${currentWidth / 16}rem` }}
       className={cn(
-        "relative flex h-svh shrink-0 flex-col",
-        "max-md:fixed max-md:inset-0 max-md:z-40 max-md:!w-full",
+        "relative flex h-svh shrink-0 flex-col transition-[width] duration-200 ease-out",
+        "max-md:fixed max-md:inset-0 max-md:z-40 max-md:!w-full max-md:transition-none",
         className
       )}
     >
-      {children}
+      <div
+        className={cn(
+          "flex h-full w-full flex-col overflow-hidden",
+          collapsed ? "pointer-events-none opacity-0" : "opacity-100",
+          "transition-opacity duration-150 ease-out"
+        )}
+      >
+        {children}
+      </div>
       <div className="max-md:hidden">
         <ResizeHandle width={width} onResize={setWidth} />
       </div>
+      {collapsed && (
+        <div
+          className={cn(
+            "absolute inset-0 flex items-start justify-center",
+            "max-md:pointer-events-none max-md:w-0 max-md:bg-transparent"
+          )}
+        >
+          <button
+            type="button"
+            aria-label="展开侧栏"
+            onClick={toggle}
+            className="group pointer-events-auto mt-3 inline-flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm transition-[transform,background-color,color,box-shadow] duration-200 ease-out hover:scale-105 hover:bg-accent hover:text-foreground hover:shadow-md active:scale-95 max-md:fixed max-md:top-3 max-md:left-3 max-md:mt-0"
+          >
+            <SidebarSimpleIcon className="size-4 transition-transform duration-200 ease-out group-hover:scale-110" />
+          </button>
+        </div>
+      )}
     </aside>
   )
 }

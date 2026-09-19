@@ -23,7 +23,7 @@ from typing import Any
 from fastapi.responses import StreamingResponse
 
 from agent.graph.checkpoint_history import checkpoint_before_latest_user
-from agent.graph.graph import get_checkpointer
+from agent.graph.graph import get_checkpointer, get_store
 from agent.runtime.events import clear_sse_callback, register_sse_callback
 from agent.runtime.task_router import (
     get_task,
@@ -248,7 +248,14 @@ def build_streaming_response(
                 # 某些 LangGraph/模型版本会正常返回最终消息，但不发出可解析的
                 # content-block-delta。此时前端没有正文和工具记录，会误显示“任务已停止”。
                 # 用最终 checkpoint 输出补发一次正文，且仅在流式正文完全缺失时执行，避免重复。
-                final_text = extract_final_assistant_text(result.get("messages", []))
+                # 只补发当前末条 AI 回复；审批/工具结尾不能向前捞出上一轮方案。
+                result_messages = result.get("messages", [])
+                last_message = result_messages[-1] if result_messages else {}
+                final_text = (
+                    extract_final_assistant_text([last_message])
+                    if last_message.get("type", last_message.get("role")) in {"ai", "assistant"}
+                    and not result.get("approval") else ""
+                )
                 if not streamed_text and final_text:
                     event_sink(
                             "message_start",

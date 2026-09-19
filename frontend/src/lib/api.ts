@@ -115,6 +115,10 @@ export interface WorkspaceInfo {
   workspace_root: string
   projects_dir: string
   skills_dir: string
+  migration?: {
+    migrated: number
+    errors: string[]
+  }
 }
 
 export interface ProjectItem {

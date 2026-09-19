@@ -379,13 +379,23 @@ function formatElapsed(ms: number): string {
 function ChunkRenderer({
   chunk,
   projectPath,
+  streamingText = false,
   ...callbacks
-}: { chunk: Chunk; projectPath?: string } & ApprovalCallbacks) {
+}: { chunk: Chunk; projectPath?: string; streamingText?: boolean } & ApprovalCallbacks) {
   switch (chunk.kind) {
     case "text":
       return (
         <div className="text-[0.9375rem] leading-7 text-[color:var(--ui-text)]">
-          <Markdown content={chunk.text} />
+          {streamingText ? (
+            <div
+              data-streaming-text
+              className="min-w-0 max-w-full whitespace-pre-wrap break-words text-[0.8125rem] leading-6 [overflow-wrap:anywhere]"
+            >
+              {chunk.text}
+            </div>
+          ) : (
+            <Markdown content={chunk.text} />
+          )}
         </div>
       );
     case "code":
@@ -640,6 +650,13 @@ function ToolActivityGroup({
   const elapsedMs = runElapsedMs && runElapsedMs > 0 ? runElapsedMs : toolElapsedMs;
   const [expanded, setExpanded] = useState(Boolean(isStreaming || running));
   const wasStreaming = useRef(isStreaming);
+  const executionDetailsRef = useRef<HTMLDivElement>(null);
+  const executionScrollTopRef = useRef(0);
+  useLayoutEffect(() => {
+    const element = executionDetailsRef.current;
+    if (!element) return;
+    element.scrollTop = executionScrollTopRef.current;
+  }, [message.chunks, expanded]);
   useEffect(() => {
     if (wasStreaming.current && !isStreaming) setExpanded(false);
     wasStreaming.current = isStreaming;
@@ -685,7 +702,7 @@ function ToolActivityGroup({
       </button>
 
       {expanded && (
-        <div role="region" aria-label="任务执行详情" className="max-h-64 animate-in fade-in-0 slide-in-from-top-1 duration-150 ease-out overflow-y-auto px-0 pb-2 pt-1">
+        <div ref={executionDetailsRef} onScroll={(event) => { executionScrollTopRef.current = event.currentTarget.scrollTop; }} role="region" aria-label="任务执行详情" className="max-h-64 [overflow-anchor:none] overflow-y-auto px-0 pb-2 pt-1">
           {tools.length === 0 ? (
             <p className="py-1 text-xs text-[color:var(--ui-text-dim)]">本次任务无工具调用</p>
           ) : null}
@@ -817,6 +834,7 @@ function AgentMessage({
             key={getChunkRenderKey(chunk, index)}
             chunk={chunk}
             projectPath={projectPath}
+            streamingText={isStreaming}
             {...callbacks}
           />
         ))}
@@ -926,6 +944,7 @@ function AgentMessage({
                 <ChunkRenderer
                   chunk={item.chunk}
                   projectPath={projectPath}
+                  streamingText={isStreaming}
                   {...callbacks}
                 />
               </div>

@@ -177,12 +177,16 @@ def normalize_repo_url(repo: str | None, *, fallback: str | None = None) -> str:
         raise ValueError("未提供仓库地址，请先配置仓库 URL。")
 
     if text.startswith(("http://", "https://")):
-        return parse_repo_url(text).clone_url
+        result = parse_repo_url(text).clone_url
+    else:
+        shorthand = text.removesuffix(".git").strip().strip("/")
+        if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", shorthand):
+            result = f"https://gitee.com/{shorthand}.git"
+        else:
+            raise ValueError(
+                "仓库地址格式不正确，请输入完整的 Gitee / GitHub / Codeup URL 或 owner/repo（简写默认 Gitee）。"
+            )
 
-    shorthand = text.removesuffix(".git").strip().strip("/")
-    if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", shorthand):
-        return f"https://gitee.com/{shorthand}.git"
-
-    raise ValueError(
-        "仓库地址格式不正确，请输入完整的 Gitee / GitHub / Codeup URL 或 owner/repo（简写默认 Gitee）。"
-    )
+    if not result.endswith(".git"):
+        result += ".git"
+    return result

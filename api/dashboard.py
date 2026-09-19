@@ -1556,6 +1556,62 @@ def _ensure_writable(path: Path, label: str) -> None:
         raise HTTPException(status_code=400, detail=f"{label}不可写：{path}")
 
 
+def _migrate_workspace(
+    old_workspace: Path,
+    new_workspace: Path,
+    progress_callback: callable | None = None,
+) -> dict[str, Any]:
+    """迁移工作区项目目录到新位置。
+
+    Args:
+        old_workspace: 旧工作区根目录。
+        new_workspace: 新工作区根目录。
+        progress_callback: 进度回调函数，接收 (current, total, message)。
+
+    Returns:
+        迁移结果，包含 migrated 数量和 errors 列表。
+    """
+    import shutil
+
+    old_projects = old_workspace / "projects"
+    new_projects = new_workspace / "projects"
+
+    result = {"migrated": 0, "errors": []}
+
+    if not old_projects.exists():
+        return result
+
+    if not new_projects.exists():
+        try:
+            new_projects.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            result["errors"].append(f"无法创建新项目目录：{e}")
+            return result
+
+    projects = [p for p in old_projects.iterdir() if p.is_dir()]
+    total = len(projects)
+
+    if total == 0:
+        return result
+
+    for index, project in enumerate(projects, start=1):
+        try:
+            target = new_projects / project.name
+            if target.exists():
+                result["errors"].append(f"项目已存在：{project.name}")
+                continue
+
+            if progress_callback:
+                progress_callback(index, total, f"迁移项目：{project.name}")
+
+            shutil.move(str(project), str(target))
+            result["migrated"] += 1
+        except Exception as e:
+            result["errors"].append(f"迁移失败 {project.name}：{e}")
+
+    return result
+
+
 @dashboard_router.get("/workspace")
 def dashboard_get_workspace() -> dict[str, str]:
     """返回当前工作目录配置。"""
@@ -1568,36 +1624,55 @@ def dashboard_get_workspace() -> dict[str, str]:
 
 
 @dashboard_router.put("/workspace")
-def dashboard_update_workspace(body: _WorkspaceUpdateRequest) -> dict[str, str]:
+def dashboard_update_workspace(body: _WorkspaceUpdateRequest) -> dict[str, Any]:
     """更新工作目录配置。
 
     支持单独更新 workspace_root、projects_dir、skills_dir 中的任意组合。
+    当 workspace_root 变更时，会自动迁移项目目录。
+    所有变更会持久化到本地配置文件，重启后仍然生效。
 
     Raises:
         HTTPException: 路径无效或不可写时返回 400。
     """
+    from config.workspace_config import save_workspace_config
+
     settings = get_settings()
+    migration_result = None
 
     if body.workspace_root is not None:
         new_path = Path(body.workspace_root).resolve()
         _ensure_writable(new_path, "工作目录")
+
+        old_workspace = settings.workspace_root
+        if old_workspace != new_path:
+            # 迁移项目目录
+            migration_result = _migrate_workspace(old_workspace, new_path)
+
         settings.workspace_root = new_path
+        save_workspace_config(workspace_root=str(new_path))
 
     if body.projects_dir is not None:
         new_projects = Path(body.projects_dir).resolve()
         _ensure_writable(new_projects, "项目目录")
         settings.projects_dir = new_projects
+        save_workspace_config(projects_dir=str(new_projects))
 
     if body.skills_dir is not None:
         new_skills = Path(body.skills_dir).resolve()
         _ensure_writable(new_skills, "技能目录")
         settings.skills_dir = new_skills
+        save_workspace_config(skills_dir=str(new_skills))
 
-    return {
+    response = {
         "workspace_root": str(settings.workspace_root),
         "projects_dir": str(settings.projects_dir),
         "skills_dir": str(settings.skills_dir),
     }
+
+    if migration_result is not None:
+        response["migration"] = migration_result
+
+    return response
 
 
 @dashboard_router.get("/workspace/pick-folder")

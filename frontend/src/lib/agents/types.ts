@@ -44,7 +44,7 @@ export type AcpToolKind =
   | "linear"
   | "other"
 
-export type AcpToolStatus = "pending" | "in_progress" | "completed" | "error"
+export type AcpToolStatus = "pending" | "in_progress" | "completed" | "error" | "rejected"
 
 export interface AcpToolLocation {
   path: string
@@ -235,7 +235,7 @@ export interface AutomationRunReceipt {
 
 export type RunEventKind = "think" | "execute" | "search" | "other" | "todo"
 
-export type RunEventStatus = "pending" | "in_progress" | "completed" | "error"
+export type RunEventStatus = "pending" | "in_progress" | "completed" | "error" | "rejected"
 
 export interface RunEvent {
   id: string

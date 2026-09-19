@@ -86,6 +86,21 @@ def run_plan_response_task(
     repo = parse_repo_url(repo_url)
     record_event(thread_id, "repo", "解析仓库", status="completed")
 
+    _effective_backend = backend_type
+    if _effective_backend is None:
+        from config.app_config import get_settings as _get_settings
+        _effective_backend = "sandbox" if _get_settings().use_sandbox else "local"
+    if _effective_backend != "sandbox":
+        import os
+        from agent.runtime._helpers import resolve_project_local_folder
+        from config.app_config import get_settings as _get_settings
+        _local_folder = resolve_project_local_folder(thread_id)
+        if _local_folder:
+            os.makedirs(_local_folder, exist_ok=True)
+        else:
+            _settings = _get_settings()
+            os.makedirs(_settings.projects_dir / repo.repo, exist_ok=True)
+
     plan_source = prompt
     previous_plan_text: str | None = None
     if previous_plan_message is not None:

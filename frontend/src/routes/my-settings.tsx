@@ -13,6 +13,7 @@ import {
   TrashIcon,
   PlusIcon,
   CheckIcon,
+  CheckCircleIcon,
   FolderIcon,
   FolderOpenIcon,
 } from "@phosphor-icons/react"
@@ -825,17 +826,31 @@ function CommandApprovalSection() {
     queryFn: api.getCommandApprovalSettings,
   })
   const [draft, setDraft] = useState<CommandApprovalSettings | null>(null)
+  const [savingEnv, setSavingEnv] = useState<"local" | "sandbox" | null>(
+    null,
+  )
+  const [lastSavedEnv, setLastSavedEnv] = useState<
+    "local" | "sandbox" | null
+  >(null)
   const save = useMutation({
-    mutationFn: (value: CommandApprovalSettings) =>
+    mutationFn: ({ value }: {
+      value: CommandApprovalSettings
+      environment: "local" | "sandbox"
+    }) =>
       api.saveCommandApprovalSettings({
         local: value.local,
         sandbox: value.sandbox,
       }),
-    onSuccess: (value) => {
+    onSuccess: (value, variables) => {
       setDraft(value)
+      setSavingEnv(null)
+      setLastSavedEnv(variables.environment)
       void queryClient.invalidateQueries({
         queryKey: ["commandApprovalSettings"],
       })
+    },
+    onError: () => {
+      setSavingEnv(null)
     },
   })
   const value = draft ?? settings.data
@@ -849,6 +864,12 @@ function CommandApprovalSection() {
       ...value,
       [environment]: { ...value[environment], [id]: action },
     })
+    setLastSavedEnv(null)
+  }
+  const handleSave = (environment: "local" | "sandbox") => {
+    setLastSavedEnv(environment)
+    setSavingEnv(environment)
+    save.mutate({ value, environment })
   }
   return (
     <SettingsSection
@@ -871,19 +892,20 @@ function CommandApprovalSection() {
                 </p>
               </div>
               <Button
+                key={environment}
                 size="sm"
-                onClick={() => save.mutate(value)}
+                onClick={() => handleSave(environment)}
                 disabled={save.isPending}
               >
-                {save.isSuccess && !save.isPending ? (
+                {save.isSuccess && !save.isPending && lastSavedEnv === environment ? (
                   <CheckIcon
                     className="approval-save-check size-3.5"
                     weight="bold"
                   />
                 ) : null}
-                {save.isPending
+                {savingEnv === environment
                   ? "保存中"
-                  : save.isSuccess
+                  : save.isSuccess && lastSavedEnv === environment
                     ? "已保存"
                     : "保存设置"}
               </Button>
@@ -1107,6 +1129,10 @@ function WorkspaceSection() {
   const [editingSkills, setEditingSkills] = useState(false)
   const [draftSkills, setDraftSkills] = useState("")
   const [pickingSkills, setPickingSkills] = useState(false)
+  const [migrationProgress, setMigrationProgress] = useState<{
+    migrated: number
+    errors: string[]
+  } | null>(null)
 
   const update = useMutation({
     mutationFn: (body: {
@@ -1114,10 +1140,13 @@ function WorkspaceSection() {
       projects_dir?: string
       skills_dir?: string
     }) => api.updateWorkspace(body),
-    onSuccess: () => {
+    onSuccess: (data) => {
       setEditing(false)
       setEditingProjects(false)
       setEditingSkills(false)
+      if (data.migration) {
+        setMigrationProgress(data.migration)
+      }
       void queryClient.invalidateQueries({ queryKey: ["workspace"] })
     },
   })
@@ -1205,6 +1234,37 @@ function WorkspaceSection() {
             )}
           </div>
         </div>
+
+        {/* 迁移进度提示 */}
+        {migrationProgress && (
+          <div className="workspace-migration-alert animate-in space-y-2 rounded-md border border-primary/30 bg-primary/5 p-3 fade-in-0 slide-in-from-top-2 duration-200">
+            <div className="flex items-center gap-2">
+              <CheckCircleIcon className="size-4 text-primary" weight="fill" />
+              <span className="text-sm font-medium">工作区迁移完成</span>
+            </div>
+            <div className="space-y-1 text-xs text-muted-foreground">
+              <p>已迁移 {migrationProgress.migrated} 个项目到新工作区</p>
+              {migrationProgress.errors.length > 0 && (
+                <div className="space-y-0.5">
+                  <p className="font-medium text-destructive">以下项目迁移失败：</p>
+                  <ul className="list-inside list-disc space-y-0.5">
+                    {migrationProgress.errors.map((error, index) => (
+                      <li key={index}>{error}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => setMigrationProgress(null)}
+            >
+              关闭
+            </Button>
+          </div>
+        )}
 
         {/* 编辑模式 */}
         {editing && (

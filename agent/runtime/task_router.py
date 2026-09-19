@@ -29,13 +29,14 @@ from agent.runtime._helpers import (
     message_metadata,
     plan_source_prompt,
 )
-from agent.runtime.events import record_event
+from agent.runtime.events import mark_tool_events_rejected, record_event
 from agent.runtime.planning_router import run_plan_response_task
 from agent.runtime.streaming_runtime import run_agent_with_event_stream
 from agent.runtime.sync_router import run_pull_only_task, run_workspace_listing_task
 from agent.runtime.task_intent import (
     classify_task_kind,
     is_pull_only_task,
+    is_simple_coding_task,
     is_workspace_listing_task,
 )
 from config.approval_runtime import (
@@ -208,7 +209,15 @@ def run_agent_task(
     if approved_plan_text is not None:
         task_kind = "coding"
 
-    if task_kind == "coding" and approved_plan_text is None and not skip_plan_confirmation:
+    # 简单编码任务跳过方案规划，直接执行
+    skip_planning_for_simple_task = (
+        task_kind == "coding"
+        and approved_plan_text is None
+        and not skip_plan_confirmation
+        and is_simple_coding_task(routing_text)
+    )
+
+    if task_kind == "coding" and approved_plan_text is None and not skip_plan_confirmation and not skip_planning_for_simple_task:
         return run_plan_response_task(repo_url=repo_url, prompt=prompt, thread_id=thread_id, event_sink=event_sink, run_id=run_id, checkpoint_id=checkpoint_id, model_id=model_id, backend_type=backend_type, project_name=existing_thread.get("project_name") if existing_thread else None)
 
     store.clear_run_events(thread_id)
@@ -223,6 +232,16 @@ def run_agent_task(
     if backend_type is None:
         from config.app_config import get_settings
         backend_type = "sandbox" if get_settings().use_sandbox else "local"
+    if backend_type != "sandbox":
+        import os
+        from agent.runtime._helpers import resolve_project_local_folder
+        from config.app_config import get_settings
+        _local_folder = resolve_project_local_folder(thread_id)
+        if _local_folder:
+            os.makedirs(_local_folder, exist_ok=True)
+        else:
+            _settings = get_settings()
+            os.makedirs(_settings.projects_dir / repo.repo, exist_ok=True)
     store.upsert_thread(
         thread_id=thread_id,
         title=coding_prompt[:80] or f"{repo.owner}/{repo.repo}",
@@ -409,6 +428,8 @@ def resume_agent_task(
             }
             for _action in actions
         ]
+        if decision == "reject":
+            mark_tool_events_rejected(thread_id)
     except Exception:
         release_approval_claim(thread_id)
         raise
