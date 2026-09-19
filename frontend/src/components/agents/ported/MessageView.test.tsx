@@ -185,6 +185,29 @@ describe("task execution and answer boundaries", () => {
     expect(screen.getAllByText("2/2")).toHaveLength(1);
   });
 
+  it("uses one compact action size and spacing for user and agent messages", () => {
+    render(
+      <MessageView
+        messages={[user, message("answer-compact", [text("紧凑操作栏")])]}
+        isStreaming={false}
+        editableMessageId="user"
+      />,
+    );
+
+    const userCopy = screen.getByRole("button", { name: "复制消息" });
+    const userEdit = screen.getByRole("button", { name: "编辑并重新发送" });
+    const agentCopy = screen.getByRole("button", { name: "复制智能体正文" });
+
+    for (const button of [userCopy, userEdit, agentCopy]) {
+      expect(button.classList.contains("size-5")).toBe(true);
+      expect(button.querySelector("svg")?.classList.contains("size-3")).toBe(true);
+    }
+    for (const row of [userCopy.parentElement, agentCopy.parentElement]) {
+      expect(row?.classList.contains("min-h-5")).toBe(true);
+      expect(row?.classList.contains("gap-0.5")).toBe(true);
+    }
+  });
+
   it("shows the directory and file name for read operations", () => {
     const readTool: Chunk = {
       kind: "tool-execution",

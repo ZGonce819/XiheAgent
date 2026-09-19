@@ -434,6 +434,13 @@ function ChunkRenderer({
   }
 }
 
+const MESSAGE_ACTION_ROW_CLASS =
+  "mt-1 flex min-h-5 items-center gap-0.5 text-[0.6875rem] text-[color:var(--ui-text-dim)] opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100";
+const MESSAGE_ACTION_BUTTON_CLASS =
+  "inline-flex size-5 items-center justify-center rounded hover:bg-[var(--ui-panel-2)] hover:text-[color:var(--ui-text)]";
+const MESSAGE_ACTION_ICON_CLASS = "size-3";
+const MESSAGE_ACTION_TIME_CLASS = "px-0.5";
+
 function VersionNavigationControls({ navigation }: { navigation?: VersionNavigation }) {
   if (!navigation || navigation.total <= 1) return null;
 
@@ -445,11 +452,11 @@ function VersionNavigationControls({ navigation }: { navigation?: VersionNavigat
         disabled={navigation.position <= 1}
         aria-label="查看上一个版本"
         title="上一个版本"
-        className="inline-flex size-6 items-center justify-center rounded-md hover:bg-[var(--ui-panel-2)] hover:text-[color:var(--ui-text)] disabled:pointer-events-none disabled:opacity-30"
+        className={`${MESSAGE_ACTION_BUTTON_CLASS} disabled:pointer-events-none disabled:opacity-30`}
       >
-        <ChevronLeft className="size-3.5" />
+        <ChevronLeft className={MESSAGE_ACTION_ICON_CLASS} />
       </button>
-      <span className="min-w-8 text-center tabular-nums">
+      <span className="min-w-7 text-center tabular-nums">
         {navigation.position}/{navigation.total}
       </span>
       <button
@@ -458,9 +465,9 @@ function VersionNavigationControls({ navigation }: { navigation?: VersionNavigat
         disabled={navigation.position >= navigation.total}
         aria-label="查看下一个版本"
         title="下一个版本"
-        className="inline-flex size-6 items-center justify-center rounded-md hover:bg-[var(--ui-panel-2)] hover:text-[color:var(--ui-text)] disabled:pointer-events-none disabled:opacity-30"
+        className={`${MESSAGE_ACTION_BUTTON_CLASS} disabled:pointer-events-none disabled:opacity-30`}
       >
-        <ChevronRight className="size-3.5" />
+        <ChevronRight className={MESSAGE_ACTION_ICON_CLASS} />
       </button>
     </>
   );
@@ -586,10 +593,10 @@ function UserMessage({ message, editable = false, onEdit, models = [], selection
             </div>
           </div>
         )}
-        <div className="mt-1.5 flex items-center justify-end gap-1 pr-1 text-[0.6875rem] text-[color:var(--ui-text-dim)] opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
-          <time dateTime={message.timestamp} className="px-1">{formatMessageTimestamp(message.timestamp)}</time>
-          <button type="button" onClick={() => void navigator.clipboard?.writeText(text)} aria-label="复制消息" title="复制" className="inline-flex size-6 items-center justify-center rounded-md hover:bg-[var(--ui-panel-2)]"><Copy className="size-3.5" /></button>
-          {editable && <button type="button" onClick={() => { setDraft(text); setEditing(true); }} aria-label="编辑并重新发送" title="编辑并重新发送" className="inline-flex size-6 items-center justify-center rounded-md hover:bg-[var(--ui-panel-2)]"><Pencil className="size-3.5" /></button>}
+        <div className={`${MESSAGE_ACTION_ROW_CLASS} justify-end pr-1`}>
+          <time dateTime={message.timestamp} className={MESSAGE_ACTION_TIME_CLASS}>{formatMessageTimestamp(message.timestamp)}</time>
+          <button type="button" onClick={() => void navigator.clipboard?.writeText(text)} aria-label="复制消息" title="复制" className={MESSAGE_ACTION_BUTTON_CLASS}><Copy className={MESSAGE_ACTION_ICON_CLASS} /></button>
+          {editable && <button type="button" onClick={() => { setDraft(text); setEditing(true); }} aria-label="编辑并重新发送" title="编辑并重新发送" className={MESSAGE_ACTION_BUTTON_CLASS}><Pencil className={MESSAGE_ACTION_ICON_CLASS} /></button>}
         </div>
       </div>
     </div>
@@ -604,17 +611,17 @@ function AgentMessageActions({ message, versionNavigation }: { message: Message;
   if (!body.trim()) return null;
 
   return (
-    <div className="mt-1 flex min-h-7 items-center gap-1 text-[0.6875rem] text-[color:var(--ui-text-dim)] opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+    <div className={MESSAGE_ACTION_ROW_CLASS}>
       <button
         type="button"
         onClick={() => void navigator.clipboard?.writeText(body)}
         aria-label="复制智能体正文"
         title="复制正文"
-        className="inline-flex size-6 items-center justify-center rounded-md hover:bg-[var(--ui-panel-2)] hover:text-[color:var(--ui-text)]"
+        className={MESSAGE_ACTION_BUTTON_CLASS}
       >
-        <Copy className="size-3.5" />
+        <Copy className={MESSAGE_ACTION_ICON_CLASS} />
       </button>
-      <time dateTime={message.timestamp} className="px-1">
+      <time dateTime={message.timestamp} className={MESSAGE_ACTION_TIME_CLASS}>
         {formatMessageTimestamp(message.timestamp)}
       </time>
       <VersionNavigationControls navigation={versionNavigation} />

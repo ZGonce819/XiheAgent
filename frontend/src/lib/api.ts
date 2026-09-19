@@ -580,6 +580,14 @@ export const api = {
       "/workspace/projects/bind-folder",
       { method: "POST", body: JSON.stringify(body) }
     ),
+  renameProject: (oldName: string, newName: string) =>
+    request<{ renamed: number; name: string }>(
+      "/workspace/projects/rename",
+      {
+        method: "PATCH",
+        body: JSON.stringify({ old_name: oldName, new_name: newName }),
+      }
+    ),
   unbindProjectFolder: (projectName: string) =>
     request<{ project_name: string; unbound: boolean }>(
       `/workspace/projects/${encodeURIComponent(projectName)}/unbind-folder`,

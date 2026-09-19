@@ -6,6 +6,7 @@ import {
   FolderOpen,
   Plus,
   Folder,
+  Pencil,
   X,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -31,8 +32,12 @@ export function ProjectSelector({
   backendType = "local",
   className,
 }: ProjectSelectorProps) {
+  const isSandbox = backendType === "sandbox"
   const [open, setOpen] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState(false)
+  const [editingProject, setEditingProject] = useState<ProjectItem | null>(null)
+  const [selectedWorkDir, setSelectedWorkDir] = useState<string | null>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
 
@@ -42,10 +47,18 @@ export function ProjectSelector({
   const [picking, setPicking] = useState(false)
   const [saving, setSaving] = useState(false)
   const [bindError, setBindError] = useState<string | null>(null)
+  const [detailsName, setDetailsName] = useState("")
+  const [detailsFolder, setDetailsFolder] = useState("")
+  const [detailsSaving, setDetailsSaving] = useState(false)
+  const [detailsError, setDetailsError] = useState<string | null>(null)
   // 路径验证（实时）
   const folderValidation = useMemo(
     () => (localFolderPath.trim() ? validatePath(localFolderPath) : { valid: true, error: "", platform: "unknown" as const }),
     [localFolderPath]
+  )
+  const detailsFolderValidation = useMemo(
+    () => (detailsFolder.trim() ? validatePath(detailsFolder) : { valid: true, error: "", platform: "unknown" as const }),
+    [detailsFolder]
   )
 
   const projects = useQuery({
@@ -70,9 +83,42 @@ export function ProjectSelector({
   const handleSelectProject = useCallback(
     (name: string, localWorkDir: string | null = null) => {
       setOpen(false)
+      setSelectedWorkDir(localWorkDir)
       onProjectChange?.(name, localWorkDir)
     },
     [onProjectChange]
+  )
+
+  const handleOpenDetails = useCallback(
+    (item: ProjectItem) => {
+      setOpen(false)
+      setEditingProject(item)
+      setDetailsName(item.name)
+      setDetailsFolder(
+        selectedProject === item.name && selectedWorkDir !== null
+          ? selectedWorkDir
+          : item.source === "workspace"
+            ? item.path
+            : ""
+      )
+      setDetailsError(null)
+      setDetailsDialogOpen(true)
+    },
+    [selectedProject, selectedWorkDir]
+  )
+
+  const handleProjectClick = useCallback(
+    (item: ProjectItem) => {
+      if (selectedProject === item.name) {
+        handleOpenDetails(item)
+        return
+      }
+      handleSelectProject(
+        item.name,
+        item.source === "workspace" ? item.path : null
+      )
+    },
+    [handleOpenDetails, handleSelectProject, selectedProject]
   )
 
   const handlePickFolder = useCallback(async () => {
@@ -106,6 +152,7 @@ export function ProjectSelector({
       await api.bindProjectFolder({ project_name: name })
       await queryClient.invalidateQueries({ queryKey: ["workspace-projects"] })
       setCreateDialogOpen(false)
+      setSelectedWorkDir(folder || null)
       onProjectChange?.(name, folder || null)
     } catch (err) {
       setBindError(err instanceof Error ? err.message : "绑定本地文件夹失败")
@@ -128,7 +175,40 @@ export function ProjectSelector({
     setCreateDialogOpen(true)
   }, [])
 
-  const isSandbox = backendType === "sandbox"
+  const handleDetailsConfirm = useCallback(async () => {
+    if (!editingProject) return
+    const canRename = editingProject.source === "created"
+    const nextName = canRename ? detailsName.trim() : editingProject.name
+    const nextFolder = isSandbox ? "" : detailsFolder.trim()
+    if (!nextName || (nextFolder && !detailsFolderValidation.valid)) return
+
+    setDetailsSaving(true)
+    setDetailsError(null)
+    try {
+      if (canRename && nextName !== editingProject.name) {
+        await api.renameProject(editingProject.name, nextName)
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["workspace-projects"] }),
+        queryClient.invalidateQueries({ queryKey: ["agent-threads"] }),
+      ])
+      setSelectedWorkDir(nextFolder || null)
+      onProjectChange?.(nextName, nextFolder || null)
+      setDetailsDialogOpen(false)
+    } catch (err) {
+      setDetailsError(err instanceof Error ? err.message : "项目详细信息保存失败")
+    } finally {
+      setDetailsSaving(false)
+    }
+  }, [
+    detailsFolder,
+    detailsFolderValidation.valid,
+    detailsName,
+    editingProject,
+    isSandbox,
+    onProjectChange,
+    queryClient,
+  ])
 
   const createdProjects = projects.data?.created_projects ?? []
   const workspaceProjects = projects.data?.workspace_projects ?? []
@@ -175,7 +255,8 @@ export function ProjectSelector({
                     <button
                       key={`created:${item.name}`}
                       type="button"
-                      onClick={() => handleSelectProject(item.name)}
+                      onClick={() => handleProjectClick(item)}
+                      title={selectedProject === item.name ? "再次点击编辑项目详细信息" : undefined}
                       className={cn(
                         "flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-[var(--ui-panel-2)] animate-in fade-in-0 slide-in-from-left-1",
                         selectedProject === item.name
@@ -187,7 +268,7 @@ export function ProjectSelector({
                       <FolderOpen className="size-3 shrink-0 text-[color:var(--ui-text-dim)]" />
                       <span className="min-w-0 flex-1 truncate">{item.name}</span>
                       {selectedProject === item.name && (
-                        <span className="text-[color:var(--ui-text-dim)]">✓</span>
+                        <Pencil className="size-3 shrink-0 text-[color:var(--ui-text-dim)]" />
                       )}
                     </button>
                   ))}
@@ -201,7 +282,8 @@ export function ProjectSelector({
                     <button
                       key={`workspace:${item.path}`}
                       type="button"
-                      onClick={() => handleSelectProject(item.name, item.path)}
+                      onClick={() => handleProjectClick(item)}
+                      title={selectedProject === item.name ? "再次点击编辑项目详细信息" : item.path}
                       className={cn(
                         "flex w-full items-start gap-2 rounded-sm px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-[var(--ui-panel-2)]",
                         selectedProject === item.name
@@ -220,7 +302,7 @@ export function ProjectSelector({
                         </span>
                       </span>
                       {selectedProject === item.name && (
-                        <span className="text-[color:var(--ui-text-dim)]">✓</span>
+                        <Pencil className="mt-0.5 size-3 shrink-0 text-[color:var(--ui-text-dim)]" />
                       )}
                     </button>
                   ))}
@@ -338,6 +420,121 @@ export function ProjectSelector({
                 onClick={handleCreateConfirm}
               >
                 {saving ? "创建中…" : "创建"}
+              </Button>
+            </div>
+          </Dialog.Popup>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      {/* 当前项目详细信息弹窗 */}
+      <Dialog.Root open={detailsDialogOpen} onOpenChange={setDetailsDialogOpen}>
+        <Dialog.Portal>
+          <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
+          <Dialog.Popup className="fixed top-1/2 left-1/2 z-50 w-[min(28rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-popover shadow-xl outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
+            <div className="flex items-center justify-between border-b border-border px-5 py-4">
+              <Dialog.Title className="text-sm font-semibold text-foreground">
+                项目详细信息
+              </Dialog.Title>
+              <Dialog.Close
+                aria-label="关闭项目详细信息"
+                title="关闭"
+                className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <X className="size-4" />
+              </Dialog.Close>
+            </div>
+
+            <div className="space-y-4 px-5 py-4">
+              <div className="space-y-1.5">
+                <label htmlFor="project-details-name" className="text-xs font-medium text-foreground">
+                  项目名称
+                </label>
+                <Input
+                  id="project-details-name"
+                  value={detailsName}
+                  onChange={(event) => setDetailsName(event.target.value)}
+                  disabled={editingProject?.source === "workspace"}
+                  autoFocus={editingProject?.source === "created"}
+                />
+                {editingProject?.source === "workspace" && (
+                  <p className="text-[0.6875rem] text-[color:var(--ui-text-dim)]">
+                    名称来自工作目录文件夹，不能在此修改。
+                  </p>
+                )}
+              </div>
+
+              {!isSandbox && (
+                <div className="space-y-1.5">
+                  <label htmlFor="project-details-folder" className="text-xs font-medium text-foreground">
+                    当前任务工作目录
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="project-details-folder"
+                      value={detailsFolder}
+                      onChange={(event) => setDetailsFolder(event.target.value)}
+                      placeholder="选择或输入本地文件夹路径"
+                      className={cn(
+                        "flex-1",
+                        detailsFolder.trim() && !detailsFolderValidation.valid && "border-destructive focus-visible:ring-destructive/30"
+                      )}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={picking}
+                      onClick={async () => {
+                        setPicking(true)
+                        try {
+                          const result = await api.pickFolder()
+                          if (result.path) setDetailsFolder(result.path)
+                        } catch {
+                          // 用户取消或系统文件夹选择器不可用。
+                        } finally {
+                          setPicking(false)
+                        }
+                      }}
+                      className="shrink-0 gap-1.5"
+                    >
+                      <FolderOpen className="size-3.5" />
+                      {picking ? "选择中…" : "浏览"}
+                    </Button>
+                  </div>
+                  {detailsFolder.trim() && !detailsFolderValidation.valid && (
+                    <p className="text-xs text-destructive">
+                      {detailsFolderValidation.error}
+                    </p>
+                  )}
+                  <p className="text-[0.6875rem] text-[color:var(--ui-text-dim)]">
+                    仅影响即将创建的当前对话，不会改变其他对话。
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3">
+              {detailsError && (
+                <p className="mr-auto text-xs text-destructive">{detailsError}</p>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={detailsSaving}
+                onClick={() => setDetailsDialogOpen(false)}
+              >
+                取消
+              </Button>
+              <Button
+                size="sm"
+                disabled={
+                  detailsSaving ||
+                  !detailsName.trim() ||
+                  (Boolean(detailsFolder.trim()) && !detailsFolderValidation.valid)
+                }
+                onClick={handleDetailsConfirm}
+              >
+                {detailsSaving ? "保存中…" : "保存"}
               </Button>
             </div>
           </Dialog.Popup>
