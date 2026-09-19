@@ -216,7 +216,7 @@ class _Settled:
     votes: tuple[dict[str, Any], ...] = ()
     vote_tokens: int = 0
     stalled_reason: str = ""
-    """非空表示**开了表决但没得出结论**，这一轮仍然要交回人工。"""
+    """非空表示全流程自动化无法继续，并已将本轮收口为失败。"""
 
 
 def _reject_message(reason: str) -> str:
@@ -269,7 +269,7 @@ def _vote_note(votes: Sequence[Mapping[str, Any]]) -> str:
 
 
 def _stalled_note(reason: str) -> str:
-    """说明「开了表决但这一次没能定下来」。
+    """说明全流程自动化为什么自行终止。
 
     Args:
         reason: 没能定下来的原因。
@@ -277,7 +277,7 @@ def _stalled_note(reason: str) -> str:
     Returns:
         给人看的说明。
     """
-    return f"已开启「审批交给表决」，但这一次没能得出结论，仍需人工处理：{reason}"
+    return f"全流程自动化已终止本轮，没有留下待人工审批：{reason}"
 
 
 def _settle_approvals(
@@ -292,11 +292,11 @@ def _settle_approvals(
     """开着表决时，把这一轮撞上的审批处理掉。
 
     只有「这个任务开了表决」且「这一轮停在等人工」才动手。每次表决都记下来，
-    包括**没能得出结论的那几次** —— 「开了全自动但这次没能定」和「表决放行了」
-    是两件不同的事，只记后者会让人以为这一轮根本没有人工介入。
+    包括**没能得出结论的那几次**。全流程自动化不能把任务重新交回人工：评审无法
+    得出结论时按安全拒绝恢复模型；基础设施无法恢复或达到次数上限时，本轮明确失败。
 
-    用满 :data:`MAX_APPROVAL_VOTES_PER_ROUND` 次还在撞审批就停手退回人工：模型可以
-    一直换做法、一直撞审批，没有上限就是拿模型的调用换一圈空转。
+    用满 :data:`MAX_APPROVAL_VOTES_PER_ROUND` 次还在撞审批就终止本轮：模型可以一直
+    换做法、一直撞审批，没有上限就是拿模型的调用换一圈空转。
 
     Args:
         thread_id: 这一轮的会话 id。
@@ -314,7 +314,7 @@ def _settle_approvals(
 
     from agent.graph.graph import get_store
     from agent.runtime.task_router import resume_agent_task
-    from config.approval_runtime import get_pending_approval
+    from config.approval_runtime import clear_pending_approval, get_pending_approval
     from services.approval_vote import vote_on_approval
 
     store = get_store()
@@ -330,27 +330,44 @@ def _settle_approvals(
             pending = None
         if not pending:
             stalled_reason = "读不到待审批内容"
+            status = "failed"
+            with contextlib.suppress(Exception):
+                clear_pending_approval(thread_id)
+            with contextlib.suppress(Exception):
+                store.update_thread_status(thread_id, "failed")
             break
 
         outcome = vote_on_approval(pending, instruction=instruction, model_id=model_id)
         votes.append(outcome.as_state_dict())
         vote_tokens += outcome.tokens
         if not outcome.decided:
-            # 没能得出结论既不能当同意也不能当否决，交回人工。
-            stalled_reason = outcome.reason
-            break
+            # 全流程自动化不能退回人工。评审故障或拒绝表决时按安全拒绝处理：命令
+            # 不会执行，模型还能根据原因换一种做法继续完成任务。
+            decision = "reject"
+            reject_message = _reject_message(
+                f"自动评审未能形成可执行结论，已按安全策略拒绝：{outcome.reason}"
+            )
+        else:
+            decision = "approve" if outcome.approved else "reject"
+            reject_message = None if outcome.approved else _reject_message(outcome.reason)
 
         try:
             resumed = resume_agent_task(
                 thread_id=thread_id,
-                decision="approve" if outcome.approved else "reject",
+                decision=decision,
                 approval_id=str(pending.get("id") or ""),
-                reject_message=None if outcome.approved else _reject_message(outcome.reason),
+                reject_message=reject_message,
             )
         except Exception as exc:
-            # 恢复失败不能把这一轮带崩：待审批记录还在，人还能接手继续处理。
+            # 全流程模式不能留下一个等人的审批。恢复链路坏了就让本轮明确失败，
+            # 清掉展示层的待审批记录，后续轮次仍可按自动化策略重试。
             logger.exception("表决之后恢复会话失败：thread_id=%s", thread_id)
             stalled_reason = f"表决之后的恢复失败：{type(exc).__name__}: {exc}"
+            status = "failed"
+            with contextlib.suppress(Exception):
+                clear_pending_approval(thread_id)
+            with contextlib.suppress(Exception):
+                store.update_thread_status(thread_id, "failed")
             break
 
         messages = list(resumed.get("messages") or [])
@@ -362,9 +379,28 @@ def _settle_approvals(
         if status != "awaiting_approval":
             break
     else:
-        stalled_reason = (
-            f"这一轮已经表决 {MAX_APPROVAL_VOTES_PER_ROUND} 次还在撞审批，交给人工"
-        )
+        stalled_reason = f"这一轮已经表决 {MAX_APPROVAL_VOTES_PER_ROUND} 次仍反复触发审批"
+        status = "failed"
+        with contextlib.suppress(Exception):
+            clear_pending_approval(thread_id)
+        with contextlib.suppress(Exception):
+            store.update_thread_status(thread_id, "failed")
+
+    if status == "failed" and stalled_reason:
+        # thread 与 run 两处都要落成终态。否则详情页刷新后可能从 runs 表里重新读到
+        # 旧的 awaiting_approval，造成“明明全自动，怎么又在等审批”的假象。
+        with contextlib.suppress(Exception):
+            latest_run = store.get_latest_run(thread_id) or {}
+            run_id = str(latest_run.get("run_id") or "")
+            if run_id:
+                store.record_run(
+                    run_id=run_id,
+                    thread_id=thread_id,
+                    status="failed",
+                    error=stalled_reason,
+                    finished=True,
+                    base_commit=latest_run.get("base_commit"),
+                )
 
     return _Settled(
         status=status,
@@ -678,7 +714,11 @@ def make_agent_round_runner(
 
         summary = extract_final_assistant_text(messages)
         if status == "failed":
-            record = store.get_latest_run(current_thread) or {}
+            record = (
+                store.get_latest_run(current_thread) or {}
+                if hasattr(store, "get_latest_run")
+                else {}
+            )
             summary = str(record.get("error") or summary or "这一轮运行失败")
         elif status == "awaiting_approval":
             # 停在等人工审批时拿不到正文，必须自己说明在等什么，否则这一轮在状态文件里
@@ -687,6 +727,9 @@ def make_agent_round_runner(
             summary = f"{summary}\n\n{waiting}" if summary.strip() else waiting
             if settled.stalled_reason:
                 summary = f"{summary}\n\n{_stalled_note(settled.stalled_reason)}"
+
+        if status == "failed" and settled.stalled_reason:
+            summary = f"{summary}\n\n{_stalled_note(settled.stalled_reason)}"
 
         note = _vote_note(settled.votes)
         if note:

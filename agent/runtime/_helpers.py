@@ -20,11 +20,10 @@ logger = logging.getLogger(__name__)
 
 
 def resolve_project_local_folder(thread_id: str) -> str | None:
-    """按 thread 反查其项目绑定的本地工作文件夹。
+    """读取当前会话自己选择的本地工作文件夹。
 
-    thread 记录里保存了 ``project_name``，项目再绑定到本地文件夹
-    （``project_local_folders`` 表）。未绑定或查询失败时返回 ``None``，
-    调用方据此回退到全局工作区。
+    工作目录属于会话而不是项目。同一项目下的不同会话可以选择不同目录；未选择时
+    返回 ``None``，调用方据此回退到全局工作区。
 
     Args:
         thread_id: 会话唯一标识。
@@ -35,11 +34,7 @@ def resolve_project_local_folder(thread_id: str) -> str | None:
     try:
         store = get_store()
         thread = store.get_thread(thread_id)
-        project_name = thread.get("project_name") if thread else None
-        if not project_name:
-            return None
-        record = store.get_project_folder(project_name)
-        folder = record.get("local_folder") if record else None
+        folder = thread.get("local_work_dir") if thread else None
         return folder if isinstance(folder, str) and folder.strip() else None
     except Exception:
         logger.warning("解析项目本地文件夹失败：thread_id=%s", thread_id, exc_info=True)
@@ -173,6 +168,8 @@ def build_agent_user_content(
     prompt: str,
     display_prompt: str | None = None,
     approved_plan: str | None = None,
+    repository_available: bool = True,
+    repository_path: str | None = None,
 ) -> str:
     """构造发送给 DeepAgent 的用户内容，避免只读任务被误导去创建 PR。
 
@@ -190,6 +187,8 @@ def build_agent_user_content(
         prompt: 用户任务描述文本。
         display_prompt: 用户在网页输入框里真正输入的文本；为 ``None`` 时使用 ``prompt``。
         approved_plan: 用户已确认的技术方案文本；仅在 coding 任务时生效。
+        repository_available: 本地仓库是否已准备完成。
+        repository_path: Agent 可直接使用的仓库绝对路径，主要用于远程沙盒。
 
     Returns:
         拼接完成的用户内容字符串。
@@ -214,13 +213,27 @@ def build_agent_user_content(
             "可以准备并读取仓库，但禁止修改文件、提交、push 或创建 Pull Request；"
             "完成后直接用中文回答用户问题。"
         )
+    repository_instruction = ""
+    if repository_available and repository_path:
+        repository_instruction = (
+            f"\n\n仓库准备结果：仓库已准备在 `{repository_path}`。"
+            "文件工具和 Git 命令都必须使用这个真实路径；"
+            "如果仓库记忆中出现 `/projects` 等不同路径，以本条路径为准。"
+        )
+    elif not repository_available:
+        repository_instruction = (
+            "\n\n仓库准备结果：远程仓库不可用，本轮处于无仓库模式。"
+            "不要执行 Git 命令，也不要尝试读取、搜索或修改仓库文件。"
+            "如果用户问题不依赖仓库内容，请直接根据用户输入和通用知识回答，不必提及仓库失败；"
+            "如果任务必须访问代码才能完成，请明确说明当前仓库地址不可用，并请用户提供有效地址。"
+        )
     return (
         f"用户可见输入：\n{visible_prompt}\n\n"
         "内部执行上下文：以下内容用于 Agent 判断和执行，不要原样展示为用户输入。\n\n"
         f"仓库地址：{repo_url}\n\n"
         f"任务类型：{task_kind}\n\n"
         f"用户任务：\n{prompt}\n\n"
-        f"{task_instruction}"
+        f"{task_instruction}{repository_instruction}"
     )
 
 
@@ -230,6 +243,8 @@ def build_plan_user_content(
     prompt: str,
     previous_plan: str | None = None,
     revision_prompt: str | None = None,
+    repository_available: bool = True,
+    repository_path: str | None = None,
 ) -> str:
     """构造专门用于生成技术方案的只读任务内容。
 
@@ -243,10 +258,27 @@ def build_plan_user_content(
         prompt: 用户原始需求文本。
         previous_plan: 上一版技术方案内容；为 ``None`` 时表示首次生成。
         revision_prompt: 用户对上一版方案的修改要求；为 ``None`` 时表示全新方案。
+        repository_available: 本地仓库是否已准备完成。
+        repository_path: Agent 可直接使用的仓库绝对路径，主要用于远程沙盒。
 
     Returns:
         拼接完成的方案生成提示文本。
     """
+
+    repository_instruction = ""
+    if repository_available and repository_path:
+        repository_instruction = (
+            f"\n仓库准备结果：仓库已准备在 `{repository_path}`。"
+            "读取文件和执行 Git 命令时必须使用这个真实路径；"
+            "如果仓库记忆中出现 `/projects` 等不同路径，以本条路径为准。\n"
+        )
+    elif not repository_available:
+        repository_instruction = (
+            "\n仓库准备结果：远程仓库不可用，本轮处于无仓库模式。"
+            "不要执行 Git 命令，也不要尝试读取或搜索仓库文件。"
+            "如果需求不依赖仓库内容，可以仅根据用户描述给出通用建议且不必提及仓库失败；"
+            "如果必须查看代码才能制定可靠方案，请说明当前仓库地址不可用，并请用户提供有效地址。\n"
+        )
 
     if previous_plan and revision_prompt:
         return (
@@ -254,6 +286,7 @@ def build_plan_user_content(
             f"原始用户需求：\n{prompt}\n\n"
             f"上一版技术方案：\n{previous_plan}\n\n"
             f"用户新的修改要求：\n{revision_prompt}\n\n"
+            f"{repository_instruction}"
             "请基于上一版方案和新的修改要求，重新输出一份完整的新技术方案。\n"
             "不要只输出差异说明，不要只回答新增部分；必须把修订后的完整方案重新组织出来。\n"
             "请只生成技术方案，不要修改文件、不要提交、不要 push、不要创建 Pull Request。\n"
@@ -270,6 +303,7 @@ def build_plan_user_content(
     return (
         f"仓库地址：{repo_url}\n\n"
         f"用户需求：\n{prompt}\n\n"
+        f"{repository_instruction}"
         "请只生成技术方案，不要修改文件、不要提交、不要 push、不要创建 Pull Request。\n"
         "方案必须使用中文 Markdown，建议包含：\n"
         "1. 需求理解\n"

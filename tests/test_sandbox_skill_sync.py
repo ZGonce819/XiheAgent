@@ -198,7 +198,7 @@ def test_sync_sandbox_skills_uploads_real_skills(skills_root: Path, make_skill):
     written_paths = [path for path, _ in backend._sandbox.files.written]
     assert written_paths == [
         "/workspace/skills/alpha/SKILL.md",
-        "/workspace/skills/.project-set/Xihe/beta/SKILL.md",
+        "/workspace/.project-set/Xihe/beta/SKILL.md",
     ]
 
 

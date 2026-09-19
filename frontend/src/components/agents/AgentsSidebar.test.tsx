@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import type { AgentThread } from "@/lib/agents/types"
 import { ProjectGroup } from "./AgentsSidebar"
@@ -15,7 +16,13 @@ vi.mock("@tanstack/react-router", () => ({
 vi.mock("@/lib/agents/queries", () => ({
   useAgentThreads: () => ({ data: [] }),
   useDeleteAgentThread: () => ({ mutate: vi.fn() }),
-  useRenameProject: () => ({ mutate: vi.fn(), isPending: false }),
+  useRenameProject: () => ({ mutateAsync: vi.fn() }),
+}))
+
+vi.mock("@/lib/api", () => ({
+  api: {
+    listProjects: () => Promise.resolve({ projects: [] }),
+  },
 }))
 
 vi.mock("@/lib/agents/threadReveal", () => ({
@@ -51,9 +58,18 @@ function makeThread(id: string): AgentThread {
 
 const threads = [makeThread("a"), makeThread("b")]
 
+function renderWithQuery(ui: React.ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  return render(
+    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
+  )
+}
+
 describe("ProjectGroup 项目子菜单收起/展开", () => {
   it("默认展开，显示项目下的对话", () => {
-    render(<ProjectGroup projectName="demo" threads={threads} />)
+    renderWithQuery(<ProjectGroup projectName="demo" threads={threads} />)
 
     expect(screen.getByText("对话 a")).toBeTruthy()
     expect(screen.getByText("对话 b")).toBeTruthy()
@@ -62,7 +78,7 @@ describe("ProjectGroup 项目子菜单收起/展开", () => {
   })
 
   it("初次挂载不播放入场动画（路由切换重新挂载时不应动）", () => {
-    render(<ProjectGroup projectName="demo" threads={threads} />)
+    renderWithQuery(<ProjectGroup projectName="demo" threads={threads} />)
 
     const content = screen.getByText("对话 a").closest("div.sidebar-project-collapse")
     expect(content).toBeNull()
@@ -71,7 +87,7 @@ describe("ProjectGroup 项目子菜单收起/展开", () => {
   it("用户主动展开时才播放入场动画", () => {
     vi.useFakeTimers()
     try {
-      render(<ProjectGroup projectName="demo" threads={threads} />)
+      renderWithQuery(<ProjectGroup projectName="demo" threads={threads} />)
 
       // 收起后内容卸载
       fireEvent.click(screen.getByRole("button", { name: "收起项目 demo" }))
@@ -93,7 +109,7 @@ describe("ProjectGroup 项目子菜单收起/展开", () => {
   it("点击项目名称后收起，再次点击恢复展开", () => {
     vi.useFakeTimers()
     try {
-      render(<ProjectGroup projectName="demo" threads={threads} />)
+      renderWithQuery(<ProjectGroup projectName="demo" threads={threads} />)
 
       fireEvent.click(screen.getByRole("button", { name: "收起项目 demo" }))
 

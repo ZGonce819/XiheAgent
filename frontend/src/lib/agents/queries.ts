@@ -305,6 +305,7 @@ export function useCreateAgentThread() {
       effort?: string | null
       backend_type?: string | null
       project_name?: string | null
+      local_work_dir?: string | null
     }) => {
       const response = await agentsApi.createThread(body)
       if (!response.body) return null
@@ -357,6 +358,9 @@ export function useCreateAgentThread() {
                   status: "running",
                   backendType: body.backend_type ?? "local",
                   projectName: body.project_name ?? null,
+                  localWorkDir: body.local_work_dir ?? null,
+                  localWorkDirFull: body.local_work_dir ?? null,
+                  localFolderMode: Boolean(body.local_work_dir),
                   createdAt: now,
                   updatedAt: now,
                   messages: [],

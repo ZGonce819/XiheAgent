@@ -63,7 +63,7 @@ export interface CloudPromptBarProps {
   /** Currently selected project name. */
   selectedProject?: string | null
   /** Called when user selects a different project. */
-  onProjectChange?: (project: string | null) => void
+  onProjectChange?: (project: string | null, localWorkDir?: string | null) => void
 }
 
 function fileToImageChunk(file: File): Promise<ImageChunk | null> {

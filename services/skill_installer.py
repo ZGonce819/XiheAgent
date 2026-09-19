@@ -49,7 +49,7 @@ def get_default_skills(project_name: str | None = None) -> list[tuple[str, bytes
     Returns:
         ``(沙盒内目标路径, 字节内容)`` 元组列表。全局层技能放在
         ``/workspace/skills/<skill_name>/SKILL.md``，项目集合层技能放在
-        ``/workspace/skills/.project-set/<集合名>/<skill_name>/SKILL.md``，
+        ``/workspace/.project-set/<集合名>/<skill_name>/SKILL.md``，
         附属文件一并上传。
 
     Note:

@@ -37,6 +37,7 @@ class ThreadRepo(ConnectionManager):
                 latest_run_status VARCHAR(32) NOT NULL DEFAULT 'pending',
                 backend_type VARCHAR(16) NOT NULL DEFAULT 'local',
                 project_name VARCHAR(256),
+                local_work_dir VARCHAR(1000),
                 source VARCHAR(32) NOT NULL DEFAULT 'dashboard',
                 created_at VARCHAR(32) NOT NULL,
                 updated_at VARCHAR(32) NOT NULL
@@ -48,6 +49,7 @@ class ThreadRepo(ConnectionManager):
             "ALTER TABLE runs ADD COLUMN head_commit VARCHAR(64) NULL",
             "ALTER TABLE threads ADD COLUMN backend_type VARCHAR(16) NOT NULL DEFAULT 'local'",
             "ALTER TABLE threads ADD COLUMN project_name VARCHAR(256) NULL",
+            "ALTER TABLE threads ADD COLUMN local_work_dir VARCHAR(1000) NULL",
             "ALTER TABLE threads ADD COLUMN source VARCHAR(32) NOT NULL DEFAULT 'dashboard'",
         ):
             try:
@@ -69,6 +71,7 @@ class ThreadRepo(ConnectionManager):
         latest_run_status: str = "pending",
         backend_type: str | None = None,
         project_name: str | None = None,
+        local_work_dir: str | None = None,
         source: str | None = None,
     ) -> None:
         """创建或更新一条 thread 记录。
@@ -101,14 +104,15 @@ class ThreadRepo(ConnectionManager):
         # 新建时使用传入值或默认 local；更新时保留原值（除非显式传入）
         effective_backend = backend_type or (existing.get("backend_type") if existing else None) or "local"
         effective_project = project_name or (existing.get("project_name") if existing else None)
+        effective_work_dir = local_work_dir or (existing.get("local_work_dir") if existing else None)
         effective_source = source or (existing.get("source") if existing else None) or "dashboard"
 
         self.execute(
             """
             INSERT INTO threads
                 (thread_id, title, user_prompt, repo_url, repo_owner, repo_name,
-                 branch_name, pr_url, latest_run_status, backend_type, project_name, source, created_at, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 branch_name, pr_url, latest_run_status, backend_type, project_name, local_work_dir, source, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
                 user_prompt = COALESCE(VALUES(user_prompt), user_prompt),
                 repo_url = COALESCE(VALUES(repo_url), repo_url),
@@ -119,12 +123,13 @@ class ThreadRepo(ConnectionManager):
                 latest_run_status = VALUES(latest_run_status),
                 backend_type = VALUES(backend_type),
                 project_name = COALESCE(VALUES(project_name), project_name),
+                local_work_dir = COALESCE(VALUES(local_work_dir), local_work_dir),
                 source = COALESCE(VALUES(source), source),
                 updated_at = VALUES(updated_at)
             """,
             (
                 thread_id, title, user_prompt, repo_url, repo_owner, repo_name,
-                branch_name, pr_url, latest_run_status, effective_backend, effective_project, effective_source, created_at, now,
+                branch_name, pr_url, latest_run_status, effective_backend, effective_project, effective_work_dir, effective_source, created_at, now,
             ),
         )
 

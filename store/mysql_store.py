@@ -75,6 +75,7 @@ class LocalMySQLStore:
         latest_run_status: str = "pending",
         backend_type: str | None = None,
         project_name: str | None = None,
+        local_work_dir: str | None = None,
         source: str | None = None,
     ) -> None:
         """创建或更新一条 thread 记录。
@@ -105,6 +106,7 @@ class LocalMySQLStore:
             latest_run_status=latest_run_status,
             backend_type=backend_type,
             project_name=project_name,
+            local_work_dir=local_work_dir,
             source=source,
         )
 
@@ -435,14 +437,15 @@ class LocalMySQLStore:
 
     # ── Project Folder 操作（项目名 → 本地工作文件夹绑定）─────────────────────
 
-    def upsert_project_folder(self, project_name: str, local_folder: str) -> None:
+    def upsert_project_folder(self, project_name: str, local_folder: str, display_name: str | None = None) -> None:
         """创建或更新项目到本地工作文件夹的绑定。
 
         Args:
             project_name: 项目名称。
             local_folder: 本地文件夹绝对路径。
+            display_name: 项目显示名称（可选，用于 UI 展示）。
         """
-        self.project_folder_repo.upsert(project_name, local_folder)
+        self.project_folder_repo.upsert(project_name, local_folder, display_name)
 
     def get_project_folder(self, project_name: str) -> dict[str, Any] | None:
         """按项目名查询本地文件夹绑定。
@@ -485,3 +488,15 @@ class LocalMySQLStore:
             受影响的行数。
         """
         return self.project_folder_repo.rename(old_name, new_name)
+
+    def update_project_display_name(self, project_name: str, display_name: str) -> int:
+        """更新项目的显示名称。
+
+        Args:
+            project_name: 项目名称。
+            display_name: 新的显示名称。
+
+        Returns:
+            受影响的行数。
+        """
+        return self.project_folder_repo.update_display_name(project_name, display_name)

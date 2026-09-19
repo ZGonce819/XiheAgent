@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from langchain_core.tools import tool
@@ -26,14 +27,16 @@ from utils.context_utils import get_runtime_thread_id
 logger = logging.getLogger(__name__)
 
 
-def _resolve_scope(scope: str, thread_id: str | None) -> tuple[str, str | None]:
+def _resolve_scope(
+    scope: str, thread_id: str | None
+) -> tuple[str, str | None, str | None]:
     """把工具入参中的作用域解析为 registry 可用的形式。
 
     - ``global``：写入全局技能目录，跨项目共享。
     - ``project_set``：写入全局目录下的项目集合，随项目走但不需要项目绑定本地
       文件夹。
-    - ``local``：写入当前会话所属项目文件夹内的 ``.xihe-agent/skills``，要求
-      项目已绑定本地文件夹；未绑定时自动降级为 ``project_set``，再不行降为
+    - ``local``：写入当前会话所选工作目录内的 ``.xihe-agent/skills``，要求
+      会话已选择本地文件夹；未选择时自动降级为 ``project_set``，再不行降为
       ``global``，避免工具因环境缺失而直接失败。
 
     沙箱会话额外把 ``local`` 降级为 ``project_set``：容器里没有项目本地文件夹，
@@ -46,20 +49,21 @@ def _resolve_scope(scope: str, thread_id: str | None) -> tuple[str, str | None]:
         thread_id: 当前会话 ID，用于反查项目与环境类型。
 
     Returns:
-        ``(scope, project_name)`` 二元组。
+        ``(scope, project_name, local_folder)`` 三元组。本地目录只取当前会话
+        自己的 ``local_work_dir``，绝不按项目名反查旧绑定。
     """
     from services.skill_registry import (
         GLOBAL_SCOPE,
         LOCAL_SCOPE,
         PROJECT_SET_SCOPE,
-        resolve_project_folder,
     )
 
     normalized = (scope or GLOBAL_SCOPE).strip().lower()
     if normalized not in {PROJECT_SET_SCOPE, LOCAL_SCOPE} or not thread_id:
-        return GLOBAL_SCOPE, None
+        return GLOBAL_SCOPE, None, None
 
     project_name: str | None = None
+    local_folder: str | None = None
     sandbox_session = False
     try:
         from agent.graph.graph import get_store
@@ -69,19 +73,23 @@ def _resolve_scope(scope: str, thread_id: str | None) -> tuple[str, str | None]:
             raw = thread.get("project_name")
             if isinstance(raw, str) and raw.strip():
                 project_name = raw.strip()
+            raw_folder = thread.get("local_work_dir")
+            if isinstance(raw_folder, str) and raw_folder.strip():
+                local_folder = raw_folder.strip()
             sandbox_session = str(thread.get("backend_type") or "") == "sandbox"
     except Exception:
         project_name = None
+        local_folder = None
 
     if not project_name:
-        return GLOBAL_SCOPE, None
+        return GLOBAL_SCOPE, None, None
     if normalized == LOCAL_SCOPE:
-        if sandbox_session or resolve_project_folder(project_name) is None:
+        if sandbox_session or not local_folder:
             # 沙箱下没有本地层；本地层也要求真实磁盘目录。两种情况都退到项目集合，
             # 仍保留项目归属。
-            return PROJECT_SET_SCOPE, project_name
-        return LOCAL_SCOPE, project_name
-    return PROJECT_SET_SCOPE, project_name
+            return PROJECT_SET_SCOPE, project_name, None
+        return LOCAL_SCOPE, project_name, local_folder
+    return PROJECT_SET_SCOPE, project_name, None
 
 
 @tool
@@ -106,7 +114,7 @@ def create_skill(
             注意事项，而不是笼统的建议。
         scope: ``global`` 跨项目共享（默认）；``project_set`` 仅当前项目可见，
             存在全局目录下的项目集合里；``local`` 仅当前项目可见，存在项目
-            文件夹内，要求项目已绑定本地文件夹且会话不在沙箱中。越靠后的层
+            文件夹内，要求当前会话已选择本地文件夹且不在沙箱中。越靠后的层
             同名时覆盖前面的层。
 
     Returns:
@@ -114,10 +122,11 @@ def create_skill(
         的字典。失败时返回带 ``error`` 的字典，不会抛出异常。
     """
     from services.skill_registry import (
+        LOCAL_SCOPE,
         SkillValidationError,
-        create_skill as registry_create_skill,
         scope_dir,
     )
+    from services.skill_registry import create_skill as registry_create_skill
 
     thread_id = get_runtime_thread_id()
 
@@ -128,11 +137,16 @@ def create_skill(
     if not (instructions or "").strip():
         return {"error": "技能正文不能为空"}
 
-    resolved_scope, project_name = _resolve_scope(scope, thread_id)
+    resolved_scope, project_name, local_folder = _resolve_scope(scope, thread_id)
     requested = (scope or "").strip().lower()
     downgraded = requested in {"project_set", "local", "project"} and resolved_scope != requested
 
     try:
+        direct_base = (
+            Path(local_folder) / ".xihe-agent" / "skills"
+            if resolved_scope == LOCAL_SCOPE and local_folder
+            else None
+        )
         record = registry_create_skill(
             name=name.strip(),
             description=description.strip(),
@@ -141,13 +155,16 @@ def create_skill(
             project_name=project_name,
             origin="agent",
             overwrite=True,
+            base_dir=direct_base,
         )
     except SkillValidationError as e:
         return {"error": str(e)}
     except OSError as e:
         return {"error": f"技能写入失败：{e}"}
 
-    directory = scope_dir(resolved_scope, project_name) / record.id
+    directory = (
+        direct_base if direct_base is not None else scope_dir(resolved_scope, project_name)
+    ) / record.id
 
     # 沙箱会话读的是容器里的技能副本，这里主动推一次；当前会话正在执行，会被
     # 记为延迟同步，在下一次构建智能体前补上。
@@ -166,7 +183,7 @@ def create_skill(
     message = f"已创建技能「{record.name}」（{record.scope} 作用域），将在下一次构建智能体时自动加载。"
     if downgraded:
         message += (
-            "当前项目未绑定本地文件夹、会话运行在沙箱中，或未指定项目，已自动保存为"
+            "当前会话未选择本地文件夹、运行在沙箱中，或未指定项目，已自动保存为"
             f"{record.scope}技能。"
         )
 
@@ -199,8 +216,8 @@ def list_skills(scope: str = "all") -> dict[str, Any]:
         GLOBAL_SCOPE,
         LOCAL_SCOPE,
         PROJECT_SET_SCOPE,
-        list_skills as registry_list,
     )
+    from services.skill_registry import list_skills as registry_list
 
     thread_id = get_runtime_thread_id()
     normalized = (scope or "all").strip().lower()
@@ -211,13 +228,19 @@ def list_skills(scope: str = "all") -> dict[str, Any]:
     if normalized in {"all", GLOBAL_SCOPE}:
         records.extend(registry_list(GLOBAL_SCOPE))
     if normalized in {"all", PROJECT_SET_SCOPE}:
-        resolved, project_name = _resolve_scope(PROJECT_SET_SCOPE, thread_id)
+        resolved, project_name, _ = _resolve_scope(PROJECT_SET_SCOPE, thread_id)
         if resolved in {PROJECT_SET_SCOPE, LOCAL_SCOPE} and project_name:
             records.extend(registry_list(PROJECT_SET_SCOPE, project_name))
     if normalized in {"all", LOCAL_SCOPE}:
-        resolved, project_name = _resolve_scope(LOCAL_SCOPE, thread_id)
-        if resolved == LOCAL_SCOPE and project_name:
-            records.extend(registry_list(LOCAL_SCOPE, project_name))
+        resolved, project_name, local_folder = _resolve_scope(LOCAL_SCOPE, thread_id)
+        if resolved == LOCAL_SCOPE and project_name and local_folder:
+            records.extend(
+                registry_list(
+                    LOCAL_SCOPE,
+                    project_name,
+                    base_dir=Path(local_folder) / ".xihe-agent" / "skills",
+                )
+            )
 
     return {
         "count": len(records),

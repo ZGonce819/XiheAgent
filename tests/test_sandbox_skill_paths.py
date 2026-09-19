@@ -37,16 +37,16 @@ def test_sources_with_project_mount_global_then_project_set():
     """属于项目集合时挂两层，且项目集合层排在后面（后写覆盖先写）。"""
     assert sandbox_skill_sources("Xihe") == [
         "/workspace/skills/",
-        "/workspace/skills/.project-set/Xihe/",
+        "/workspace/.project-set/Xihe/",
     ]
 
 
 def test_project_set_root_preserves_case_and_blocks_escape():
     """集合名保留大小写；路径分隔符等危险字符被清洗掉。"""
-    assert sandbox_project_set_root("Xihe") == "/workspace/skills/.project-set/Xihe"
+    assert sandbox_project_set_root("Xihe") == "/workspace/.project-set/Xihe"
     escaped = sandbox_project_set_root("../../etc/passwd")
     assert ".." not in escaped
-    assert escaped.startswith("/workspace/skills/.project-set/")
+    assert escaped.startswith("/workspace/.project-set/")
 
 
 def test_project_set_root_rejects_empty_name():
@@ -62,7 +62,7 @@ def test_roots_always_include_global_even_without_skills():
     assert sandbox_skill_roots(None) == ["/workspace/skills"]
     assert sandbox_skill_roots("Xihe") == [
         "/workspace/skills",
-        "/workspace/skills/.project-set/Xihe",
+        "/workspace/.project-set/Xihe",
     ]
 
 
@@ -93,7 +93,7 @@ def test_documents_append_project_set_layer(skills_root: Path, make_skill):
 
     assert [path for path, _ in documents] == [
         "/workspace/skills/alpha/SKILL.md",
-        "/workspace/skills/.project-set/Xihe/beta/SKILL.md",
+        "/workspace/.project-set/Xihe/beta/SKILL.md",
     ]
 
 

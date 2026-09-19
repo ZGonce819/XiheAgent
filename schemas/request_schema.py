@@ -30,6 +30,7 @@ class DashboardThreadMessageRequest(BaseModel):
     effort: str | None = Field(default=None, description="推理努力程度")
     backend_type: str | None = Field(default=None, description="运行环境：local 或 sandbox")
     project_name: str | None = Field(default=None, description="关联的项目名称")
+    local_work_dir: str | None = Field(default=None, max_length=1000, description="当前对话的本地工作目录")
     edit_message_id: str | None = Field(default=None, description="正在编辑的最近一条用户消息 ID")
     edit_message_content: str | None = Field(default=None, description="待编辑消息的原始文本，用于校验实时消息 ID")
     edit_snapshot: list[dict[str, Any]] | None = Field(default=None, description="编辑前的页面消息快照")
@@ -62,15 +63,26 @@ class DashboardProjectRenameRequest(BaseModel):
 
 
 class DashboardProjectBindFolderRequest(BaseModel):
-    """项目绑定本地文件夹请求体。
+    """创建项目请求体。
 
     Attributes:
         project_name: 项目名称，绑定关系的业务键。
-        local_folder: 本地文件夹绝对路径，作为该项目的项目根。
     """
 
     project_name: str = Field(min_length=1, max_length=256, description="项目名称")
-    local_folder: str = Field(min_length=1, max_length=1000, description="本地文件夹绝对路径")
+    local_folder: str | None = Field(default=None, max_length=1000, description="技能本地作用域使用的文件夹")
+
+
+class DashboardProjectUpdateDisplayNameRequest(BaseModel):
+    """更新项目显示名称请求体。
+
+    Attributes:
+        project_name: 项目名称。
+        display_name: 新的显示名称。
+    """
+
+    project_name: str = Field(min_length=1, max_length=256, description="项目名称")
+    display_name: str = Field(min_length=1, max_length=256, description="项目显示名称")
 
 
 class TaskCreateRequest(BaseModel):
@@ -110,6 +122,7 @@ class DashboardSkillCreateRequest(BaseModel):
     content: str | None = Field(default=None, max_length=512000, description="完整 SKILL.md 文本")
     scope: str = Field(default="global", description="作用域：global / project_set / local")
     project_name: str | None = Field(default=None, max_length=256, description="项目集合名或项目名")
+    local_folder: str | None = Field(default=None, max_length=1024, description="本地作用域的直接文件夹路径（无需项目绑定）")
 
 
 class DashboardSkillUpdateRequest(BaseModel):

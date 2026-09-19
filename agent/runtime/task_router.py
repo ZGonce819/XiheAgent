@@ -14,8 +14,11 @@
 from __future__ import annotations
 
 import logging
+import shlex
+import shutil
 import uuid
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from agent.graph.graph import get_checkpointer, get_store
@@ -64,6 +67,161 @@ TASK_KIND_LABELS = {
 }
 
 
+def _ensure_local_repository(*, thread_id: str, repo: Any) -> Path | None:
+    """准备本地 Git 仓库；远程不可用时返回 ``None`` 并继续任务。"""
+    from agent.runtime._helpers import resolve_project_local_folder
+    from agent.runtime.repo_mapping import save_clone_mapping
+    from backends.local_shell import LocalShellBackend
+    from backends.workspace import Workspace
+    from config.app_config import get_settings
+
+    settings = get_settings()
+    local_folder = resolve_project_local_folder(thread_id)
+    if local_folder:
+        workspace = Workspace(Path(local_folder))
+        backend = LocalShellBackend(
+            workspace,
+            local_folder_mode=True,
+            global_workspace_root=settings.workspace_root,
+        )
+        target = workspace.resolve(".")
+        cwd = "."
+    else:
+        workspace = Workspace(settings.workspace_root)
+        backend = LocalShellBackend(workspace)
+        settings.projects_dir.mkdir(parents=True, exist_ok=True)
+        target = workspace.resolve(Path("projects") / repo.repo)
+        cwd = f"projects/{repo.repo}"
+
+    if (target / ".git").exists():
+        return target
+
+    record_event(thread_id, "workspace", "克隆远程仓库", kind="execute", status="in_progress")
+    if local_folder:
+        # 本地文件夹中已有 .xihe-agent，不能使用要求目标目录为空的 `git clone .`。
+        required = []
+        for command in (
+            "git init",
+            f"git remote add origin {repo.clone_url}",
+            "git fetch origin",
+        ):
+            result = backend.run(command, cwd=cwd, timeout=600)
+            required.append(result)
+            if result.exit_code != 0:
+                break
+        failed = next((result for result in required if result.exit_code != 0), None)
+        if failed is None:
+            head_result = backend.run("git remote set-head origin --auto", cwd=cwd, timeout=60)
+            if head_result.exit_code == 0:
+                symbolic = backend.run(
+                    "git symbolic-ref --short refs/remotes/origin/HEAD",
+                    cwd=cwd,
+                    timeout=60,
+                )
+                remote_branch = symbolic.stdout.strip()
+                if symbolic.exit_code == 0 and remote_branch.startswith("origin/"):
+                    branch = remote_branch.removeprefix("origin/")
+                    checkout = backend.run(
+                        f"git checkout -B {branch} --track {remote_branch}",
+                        cwd=cwd,
+                        timeout=300,
+                    )
+                    failed = checkout if checkout.exit_code != 0 else None
+    else:
+        result = backend.run(
+            f"git clone {repo.clone_url} {repo.repo}", cwd="projects", timeout=600
+        )
+        failed = result if result.exit_code != 0 else None
+
+    if failed is not None or not (target / ".git").exists():
+        detail = mask_token(
+            (failed.stderr or failed.stdout) if failed is not None else "克隆完成后未发现 .git"
+        )
+        # 本地文件夹模式会先执行 git init。后续 fetch 失败时移除本次新建的
+        # 元数据，避免下一轮仅因 .git 存在就误判仓库已经准备完成。
+        if local_folder and (target / ".git").exists():
+            shutil.rmtree(target / ".git", ignore_errors=True)
+        record_event(
+            thread_id,
+            "workspace",
+            "远程仓库不可用，继续无仓库模式",
+            kind="execute",
+            status="completed",
+            detail=detail,
+        )
+        logger.warning(
+            "远程仓库不可用，继续无仓库模式：thread_id=%s detail=%s",
+            thread_id,
+            detail,
+        )
+        return None
+
+    if not local_folder:
+        save_clone_mapping(
+            repo_url=repo.clone_url,
+            project_dir=cwd,
+            local_path=str(target),
+            store=get_store(),
+        )
+    record_event(thread_id, "workspace", "克隆远程仓库", kind="execute", status="completed")
+    return target
+
+
+def _ensure_sandbox_repository(*, thread_id: str, repo: Any) -> str | None:
+    """在远程沙盒中准备仓库；远程不可用时进入无仓库模式。"""
+    from backends.opensandbox import OpenSandboxBackend
+    from server import ensure_backend_for_thread
+
+    backend = ensure_backend_for_thread(thread_id, backend_type="sandbox")
+    if not isinstance(backend, OpenSandboxBackend):
+        raise RuntimeError("沙盒后端不可用，无法准备远程仓库")
+
+    target = f"/workspace/projects/{repo.repo}"
+    quoted_target = shlex.quote(target)
+    if backend.execute(f"test -d {quoted_target}/.git").exit_code == 0:
+        return target
+
+    record_event(thread_id, "workspace", "克隆远程仓库", kind="execute", status="in_progress")
+    prepare = backend.execute("mkdir -p /workspace/projects")
+    if prepare.exit_code != 0:
+        detail = mask_token(prepare.output or "无法创建沙盒项目目录")
+        raise RuntimeError(f"沙盒工作区准备失败：{detail}")
+
+    clone = backend.execute(
+        f"git clone {shlex.quote(repo.clone_url)} {quoted_target}",
+        timeout=600,
+    )
+    verify = backend.execute(f"test -d {quoted_target}/.git")
+    if clone.exit_code != 0 or verify.exit_code != 0:
+        detail = mask_token(clone.output or "克隆完成后未发现 .git")
+        record_event(
+            thread_id,
+            "workspace",
+            "远程仓库不可用，继续无仓库模式",
+            kind="execute",
+            status="completed",
+            detail=detail,
+        )
+        logger.warning(
+            "沙盒远程仓库不可用，继续无仓库模式：thread_id=%s detail=%s",
+            thread_id,
+            detail,
+        )
+        return None
+
+    record_event(thread_id, "workspace", "克隆远程仓库", kind="execute", status="completed")
+    return target
+
+
+def _ensure_repository(
+    *, thread_id: str, repo: Any, backend_type: str
+) -> Path | str | None:
+    """根据运行环境准备仓库，并返回 Agent 可使用的仓库根目录。"""
+    if backend_type == "sandbox":
+        return _ensure_sandbox_repository(thread_id=thread_id, repo=repo)
+    return _ensure_local_repository(thread_id=thread_id, repo=repo)
+
+
 def initialize_task_record(
     *,
     repo_url: str,
@@ -72,6 +230,7 @@ def initialize_task_record(
     record_user_message: bool = True,
     backend_type: str | None = None,
     project_name: str | None = None,
+    local_work_dir: str | None = None,
     source: str | None = None,
 ) -> str:
     """先创建 dashboard 可见的 thread 记录。
@@ -98,6 +257,7 @@ def initialize_task_record(
         latest_run_status="running",
         backend_type=backend_type,
         project_name=project_name,
+        local_work_dir=local_work_dir,
         source=source,
     )
     record_event(thread_id, "created", "任务已创建", status="completed")
@@ -234,16 +394,6 @@ def run_agent_task(
     if backend_type is None:
         from config.app_config import get_settings
         backend_type = "sandbox" if get_settings().use_sandbox else "local"
-    if backend_type != "sandbox":
-        import os
-        from agent.runtime._helpers import resolve_project_local_folder
-        from config.app_config import get_settings
-        _local_folder = resolve_project_local_folder(thread_id)
-        if _local_folder:
-            os.makedirs(_local_folder, exist_ok=True)
-        else:
-            _settings = get_settings()
-            os.makedirs(_settings.projects_dir / repo.repo, exist_ok=True)
     store.upsert_thread(
         thread_id=thread_id,
         title=coding_prompt[:80] or f"{repo.owner}/{repo.repo}",
@@ -256,13 +406,32 @@ def run_agent_task(
         project_name=existing_thread.get("project_name") if existing_thread else None,
     )
     run_id = run_id or str(uuid.uuid4())
+    repository_path = _ensure_repository(
+        thread_id=thread_id,
+        repo=repo,
+        backend_type=backend_type,
+    )
+    repository_available = repository_path is not None
+    repository_agent_path = (
+        str(repository_path) if backend_type == "sandbox" and repository_path else None
+    )
     # 延迟导入，避免 services 包的兼容导出在 runtime 初始化期间形成循环依赖。
     from services.repo_rollback import git_head, git_parent
-    base_commit = git_head(repo.clone_url, store)
+    base_commit = (
+        git_head(repo.clone_url, store)
+        if repository_available and backend_type != "sandbox"
+        else None
+    )
     store.record_run(run_id=run_id, thread_id=thread_id, status="running", base_commit=base_commit)
     logger.info("业务 Store 已记录运行：thread_id=%s run_id=%s", thread_id, run_id)
     record_event(thread_id, "agent", "构建 Agent 运行图", status="in_progress")
-    agent = build_agent_for_runtime(thread_id=thread_id, task_kind=task_kind, repo_url=repo.clone_url, model_id=model_id, backend_type=backend_type)
+    agent = build_agent_for_runtime(
+        thread_id=thread_id,
+        task_kind=task_kind,
+        repo_url=repo.clone_url if repository_available else None,
+        model_id=model_id,
+        backend_type=backend_type,
+    )
     logger.info("Agent 图已构建：thread_id=%s", thread_id)
     record_event(thread_id, "agent", "构建 Agent 运行图", status="completed")
     try:
@@ -279,6 +448,8 @@ def run_agent_task(
                 prompt=coding_prompt,
                 display_prompt=display_prompt,
                 approved_plan=approved_plan_text,
+                repository_available=repository_available,
+                repository_path=repository_agent_path,
             ),
             task_kind=task_kind,
             event_sink=event_sink,
@@ -311,7 +482,11 @@ def run_agent_task(
             }
         store.finish_open_run_events(thread_id, status="completed")
         store.update_thread_status(thread_id, "completed")
-        head_commit = git_head(repo.clone_url, store)
+        head_commit = (
+            git_head(repo.clone_url, store)
+            if repository_available and backend_type != "sandbox"
+            else None
+        )
         # 首次任务可能由 Agent 自己完成 clone，启动前尚无 HEAD。此时第一
         # 个提交的父提交就是可回退的仓库基线。
         if base_commit is None and head_commit:
@@ -489,7 +664,9 @@ def resume_agent_task(
             )
         from services.repo_rollback import git_head
 
-        head_commit = git_head(repo.clone_url, store)
+        head_commit = (
+            git_head(repo.clone_url, store) if backend_type != "sandbox" else None
+        )
         store.record_run(
             run_id=run_id,
             thread_id=thread_id,

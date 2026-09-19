@@ -25,6 +25,7 @@ export interface ThreadCreateRequest {
   effort?: string | null
   backend_type?: string | null
   project_name?: string | null
+  local_work_dir?: string | null
 }
 
 export interface ThreadMessageRequest {
@@ -35,6 +36,7 @@ export interface ThreadMessageRequest {
   effort?: string | null
   backend_type?: string | null
   project_name?: string | null
+  local_work_dir?: string | null
   edit_message_id?: string | null
   edit_message_content?: string | null
   edit_snapshot?: Array<Message>

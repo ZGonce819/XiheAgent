@@ -186,8 +186,17 @@ def _apply_pending_skill_refresh(thread_id: str, backend: BaseSandbox) -> None:
             return
         written = sync_sandbox_skills(backend, resolve_thread_project_name(thread_id))
         logger.info("补同步技能到沙箱：thread_id=%s files=%d", thread_id, written)
-    except Exception:
-        logger.warning("补同步技能到沙箱失败：thread_id=%s", thread_id, exc_info=True)
+    except Exception as exc:
+        # 沙箱已被回收，缓存失效——清除 _BACKENDS 中的幽灵条目。
+        if "SANDBOX_NOT_FOUND" in str(exc):
+            _BACKENDS.pop(thread_id, None)
+            try:
+                backend.destroy()
+            except Exception:
+                pass
+            logger.info("补同步时发现沙箱已失效，清除缓存：thread_id=%s", thread_id)
+        else:
+            logger.warning("补同步技能到沙箱失败：thread_id=%s", thread_id, exc_info=True)
 
 
 def _resolve_skill_sources(thread_id: str, backend_type: str | None) -> list[str]:
@@ -213,9 +222,9 @@ def _resolve_skill_sources(thread_id: str, backend_type: str | None) -> list[str
         技能源路径列表。本地环境形如
         ``["/skills-global/", "/skills-set/", "/skills/"]``；
         沙箱环境形如
-        ``["/workspace/skills/", "/workspace/skills/.project-set/Xihe/"]``。
+        ``["/workspace/skills/", "/workspace/.project-set/Xihe/"]``。
     """
-    from agent.runtime._helpers import resolve_thread_project_name
+    from agent.runtime._helpers import resolve_project_local_folder, resolve_thread_project_name
     from services.skill_registry import agent_skill_sources, sandbox_skill_sources
 
     project_name = resolve_thread_project_name(thread_id)
@@ -223,7 +232,10 @@ def _resolve_skill_sources(thread_id: str, backend_type: str | None) -> list[str
     if backend_type == "sandbox":
         return sandbox_skill_sources(project_name)
 
-    sources = agent_skill_sources(project_name)
+    sources = agent_skill_sources(
+        project_name,
+        has_local_folder=bool(resolve_project_local_folder(thread_id)),
+    )
     return sources or []
 
 
@@ -390,12 +402,16 @@ def _prepare_repo_backend_context(
 
     repo = parse_repo_url(repo_url)
     langgraph_store = get_langgraph_store()
+    from backends.opensandbox import OpenSandboxBackend
+
+    sandbox_mode = isinstance(backend, OpenSandboxBackend)
     local_folder_mode = bool(getattr(backend, "local_folder_mode", False))
     project_dir = repo_project_dir(repo, local_folder_mode=local_folder_mode)
     ensure_repo_memory_initialized(
         store=langgraph_store,
         repo=repo,
         project_dir=project_dir,
+        sandbox_mode=sandbox_mode,
     )
 
     memory_path = repo_memory_virtual_path(repo.owner, repo.repo)

@@ -937,25 +937,28 @@ def test_a_rejection_is_explained_to_the_model(monkeypatch: pytest.MonkeyPatch) 
     assert "用户拒绝" not in message
 
 
-def test_a_vote_that_cannot_decide_hands_the_round_back_to_the_human(
+def test_a_vote_that_cannot_decide_is_safely_rejected_without_human_approval(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """表决没能得出结论时，这一轮仍然停下等人工，并且要说清为什么。"""
+    """表决没结论时按安全拒绝恢复，不能违背全流程自动化语义去等人。"""
     _stub_vote(monkeypatch, ["undecided"])
 
     result, traces = _run_approval_round(
-        monkeypatch, auto_approve=True, statuses=["awaiting_approval"]
+        monkeypatch, auto_approve=True, statuses=["awaiting_approval", "completed"]
     )
 
-    assert result.waiting_approval is True
-    # 没能得出结论就**不能**恢复会话 —— 那不是否决，模型不该据此改东西。
-    assert traces["resume"] == []
-    assert "没能得出结论" in result.summary
-    assert "表决结论：undecided" in result.summary
+    assert result.outcome == "succeeded"
+    assert result.waiting_approval is False
+    decision, message = traces["resume"][0]
+    assert decision == "reject"
+    assert "按安全策略拒绝" in message
+    assert "表决结论：undecided" in message
 
 
-def test_the_round_stops_after_the_vote_cap(monkeypatch: pytest.MonkeyPatch) -> None:
-    """用满表决次数还在撞审批就停手，退回等人工。"""
+def test_the_round_fails_after_the_vote_cap_without_waiting_for_a_human(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """用满表决次数仍撞审批就明确失败，不能留下人工审批。"""
     from services.automation_loop import MAX_APPROVAL_VOTES_PER_ROUND
 
     calls = _stub_vote(monkeypatch, ["approve"])
@@ -965,19 +968,16 @@ def test_the_round_stops_after_the_vote_cap(monkeypatch: pytest.MonkeyPatch) -> 
     )
 
     assert len(calls) == MAX_APPROVAL_VOTES_PER_ROUND
-    assert result.waiting_approval is True
+    assert result.outcome == "failed"
+    assert result.waiting_approval is False
     assert len(result.approval_votes) == MAX_APPROVAL_VOTES_PER_ROUND
-    assert "还在撞审批" in result.summary
+    assert "仍反复触发审批" in result.summary
 
 
-def test_a_failing_resume_hands_the_round_back_to_the_human(
+def test_a_failing_resume_fails_the_round_without_human_approval(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """表决之后的恢复失败时，这一轮记成等人工而不是把异常抛出去。
-
-    待审批记录还在，人还能接手；把异常抛出去会让这一轮变成失败，还会顶掉
-    「其实是卡在审批上」这个真正的原因。
-    """
+    """恢复基础设施失败时本轮失败，并且不能留下待人工处理的审批。"""
     _stub_vote(monkeypatch, ["approve"])
 
     result, _traces = _run_approval_round(
@@ -987,7 +987,8 @@ def test_a_failing_resume_hands_the_round_back_to_the_human(
         resume_error=RuntimeError("checkpoint 读不到"),
     )
 
-    assert result.waiting_approval is True
+    assert result.outcome == "failed"
+    assert result.waiting_approval is False
     assert "checkpoint 读不到" in result.summary
 
 

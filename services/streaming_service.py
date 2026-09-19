@@ -76,6 +76,7 @@ def build_streaming_response(
     approval_decision: str | None = None,
     approval_id: str | None = None,
     project_name: str | None = None,
+    local_work_dir: str | None = None,
 ) -> StreamingResponse:
     """构造 POST SSE 流式响应。
 
@@ -120,7 +121,14 @@ def build_streaming_response(
                 raise RuntimeError("无法清理首轮 checkpoint，已拒绝回退") from exc
 
     if approval_decision is None:
-        initialize_task_record(repo_url=repo_url, prompt=content, thread_id=thread_id, backend_type=backend_type, project_name=project_name)
+        initialize_task_record(
+            repo_url=repo_url,
+            prompt=content,
+            thread_id=thread_id,
+            backend_type=backend_type,
+            project_name=project_name,
+            local_work_dir=local_work_dir,
+        )
     initial_task = get_task(thread_id)
     if initial_task is None:
         from fastapi import HTTPException

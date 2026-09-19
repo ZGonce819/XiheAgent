@@ -646,9 +646,9 @@ export function AgentThreadView({ user, thread }: AgentThreadViewProps) {
         open={skillPanelOpen}
         projectName={thread.projectName ?? null}
         backendType={thread.backendType}
+        localFolder={thread.localFolderMode ? thread.localWorkDirFull : null}
         onOpenChange={setSkillPanelOpen}
       />
     </AgentsShell>
   );
 }
-

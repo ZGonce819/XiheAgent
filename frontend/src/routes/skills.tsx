@@ -187,7 +187,7 @@ function SkillsDirectory() {
           projectName
             ? `全局技能跨项目共享；项目与本地技能仅在「${projectName}」内生效，同名时逐层覆盖。`
             : projectNames.length > 0
-              ? "全局技能跨项目共享；在右上角选择项目，即可启用项目与本地作用域。"
+              ? "当前展示所有项目的技能，在右上角选择项目可聚焦到该项目的全局、项目与本地技能。"
               : "暂无可用项目。创建带项目的对话后，这里就能选择项目作用域。"
         }
         action={
@@ -358,7 +358,6 @@ function SkillsDirectory() {
 
       <SkillFormDialog
         open={formOpen}
-        projectName={projectName}
         projectNames={projectNames}
         boundFolders={boundFolders}
         onOpenChange={setFormOpen}
@@ -389,14 +388,12 @@ function SkillsDirectory() {
 
 function SkillFormDialog({
   open,
-  projectName,
   projectNames,
   boundFolders,
   onOpenChange,
   onDone,
 }: {
   open: boolean
-  projectName: string | null
   /** 可选的项目名列表，供「项目」作用域选择归属。 */
   projectNames: Array<string>
   /** 已绑定本地文件夹的项目，用于预填「本地」作用域的目录。 */
@@ -413,11 +410,11 @@ function SkillFormDialog({
   /**
    * 「项目」作用域的归属项目。
    *
-   * 与顶部项目选择器（`projectName`）分开：顶部那个决定「列出哪些项目的技能」，
-   * 这里决定「这个新技能存到哪个项目」。默认跟随顶部选择，用户可单独改。
+   * 与顶部项目选择器完全独立：顶部那个决定「列出哪些项目的技能」，
+   * 这里决定「这个新技能存到哪个项目」。
    */
   const [targetProject, setTargetProject] = useState<string>(
-    projectName ?? projectNames[0] ?? ""
+    projectNames[0] ?? ""
   )
   /**
    * 「本地」作用域的目标文件夹。
@@ -427,7 +424,7 @@ function SkillFormDialog({
    * 所以这里选中的文件夹会在提交前先绑定到 `targetProject`，再以 `local` 作用域创建。
    */
   const [localFolder, setLocalFolder] = useState(
-    () => boundFolders.get(projectName ?? projectNames[0] ?? "") ?? ""
+    () => boundFolders.get(projectNames[0] ?? "") ?? ""
   )
   const [picking, setPicking] = useState(false)
   const [overwrite, setOverwrite] = useState(false)
@@ -447,9 +444,9 @@ function SkillFormDialog({
     setMode("paste")
     setScope("global")
     setLocalFolder(
-      boundFolders.get(projectName ?? projectNames[0] ?? "") ?? ""
+      boundFolders.get(projectNames[0] ?? "") ?? ""
     )
-    setTargetProject(projectName ?? projectNames[0] ?? "")
+    setTargetProject(projectNames[0] ?? "")
   }
 
   /** 切换归属项目时，若它已绑定文件夹就预填，避免用户误以为没绑定。 */
@@ -483,13 +480,17 @@ function SkillFormDialog({
   }
 
   /** 按当前模式真正写入技能；`projectArg` 为 `null` 表示全局作用域。 */
-  const createOrUpload = async (projectArg: string | null): Promise<string> => {
+  const createOrUpload = async (
+    projectArg: string | null,
+    localFolderArg?: string | null
+  ): Promise<string> => {
     if (mode === "upload") {
       if (!file) throw new Error("请先选择 SKILL.md 或 ZIP 技能包")
       const result = await api.uploadSkill(file, {
         scope,
         projectName: projectArg,
         overwrite,
+        localFolder: localFolderArg,
       })
       const [firstFailed] = result.failed
       const failedNote = firstFailed
@@ -503,6 +504,7 @@ function SkillFormDialog({
       body,
       scope,
       project_name: projectArg,
+      local_folder: localFolderArg,
     })
     return `已创建技能「${name}」，下次构建智能体时生效`
   }
@@ -514,21 +516,17 @@ function SkillFormDialog({
       }
 
       if (scope === "local") {
-        // 「本地」在界面上是文件夹驱动的：用户只选文件夹，不需要再指定归属项目。
-        // 但后端是按项目名反查绑定文件夹来定位本地技能目录的，因此这里隐式使用
-        // 顶部当前项目作为载体——用户选中的文件夹会被绑定到它。
-        const project = (projectName ?? "").trim()
-        if (!project) {
-          throw new Error(
-            "本地技能需要先在顶部选择一个项目，用来承载这份文件夹绑定。"
-          )
-        }
         const folder = localFolder.trim()
         if (!folder) throw new Error("请先选择本地文件夹")
         if (!folderValidation.valid) throw new Error(folderValidation.error)
-        await api.bindProjectFolder({ project_name: project, local_folder: folder })
-        await queryClient.invalidateQueries({ queryKey: ["workspace-projects"] })
-        return createOrUpload(project)
+
+        const project = targetProject.trim()
+        if (project) {
+          await api.bindProjectFolder({ project_name: project, local_folder: folder })
+          await queryClient.invalidateQueries({ queryKey: ["workspace-projects"] })
+          return createOrUpload(project)
+        }
+        return createOrUpload(null, folder)
       }
 
       const project = targetProject.trim()
@@ -714,11 +712,6 @@ function SkillFormDialog({
                 技能直接写入所选文件夹，建议选择项目根目录——它会存放到项目根目录下的{" "}
                 <code className="font-mono">/.xihe-agent/skills</code>。
               </p>
-              {!projectName && (
-                <p className="text-[0.625rem] text-muted-foreground">
-                  本地技能需要一个项目来承载文件夹绑定，请先在页面顶部选择项目。
-                </p>
-              )}
               {localFolder.trim() && !folderValidation.valid && (
                 <p className="text-[0.625rem] text-destructive">
                   {folderValidation.error}
@@ -817,10 +810,9 @@ function SkillFormDialog({
                 : !name.trim() || !description.trim() || !body.trim()) ||
               // 非全局作用域必须能定位到存放目录，否则提交一定失败
               (effectiveScope === "project_set" && !targetProject.trim()) ||
-              // 本地作用域的载体是顶部当前项目，再加所选文件夹
+              // 本地作用域只需要选定文件夹且路径合法
               (effectiveScope === "local" &&
-                (!projectName ||
-                  !localFolder.trim() ||
+                (!localFolder.trim() ||
                   !folderValidation.valid))
             }
             onClick={() => submitMutation.mutate()}

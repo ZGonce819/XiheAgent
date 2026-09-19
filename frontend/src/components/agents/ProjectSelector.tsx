@@ -19,7 +19,7 @@ export interface ProjectSelectorProps {
   /** 当前选中的项目名称 */
   selectedProject?: string | null
   /** 选中项目回调 */
-  onProjectChange?: (project: string | null) => void
+  onProjectChange?: (project: string | null, localWorkDir?: string | null) => void
   /** 当前环境类型：sandbox 时隐藏本地相关选项 */
   backendType?: string
   className?: string
@@ -42,10 +42,6 @@ export function ProjectSelector({
   const [picking, setPicking] = useState(false)
   const [saving, setSaving] = useState(false)
   const [bindError, setBindError] = useState<string | null>(null)
-  // 已创建的项目名：非空时顶部按钮变为项目行样式，再次点击可编辑
-  // 从侧边栏「+」进入时，用 selectedProject 初始化，使顶部按钮显示项目名称（和手动创建后一致）
-  const [createdProject, setCreatedProject] = useState<string | null>(selectedProject ?? null)
-
   // 路径验证（实时）
   const folderValidation = useMemo(
     () => (localFolderPath.trim() ? validatePath(localFolderPath) : { valid: true, error: "", platform: "unknown" as const }),
@@ -72,9 +68,9 @@ export function ProjectSelector({
   }, [])
 
   const handleSelectProject = useCallback(
-    (name: string) => {
+    (name: string, localWorkDir: string | null = null) => {
       setOpen(false)
-      onProjectChange?.(name)
+      onProjectChange?.(name, localWorkDir)
     },
     [onProjectChange]
   )
@@ -107,17 +103,10 @@ export function ProjectSelector({
     setBindError(null)
     try {
       const folder = localFolderPath.trim()
-      const existing = (projects.data?.projects ?? []).find((p) => p.name === name)
-      if (folder) {
-        await api.bindProjectFolder({ project_name: name, local_folder: folder })
-      } else if (existing?.local_folder) {
-        // 编辑时清空了文件夹：解除原有绑定，回退到全局工作区
-        await api.unbindProjectFolder(name)
-      }
+      await api.bindProjectFolder({ project_name: name })
       await queryClient.invalidateQueries({ queryKey: ["workspace-projects"] })
       setCreateDialogOpen(false)
-      setCreatedProject(name)
-      onProjectChange?.(name)
+      onProjectChange?.(name, folder || null)
     } catch (err) {
       setBindError(err instanceof Error ? err.message : "绑定本地文件夹失败")
     } finally {
@@ -128,26 +117,21 @@ export function ProjectSelector({
     localFolderPath,
     folderValidation.valid,
     onProjectChange,
-    projects.data,
     queryClient,
   ])
 
   const handleOpenCreate = useCallback(() => {
     setOpen(false)
     setBindError(null)
-    if (createdProject) {
-      // 编辑模式：用已保存的绑定预填表单
-      const existing = (projects.data?.projects ?? []).find(
-        (p) => p.name === createdProject
-      )
-      setNewProjectName(createdProject)
-      setLocalFolderPath(existing?.local_folder ?? "")
-    }
+    setNewProjectName("")
+    setLocalFolderPath("")
     setCreateDialogOpen(true)
-  }, [createdProject, projects.data])
+  }, [])
 
-  const projectList = projects.data?.projects ?? []
   const isSandbox = backendType === "sandbox"
+
+  const createdProjects = projects.data?.created_projects ?? []
+  const workspaceProjects = projects.data?.workspace_projects ?? []
 
   return (
     <>
@@ -171,68 +155,81 @@ export function ProjectSelector({
 
         {open && (
           <div className="absolute left-0 top-full z-50 mt-1 min-w-[200px] origin-top-left animate-in fade-in-0 zoom-in-95 slide-in-from-top-1 duration-150 ease-out overflow-hidden rounded-md border border-[var(--ui-border)] bg-[var(--ui-surface)] shadow-lg">
-            {/* 创建操作：已创建项目后显示为项目行，再次点击可编辑 */}
+            {/* 创建入口始终保留，方便连续创建多个项目。 */}
             <div className="border-b border-[var(--ui-border)] p-1">
-              {createdProject ? (
-                <button
-                  type="button"
-                  onClick={handleOpenCreate}
-                  title="点击编辑项目"
-                  className="flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-left text-xs text-[color:var(--ui-text-muted)] transition-colors hover:bg-[var(--ui-panel-2)]"
-                >
-                  <FolderOpen className="size-3 shrink-0 text-[color:var(--ui-text-dim)]" />
-                  <span className="flex-1 truncate">{createdProject}</span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleOpenCreate}
-                  className="flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-left text-xs text-[color:var(--ui-text)] transition-colors hover:bg-[var(--ui-panel-2)]"
-                >
-                  <Plus className="size-3.5 text-[color:var(--ui-accent)]" />
-                  <span>创建新项目</span>
-                </button>
+              <button
+                type="button"
+                onClick={handleOpenCreate}
+                className="flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-left text-xs text-[color:var(--ui-text)] transition-colors hover:bg-[var(--ui-panel-2)]"
+              >
+                <Plus className="size-3.5 text-[color:var(--ui-accent)]" />
+                <span>创建新项目</span>
+              </button>
+            </div>
+
+            <div className="max-h-[260px] overflow-y-auto">
+              {/* 已创建项目：项目名是唯一展示名称。 */}
+              {createdProjects.length > 0 && (
+                <div className="p-1">
+                  {createdProjects.map((item: ProjectItem, index: number) => (
+                    <button
+                      key={`created:${item.name}`}
+                      type="button"
+                      onClick={() => handleSelectProject(item.name)}
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-[var(--ui-panel-2)] animate-in fade-in-0 slide-in-from-left-1",
+                        selectedProject === item.name
+                          ? "text-[color:var(--ui-text)] bg-[var(--ui-panel-2)]/50"
+                          : "text-[color:var(--ui-text-muted)]"
+                      )}
+                      style={{ animationDelay: `${Math.min(index * 30, 150)}ms` }}
+                    >
+                      <FolderOpen className="size-3 shrink-0 text-[color:var(--ui-text-dim)]" />
+                      <span className="min-w-0 flex-1 truncate">{item.name}</span>
+                      {selectedProject === item.name && (
+                        <span className="text-[color:var(--ui-text-dim)]">✓</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* 工作目录项目：与已创建项目视觉分组，并展示完整文件夹地址。 */}
+              {workspaceProjects.length > 0 && (
+                <div className="border-t border-[var(--ui-border)] p-1 pt-1.5">
+                  {workspaceProjects.map((item: ProjectItem) => (
+                    <button
+                      key={`workspace:${item.path}`}
+                      type="button"
+                      onClick={() => handleSelectProject(item.name, item.path)}
+                      className={cn(
+                        "flex w-full items-start gap-2 rounded-sm px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-[var(--ui-panel-2)]",
+                        selectedProject === item.name
+                          ? "bg-[var(--ui-panel-2)]/50 text-[color:var(--ui-text)]"
+                          : "text-[color:var(--ui-text-muted)]"
+                      )}
+                    >
+                      <Folder className="mt-0.5 size-3 shrink-0 text-[color:var(--ui-text-dim)]" />
+                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <span className="truncate">{item.name}</span>
+                        <span
+                          className="truncate text-[0.65rem] text-[color:var(--ui-text-dim)]"
+                          title={item.path}
+                        >
+                          {item.path}
+                        </span>
+                      </span>
+                      {selectedProject === item.name && (
+                        <span className="text-[color:var(--ui-text-dim)]">✓</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
 
-            {/* 项目列表 */}
-            {projectList.length > 0 && (
-              <div className="max-h-[200px] overflow-y-auto p-1">
-                {projectList.map((item: ProjectItem, index: number) => (
-                  <button
-                    key={item.path}
-                    type="button"
-                    onClick={() => handleSelectProject(item.name)}
-                    className={cn(
-                      "flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-[var(--ui-panel-2)] animate-in fade-in-0 slide-in-from-left-1",
-                      selectedProject === item.name
-                        ? "text-[color:var(--ui-text)] bg-[var(--ui-panel-2)]/50"
-                        : "text-[color:var(--ui-text-muted)]"
-                    )}
-                    style={{ animationDelay: `${Math.min(index * 30, 150)}ms` }}
-                  >
-                    <FolderOpen className="size-3 shrink-0 text-[color:var(--ui-text-dim)]" />
-                    <span className="flex min-w-0 flex-1 flex-col">
-                      <span className="truncate">{item.name}</span>
-                      {item.local_folder && (
-                        <span
-                          className="truncate text-[0.65rem] text-[color:var(--ui-text-dim)]"
-                          title={item.local_folder}
-                        >
-                          {item.local_folder}
-                        </span>
-                      )}
-                    </span>
-                    {selectedProject === item.name && (
-                      <span className="text-[color:var(--ui-text-dim)]">✓</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-
             {/* 空状态 */}
-            {projectList.length === 0 && !projects.isLoading && (
+            {createdProjects.length === 0 && workspaceProjects.length === 0 && !projects.isLoading && (
               <div className="px-3 py-4 text-center text-xs text-[color:var(--ui-text-dim)]">
                 暂无项目，点击上方按钮创建
               </div>
@@ -256,7 +253,7 @@ export function ProjectSelector({
             {/* 标题栏 */}
             <div className="flex items-center justify-between border-b border-border px-5 py-4">
               <Dialog.Title className="text-sm font-semibold text-foreground">
-                {createdProject ? "编辑项目" : "创建新项目"}
+                创建新项目
               </Dialog.Title>
               <Dialog.Close className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
                 <X className="size-4" />
@@ -282,7 +279,7 @@ export function ProjectSelector({
               {!isSandbox && (
                 <div className="space-y-1.5 animate-in fade-in-0 slide-in-from-top-2 duration-200">
                   <label className="text-xs font-medium text-foreground">
-                    添加本地文件夹
+                    本地文件夹（可选）
                   </label>
                   <div className="flex items-center gap-2">
                     <Input
@@ -311,6 +308,9 @@ export function ProjectSelector({
                       {folderValidation.error}
                     </p>
                   )}
+                  <p className="text-[0.65rem] text-[color:var(--ui-text-dim)]">
+                    仅用于即将创建的当前对话，不会影响该项目下的其他对话。
+                  </p>
                 </div>
               )}
             </div>
@@ -337,7 +337,7 @@ export function ProjectSelector({
                 }
                 onClick={handleCreateConfirm}
               >
-                {saving ? "保存中…" : createdProject ? "保存" : "创建"}
+                {saving ? "创建中…" : "创建"}
               </Button>
             </div>
           </Dialog.Popup>

@@ -66,6 +66,7 @@ from schemas.request_schema import (
     DashboardEditPreviewRequest,
     DashboardProjectBindFolderRequest,
     DashboardProjectRenameRequest,
+    DashboardProjectUpdateDisplayNameRequest,
     DashboardSkillCreateRequest,
     DashboardSkillUpdateRequest,
     DashboardThreadMessageRequest,
@@ -710,7 +711,7 @@ def dashboard_run_schedule(
 
 
 def _skill_scope_context(
-    scope: str, project_name: str | None
+    scope: str, project_name: str | None, local_folder: str | None = None
 ) -> tuple[str, str | None]:
     """规范化技能作用域参数并做可用性校验。
 
@@ -718,9 +719,13 @@ def _skill_scope_context(
     技能目录下，只要有项目名即可；``local`` 要求项目已绑定本地文件夹，否则
     落点不存在，写入会失败。
 
+    当 ``local_folder`` 直接提供时，``local`` 作用域不再强制要求项目绑定——
+    调用方会直接用该路径拼接落点。
+
     Args:
         scope: 前端传入的作用域标识。
         project_name: 项目名。
+        local_folder: 本地作用域的直接文件夹路径（可绕过项目绑定）。
 
     Returns:
         规范化后的 ``(scope, project_name)``。
@@ -731,7 +736,6 @@ def _skill_scope_context(
     from services.skill_registry import (
         GLOBAL_SCOPE,
         LOCAL_SCOPE,
-        PROJECT_SET_SCOPE,
         SkillValidationError,
         normalize_scope,
         resolve_project_folder,
@@ -746,15 +750,26 @@ def _skill_scope_context(
         return normalized, None
 
     name = (project_name or "").strip()
+    if normalized == LOCAL_SCOPE:
+        direct_folder = (local_folder or "").strip()
+        if direct_folder:
+            return normalized, name or None
+        if name:
+            if resolve_project_folder(name) is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"项目「{name}」尚未绑定本地文件夹，无法使用本地技能",
+                )
+            return normalized, name
+        raise HTTPException(
+            status_code=400,
+            detail="本地技能需要指定项目名或直接提供文件夹路径",
+        )
+
     if not name:
         raise HTTPException(
             status_code=400,
             detail=f"{SCOPE_LABELS_CN.get(normalized, normalized)}技能必须指定项目名",
-        )
-    if normalized == LOCAL_SCOPE and resolve_project_folder(name) is None:
-        raise HTTPException(
-            status_code=400,
-            detail=f"项目「{name}」尚未绑定本地文件夹，无法使用本地技能",
         )
     return normalized, name
 
@@ -797,7 +812,10 @@ def _refresh_sandbox_skills(scope: str, project_name: str | None) -> None:
 
 @dashboard_router.get("/skills")
 def dashboard_skills(
-    project_name: str | None = None, backend_type: str | None = None
+    project_name: str | None = None,
+    backend_type: str | None = None,
+    local_folder: str | None = None,
+    session_scoped: bool = False,
 ) -> dict[str, Any]:
     """列出可见的 DeepAgents 技能，并标注作用域与来源。
 
@@ -812,6 +830,10 @@ def dashboard_skills(
         project_name: 可选的项目名，提供时会一并列出该项目的项目集合技能与
             本地技能。
         backend_type: 可选的会话运行环境，``"sandbox"`` 时隐藏本地层。
+        local_folder: 当前会话实际使用的本地工作目录。提供后，本地技能只从
+            这个目录读取，不再按项目名反查历史绑定。
+        session_scoped: 是否来自会话内技能面板。为真时即使没有本地目录，也不
+            回退到项目的历史文件夹绑定。
 
     Returns:
         包含 ``items``、``scopes``、``virtualRoot`` 与 ``available`` 的字典。
@@ -833,14 +855,45 @@ def dashboard_skills(
         skill_items.append(record.to_payload())
 
     has_project = bool(project_name and project_name.strip())
-    project_dir = resolve_project_folder(project_name) if has_project else None
+    direct_local_folder = (local_folder or "").strip()
+    project_dir = (
+        Path(direct_local_folder).expanduser().resolve()
+        if direct_local_folder
+        else (
+            None
+            if session_scoped
+            else (resolve_project_folder(project_name) if has_project else None)
+        )
+    )
+    if project_dir is not None and not project_dir.is_dir():
+        project_dir = None
     local_available = project_dir is not None and not sandbox_session
     if has_project:
         for record in list_skills(PROJECT_SET_SCOPE, project_name):
             skill_items.append(record.to_payload())
         if local_available:
-            for record in list_skills(LOCAL_SCOPE, project_name):
+            for record in list_skills(
+                LOCAL_SCOPE,
+                project_name,
+                base_dir=project_dir / ".xihe-agent" / "skills",
+            ):
                 skill_items.append(record.to_payload())
+    else:
+        from services.skill_registry import list_project_sets
+
+        for set_name in list_project_sets():
+            for record in list_skills(PROJECT_SET_SCOPE, set_name):
+                skill_items.append(record.to_payload())
+        try:
+            from agent.graph.graph import get_store
+
+            for binding in get_store().list_project_folders():
+                bound_project = binding.get("project_name")
+                if bound_project:
+                    for record in list_skills(LOCAL_SCOPE, bound_project):
+                        skill_items.append(record.to_payload())
+        except Exception:
+            pass
 
     scopes = [
         {
@@ -852,21 +905,33 @@ def dashboard_skills(
             "available": True,
         }
     ]
-    # 三个作用域始终全部返回：未指定项目时「项目」「本地」标为不可用而不是不返回。
-    # 前端据此把三张卡片和筛选选项稳定地摆出来，避免列表随选择变化而跳一下。
+    # 三个作用域始终全部返回。
+    # 指定项目时：项目/本地作用域聚焦到该项目；未指定时：展示全局汇总视图，
+    # 项目集合始终可用，本地作用域在有任意项目绑定文件夹时可用。
     try:
         set_directory = str(project_set_dir(project_name)) if has_project else None
     except Exception:
         set_directory = None
+    any_local_bound = False
+    if not has_project:
+        try:
+            from agent.graph.graph import get_store
+
+            any_local_bound = len(get_store().list_project_folders()) > 0
+        except Exception:
+            pass
     scopes.append(
         {
             "scope": PROJECT_SET_SCOPE,
             "label": "项目",
-            "description": "仅该项目可见，同名时覆盖全局技能。",
+            "description": (
+                "仅该项目可见，同名时覆盖全局技能。"
+                if has_project
+                else "汇总所有项目集合的技能，选择项目可聚焦查看。"
+            ),
             "projectName": project_name if has_project else None,
-            # 项目集合落在全局技能目录下，只要有项目名就可用。
             "directory": set_directory,
-            "available": has_project,
+            "available": True,
         }
     )
     scopes.append(
@@ -876,19 +941,28 @@ def dashboard_skills(
             "description": (
                 "沙箱会话没有项目本地文件夹，该层不参与加载。"
                 if sandbox_session
-                else "仅该项目可见，存放在项目文件夹内，同名时覆盖项目技能。"
+                else (
+                    "仅该项目可见，存放在项目文件夹内，同名时覆盖项目技能。"
+                    if has_project
+                    else "汇总所有已绑定文件夹项目的本地技能。"
+                )
             ),
             "projectName": project_name if has_project else None,
             "directory": (
                 str(project_dir / ".xihe-agent" / "skills") if project_dir else None
             ),
-            "available": local_available,
+            "available": (local_available or any_local_bound) and not sandbox_session,
         }
     )
 
     available_scopes = [
         scope
-        for scope in writable_scopes(project_name)
+        for scope in writable_scopes(
+            project_name,
+            has_local_folder=(
+                local_available if direct_local_folder or session_scoped else None
+            ),
+        )
         if not (sandbox_session and scope == LOCAL_SCOPE)
     ]
 
@@ -960,7 +1034,9 @@ def dashboard_create_skill(body: DashboardSkillCreateRequest) -> dict[str, Any]:
         scope_dir,
     )
 
-    scope, project_name = _skill_scope_context(body.scope, body.project_name)
+    scope, project_name = _skill_scope_context(
+        body.scope, body.project_name, body.local_folder
+    )
 
     content = (body.content or "").strip()
     if content:
@@ -979,7 +1055,12 @@ def dashboard_create_skill(body: DashboardSkillCreateRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="技能说明不能为空")
 
     try:
-        base_dir = scope_dir(scope, project_name)
+        direct_base: Path | None = None
+        if scope == "local" and (body.local_folder or "").strip():
+            direct_base = Path(body.local_folder.strip()) / ".xihe-agent" / "skills"
+            base_dir = direct_base
+        else:
+            base_dir = scope_dir(scope, project_name)
         if markup:
             # 从完整文档中剥离 frontmatter，正文交由 registry 重新组装，
             # 避免出现两段 frontmatter。
@@ -997,6 +1078,7 @@ def dashboard_create_skill(body: DashboardSkillCreateRequest) -> dict[str, Any]:
                 origin="user",
                 overwrite=False,
                 directory_name=document_name,
+                base_dir=direct_base,
             )
         else:
             record = create_skill(
@@ -1007,6 +1089,7 @@ def dashboard_create_skill(body: DashboardSkillCreateRequest) -> dict[str, Any]:
                 project_name=project_name,
                 origin="user",
                 overwrite=False,
+                base_dir=direct_base,
             )
     except SkillValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1110,6 +1193,7 @@ def dashboard_upload_skill(
     project_name: str | None = Form(None, description="项目集合名或项目名"),
     name: str | None = Form(None, description="技能名，仅在单文件上传且缺少 frontmatter 时使用"),
     overwrite: bool = Form(False, description="同名技能已存在时是否覆盖"),
+    local_folder: str | None = Form(None, description="本地作用域的直接文件夹路径（无需项目绑定）"),
 ) -> dict[str, Any]:
     """通过上传 ZIP 包或单个 SKILL.md 创建技能。
 
@@ -1147,8 +1231,13 @@ def dashboard_upload_skill(
         validate_skill_content,
     )
 
-    normalized, project = _skill_scope_context(scope, project_name)
-    base_dir = scope_dir(normalized, project)
+    normalized, project = _skill_scope_context(scope, project_name, local_folder)
+    direct_base: Path | None = None
+    if normalized == "local" and (local_folder or "").strip():
+        direct_base = Path(local_folder.strip()) / ".xihe-agent" / "skills"
+        base_dir = direct_base
+    else:
+        base_dir = scope_dir(normalized, project)
     filename = (file.filename or "").strip().lower()
 
     # 上传体积上限：ZIP 与单文件共用同一个总大小约束。
@@ -1193,6 +1282,7 @@ def dashboard_upload_skill(
             extra_files=attachments or {},
             overwrite=overwrite,
             directory_name=final_name,
+            base_dir=direct_base,
         )
         created.append(record.to_payload())
 
@@ -1486,8 +1576,27 @@ async def dashboard_stream_new_message(body: DashboardThreadMessageRequest) -> S
     requested_backend = body.backend_type or ("sandbox" if get_settings().use_sandbox else "local")
     if requested_backend == "sandbox" and not get_settings().use_sandbox:
         raise HTTPException(status_code=400, detail="您未开启沙盒配置，请开启后再尝试")
+    local_work_dir: str | None = None
+    if body.local_work_dir and body.local_work_dir.strip():
+        if requested_backend != "local":
+            raise HTTPException(status_code=400, detail="沙箱对话不能使用本机工作目录")
+        work_dir = Path(body.local_work_dir.strip()).resolve()
+        if not work_dir.exists() or not work_dir.is_dir():
+            raise HTTPException(
+                status_code=400,
+                detail=f"当前对话的工作目录不存在或不是文件夹：{work_dir}",
+            )
+        local_work_dir = str(work_dir)
     thread_id = str(uuid.uuid4())
-    return build_streaming_response(thread_id=thread_id, repo_url=repo_url, content=body.content, model_id=body.model_id, backend_type=requested_backend, project_name=body.project_name)
+    return build_streaming_response(
+        thread_id=thread_id,
+        repo_url=repo_url,
+        content=body.content,
+        model_id=body.model_id,
+        backend_type=requested_backend,
+        project_name=body.project_name,
+        local_work_dir=local_work_dir,
+    )
 
 
 @dashboard_router.post("/threads/{thread_id}/stream-message")
@@ -1558,6 +1667,7 @@ async def dashboard_stream_existing_message(
             model_id=body.model_id,
             backend_type=requested_backend,
             project_name=body.project_name,
+            local_work_dir=body.local_work_dir,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1830,40 +1940,56 @@ def dashboard_pick_folder() -> dict[str, Any]:
 
 @dashboard_router.get("/workspace/projects")
 def dashboard_list_projects() -> dict[str, Any]:
-    """列出项目目录下的所有子目录作为项目。
+    """分别列出用户创建的项目与工作目录中发现的文件夹。
 
-    每个项目会合并已持久化的本地文件夹绑定（``local_folder``），
-    未绑定时该字段为 ``None``。
+    项目名称是唯一展示名称，不再维护第二套“显示名称”。用户创建的项目来自持久化
+    记录，本地文件夹可为空；工作目录项目来自 ``projects_dir`` 的直属子文件夹。
 
     Returns:
-        dict: 包含 ``projects`` 列表，每项有 ``name``、``path`` 和 ``local_folder`` 字段。
+        dict: 包含 ``created_projects`` 与 ``workspace_projects`` 两组项目。
     """
     settings = get_settings()
     projects_dir = settings.projects_dir
 
-    bindings: dict[str, str] = {}
+    bindings: dict[str, str | None] = {}
     try:
         for record in get_store().list_project_folders():
             name = record.get("project_name")
             folder = record.get("local_folder")
-            if isinstance(name, str) and isinstance(folder, str) and folder.strip():
-                bindings[name] = folder
+            if isinstance(name, str):
+                folder_str = folder if isinstance(folder, str) else ""
+                bindings[name] = folder_str if folder_str.strip() else None
     except Exception:
         logger.warning("读取项目本地文件夹绑定失败，返回未合并的目录列表", exc_info=True)
 
-    if not projects_dir.exists():
-        return {"projects": [], "projects_dir": str(projects_dir)}
+    created_projects = [
+        {
+            "name": name,
+            "path": folder or "",
+            "local_folder": folder,
+            "source": "created",
+        }
+        for name, folder in bindings.items()
+    ]
 
-    items: list[dict[str, Any]] = []
-    for child in sorted(projects_dir.iterdir(), key=lambda p: p.name.lower()):
-        if child.is_dir() and not child.name.startswith("."):
-            items.append({
-                "name": child.name,
-                "path": str(child),
-                "local_folder": bindings.get(child.name),
-            })
+    workspace_projects: list[dict[str, Any]] = []
+    if projects_dir.exists():
+        for child in sorted(projects_dir.iterdir(), key=lambda p: p.name.lower()):
+            if child.is_dir() and not child.name.startswith("."):
+                workspace_projects.append({
+                    "name": child.name,
+                    "path": str(child),
+                    "local_folder": str(child),
+                    "source": "workspace",
+                })
 
-    return {"projects": items, "projects_dir": str(projects_dir)}
+    return {
+        # ``projects`` 暂时保留为兼容字段；新界面使用下面两个明确分组的字段。
+        "projects": created_projects + workspace_projects,
+        "created_projects": created_projects,
+        "workspace_projects": workspace_projects,
+        "projects_dir": str(projects_dir),
+    }
 
 
 @dashboard_router.patch("/workspace/projects/rename")
@@ -1891,28 +2017,29 @@ def dashboard_rename_project(body: DashboardProjectRenameRequest) -> dict[str, A
 
 @dashboard_router.post("/workspace/projects/bind-folder")
 def dashboard_bind_project_folder(body: DashboardProjectBindFolderRequest) -> dict[str, Any]:
-    """把项目绑定到一个本地文件夹，作为该项目的项目根。
+    """创建一个只有名称的项目。
 
-    绑定后，该项目的所有会话都以这个文件夹为 Agent 工作根目录（文件夹即项目根），
-    并在其中维护 ``.xihe-agent/{skills,memories,reviews}`` 布局。
+    主界面的工作目录属于新建会话，不保存在这里。``local_folder`` 仅为技能接口沿用
+    的本地技能作用域绑定，主界面创建项目时不会传入。
 
     Args:
-        body: 包含 ``project_name`` 和 ``local_folder`` 的请求体。
+        body: 包含 ``project_name``，技能接口兼容场景可额外传 ``local_folder``。
 
     Returns:
-        dict: ``project_name`` 与绑定后的 ``local_folder``（已解析为绝对路径）。
+        dict: ``project_name``。
 
     Raises:
         HTTPException: 文件夹不存在或不是目录时返回 400。
     """
     project_name = body.project_name.strip()
-    folder = Path(body.local_folder.strip()).resolve()
     if not project_name:
         raise HTTPException(status_code=400, detail="项目名称不能为空")
-    if not folder.exists() or not folder.is_dir():
+    raw_folder = (body.local_folder or "").strip()
+    folder = Path(raw_folder).resolve() if raw_folder else None
+    if folder is not None and (not folder.exists() or not folder.is_dir()):
         raise HTTPException(status_code=400, detail=f"本地文件夹不存在或不是目录：{folder}")
-    get_store().upsert_project_folder(project_name, str(folder))
-    return {"project_name": project_name, "local_folder": str(folder)}
+    get_store().upsert_project_folder(project_name, str(folder) if folder else "")
+    return {"project_name": project_name}
 
 
 @dashboard_router.delete("/workspace/projects/{project_name}/unbind-folder")
@@ -1930,3 +2057,26 @@ def dashboard_unbind_project_folder(project_name: str) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="项目名称不能为空")
     removed = get_store().delete_project_folder(name)
     return {"project_name": name, "unbound": removed > 0}
+
+
+@dashboard_router.patch("/workspace/projects/update-display-name")
+def dashboard_update_project_display_name(body: DashboardProjectUpdateDisplayNameRequest) -> dict[str, Any]:
+    """更新项目的显示名称。
+
+    Args:
+        body: 包含 ``project_name`` 和 ``display_name`` 的请求体。
+
+    Returns:
+        dict: ``project_name`` 与 ``display_name``。
+
+    Raises:
+        HTTPException: 项目名称或显示名称为空时返回 400。
+    """
+    project_name = body.project_name.strip()
+    display_name = body.display_name.strip()
+    if not project_name:
+        raise HTTPException(status_code=400, detail="项目名称不能为空")
+    if not display_name:
+        raise HTTPException(status_code=400, detail="显示名称不能为空")
+    affected = get_store().update_project_display_name(project_name, display_name)
+    return {"project_name": project_name, "display_name": display_name, "updated": affected > 0}

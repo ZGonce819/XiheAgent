@@ -148,7 +148,8 @@ export interface AgentSchedule {
    * 这个任务有没有开启「全流程自动化」：需要审批的命令由三个评审表决决定，
    * 不再停下来等人在界面上点确认。
    *
-   * 默认关闭。开启后也不会放行按策略硬拒绝的命令，评审得不出结论时同样交回人工。
+   * 默认关闭。开启后也不会放行按策略硬拒绝的命令；评审得不出结论时按安全拒绝处理，
+   * 不会退回人工审批。
    */
   autoApprove?: boolean
   enabled: boolean
@@ -276,6 +277,8 @@ export interface AgentThread {
   localWorkDir?: string | null
   /** 本地工作目录的绝对路径，用于悬停提示 */
   localWorkDirFull?: string | null
+  /** 是否由当前会话显式选择了独立本地文件夹。 */
+  localFolderMode?: boolean
   createdAt: number
   updatedAt: number
   messages: Array<Message>

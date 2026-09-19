@@ -94,8 +94,14 @@ VIRTUAL_PROJECT_SET_SKILLS = "/skills-set/"
 # 沙箱 backend 不做虚拟路径映射（``OpenSandboxBackend`` 直接把路径当容器内真实
 # 路径使用），因此沙箱会话的技能源必须写成容器内真实路径。``/workspace`` 是
 # OpenSandbox 的默认工作目录，容器内布局刻意与主机保持一致：全局层直接放在
-# ``/workspace/skills``，项目集合层放在 ``/workspace/skills/.project-set/<集合名>``，
+# ``/workspace/skills``，项目集合层放在 ``/workspace/.project-set/<集合名>``，
 # 这样两层的覆盖关系与目录语义和本地环境完全相同。
+#
+# 注意：项目集合层刻意放在 ``/workspace/.project-set/`` 而非
+# ``/workspace/skills/.project-set/``。后者位于全局技能根目录内部，会被
+# ``SkillsMiddleware`` 的 ``ls()`` 扫描到并当作候选技能目录，触发对
+# ``.project-set/SKILL.md`` 的 404 读取。第三方框架不过滤以点开头的目录，
+# 因此只能从布局上避免——把项目集合层移出全局技能根目录即可。
 SANDBOX_SKILL_ROOT = "/workspace/skills"
 
 # 与 deepagents.middleware.skills 对齐的硬约束。
@@ -152,7 +158,7 @@ class SkillRecord:
             可直接 JSON 序列化的技能描述字典，字段名保持与既有接口兼容
             （``virtualPath``、``updatedAt`` 为驼峰）。
         """
-        return {
+        result: dict[str, Any] = {
             "id": self.id,
             "name": self.name,
             "description": self.description,
@@ -165,6 +171,12 @@ class SkillRecord:
             "extraFiles": list(self.extra_files),
             "sourcePath": self.source_path,
         }
+        if self.scope == "local":
+            try:
+                result["localFolderName"] = self.directory.parent.parent.parent.name
+            except (AttributeError, IndexError):
+                pass
+        return result
 
 
 # ── 内容解析与校验 ──────────────────────────────────────────────────────────
@@ -537,7 +549,9 @@ def scope_virtual_path(scope: str) -> str:
     return ""
 
 
-def writable_scopes(project_name: str | None = None) -> list[str]:
+def writable_scopes(
+    project_name: str | None = None, *, has_local_folder: bool | None = None
+) -> list[str]:
     """返回当前可写的技能作用域列表。
 
     ``global`` 永远可写；``project_set`` 只要有项目名即可（它落在全局目录下，
@@ -545,6 +559,8 @@ def writable_scopes(project_name: str | None = None) -> list[str]:
 
     Args:
         project_name: 可选的当前项目名。
+        has_local_folder: 当前会话是否有可用本地目录。省略时兼容独立技能页，
+            仍按项目绑定查询。
 
     Returns:
         作用域标识列表。
@@ -552,12 +568,19 @@ def writable_scopes(project_name: str | None = None) -> list[str]:
     scopes: list[str] = [GLOBAL_SCOPE]
     if project_name and project_name.strip():
         scopes.append(PROJECT_SET_SCOPE)
-        if resolve_project_folder(project_name) is not None:
+        has_local = (
+            resolve_project_folder(project_name) is not None
+            if has_local_folder is None
+            else has_local_folder
+        )
+        if has_local:
             scopes.append(LOCAL_SCOPE)
     return scopes
 
 
-def agent_skill_sources(project_name: str | None = None) -> list[str]:
+def agent_skill_sources(
+    project_name: str | None = None, *, has_local_folder: bool | None = None
+) -> list[str]:
     """返回传给 ``SkillsMiddleware`` 的技能源列表。
 
     ``SkillsMiddleware`` 按传入顺序加载，**后写的源覆盖先写的同名技能**，
@@ -574,6 +597,8 @@ def agent_skill_sources(project_name: str | None = None) -> list[str]:
 
     Args:
         project_name: 当前项目名；为空时退化为只挂全局源。
+        has_local_folder: 当前会话是否有独立本地目录。省略时兼容旧调用方，
+            仍按项目绑定查询。
 
     Returns:
         虚拟路径列表，按加载顺序排列。
@@ -582,10 +607,18 @@ def agent_skill_sources(project_name: str | None = None) -> list[str]:
         # 拿不到项目名时不确定 backend 是否处于本地文件夹模式，此时
         # ``/skills`` 的指向是不确定的，挂全局源才是安全的。
         return [VIRTUAL_GLOBAL_SKILLS]
-    has_local = resolve_project_folder(project_name) is not None
+    project_slug = sanitize_dir_name(project_name)
+    if not project_slug:
+        return [VIRTUAL_GLOBAL_SKILLS]
+    project_source = f"{VIRTUAL_PROJECT_SET_SKILLS}{project_slug}/"
+    has_local = (
+        resolve_project_folder(project_name) is not None
+        if has_local_folder is None
+        else has_local_folder
+    )
     if has_local:
-        return [VIRTUAL_GLOBAL_SKILLS, VIRTUAL_PROJECT_SET_SKILLS, VIRTUAL_LOCAL_SKILLS]
-    return [VIRTUAL_GLOBAL_SKILLS, VIRTUAL_PROJECT_SET_SKILLS]
+        return [VIRTUAL_GLOBAL_SKILLS, project_source, VIRTUAL_LOCAL_SKILLS]
+    return [VIRTUAL_GLOBAL_SKILLS, project_source]
 
 
 def sandbox_skill_sources(project_name: str | None = None) -> list[str]:
@@ -617,7 +650,7 @@ def sandbox_project_set_root(project_name: str) -> str:
         project_name: 项目集合名。
 
     Returns:
-        形如 ``/workspace/skills/.project-set/Xihe`` 的容器内路径。
+        形如 ``/workspace/.project-set/Xihe`` 的容器内路径。
 
     Raises:
         SkillValidationError: 集合名为空时。
@@ -625,7 +658,9 @@ def sandbox_project_set_root(project_name: str) -> str:
     slug = sanitize_dir_name(project_name)
     if not slug:
         raise SkillValidationError("项目集合名不能为空")
-    return f"{SANDBOX_SKILL_ROOT}/{PROJECT_SET_DIR_NAME}/{slug}"
+    # 项目集合层放在 /workspace/.project-set/ 而非 /workspace/skills/.project-set/，
+    # 避免被 SkillsMiddleware 的 ls() 扫描到（它不过滤以点开头的目录）。
+    return f"/workspace/{PROJECT_SET_DIR_NAME}/{slug}"
 
 
 # ── 列举 ────────────────────────────────────────────────────────────────────
@@ -703,6 +738,12 @@ def read_skill(directory: Path, *, scope: str, project_name: str | None = None) 
     marker = read_origin_marker(directory)
     origin = marker or ("builtin" if scope == BUILTIN_SCOPE else "user")
 
+    virtual_root = scope_virtual_path(scope)
+    if scope == PROJECT_SET_SCOPE and project_name:
+        project_slug = sanitize_dir_name(project_name)
+        if project_slug:
+            virtual_root = f"{VIRTUAL_PROJECT_SET_SKILLS}{project_slug}/"
+
     return SkillRecord(
         id=directory.name,
         name=name,
@@ -710,7 +751,7 @@ def read_skill(directory: Path, *, scope: str, project_name: str | None = None) 
         scope=scope,  # type: ignore[arg-type]
         project_name=project_name,
         directory=directory,
-        virtual_path=f"{scope_virtual_path(scope)}{directory.name}/SKILL.md",
+        virtual_path=f"{virtual_root}{directory.name}/SKILL.md",
         origin=origin,
         updated_at=_skill_updated_at(skill_file),
         extra_files=_list_extra_files(directory),
@@ -719,20 +760,24 @@ def read_skill(directory: Path, *, scope: str, project_name: str | None = None) 
 
 
 def list_skills(
-    scope: str = GLOBAL_SCOPE, project_name: str | None = None
+    scope: str = GLOBAL_SCOPE,
+    project_name: str | None = None,
+    *,
+    base_dir: Path | None = None,
 ) -> list[SkillRecord]:
     """列举某个作用域下的全部技能。
 
     Args:
         scope: 作用域标识，``project`` 会被折叠为 ``local``。
         project_name: ``project_set`` 的集合名或 ``local`` 的项目名。
+        base_dir: 显式技能根目录，用于按当前会话目录读取本地技能。
 
     Returns:
         按目录名排序的技能记录列表；目录不存在时返回空列表。
     """
     try:
         normalized = normalize_scope(scope)
-        base = scope_dir(normalized, project_name)
+        base = base_dir if base_dir is not None else scope_dir(normalized, project_name)
     except SkillValidationError:
         return []
     if not base.is_dir():
@@ -786,6 +831,18 @@ def list_all_skills(project_name: str | None = None) -> list[SkillRecord]:
         records.extend(list_skills(PROJECT_SET_SCOPE, project_name))
         if resolve_project_folder(project_name) is not None:
             records.extend(list_skills(LOCAL_SCOPE, project_name))
+    else:
+        for set_name in list_project_sets():
+            records.extend(list_skills(PROJECT_SET_SCOPE, set_name))
+        try:
+            from agent.graph.graph import get_store
+
+            for binding in get_store().list_project_folders():
+                bound_project = binding.get("project_name")
+                if bound_project:
+                    records.extend(list_skills(LOCAL_SCOPE, bound_project))
+        except Exception:
+            pass
     return records
 
 
@@ -859,6 +916,7 @@ def create_skill(
     extra_files: dict[str, bytes] | None = None,
     overwrite: bool = False,
     directory_name: str | None = None,
+    base_dir: Path | None = None,
 ) -> SkillRecord:
     """创建（或覆盖）一个技能。
 
@@ -872,6 +930,7 @@ def create_skill(
         extra_files: 随技能一并写入的附属文件，键为相对路径。
         overwrite: 同名技能已存在时是否覆盖。
         directory_name: 指定目录名，用于导入既有技能时保持目录与名称一致。
+        base_dir: 直接指定技能目录路径，绕过 scope_dir 解析。
 
     Returns:
         写入后的技能记录。
@@ -883,7 +942,7 @@ def create_skill(
     if normalized == BUILTIN_SCOPE:
         raise SkillValidationError("内置技能目录不可写入")
 
-    base_dir = scope_dir(normalized, project_name)
+    resolved_dir = base_dir if base_dir is not None else scope_dir(normalized, project_name)
     slug = (directory_name or coerce_ascii_name(name)).strip()
     if not slug:
         raise SkillValidationError("技能名不能为空")
@@ -892,13 +951,13 @@ def create_skill(
     document = build_skill_document(slug, description, safe_body)
     validate_skill_content(document, directory_name=slug)
 
-    target = base_dir / slug
+    target = resolved_dir / slug
     if target.exists():
         if not overwrite:
             raise SkillValidationError(f"技能「{slug}」已存在，请改用其他名称")
-        _clear_skill_dir(target, base_dir)
+        _clear_skill_dir(target, resolved_dir)
 
-    base_dir.mkdir(parents=True, exist_ok=True)
+    resolved_dir.mkdir(parents=True, exist_ok=True)
     target.mkdir(parents=True, exist_ok=True)
     (target / SKILL_FILE_NAME).write_text(document, encoding="utf-8")
     write_origin_marker(target, origin)

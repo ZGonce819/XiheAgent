@@ -32,6 +32,7 @@ export function AgentsHome({ initialProject = null }: { initialProject?: string 
   const [sandboxWarning, setSandboxWarning] = useState(false)
   const [repoWarning, setRepoWarning] = useState(false)
   const [selectedProject, setSelectedProject] = useState<string | null>(initialProject)
+  const [localWorkDir, setLocalWorkDir] = useState<string | null>(null)
 
   const handleBackendTypeChange = (next: string) => {
     if (next === "sandbox" && !sandboxAvailable) {
@@ -146,6 +147,7 @@ export function AgentsHome({ initialProject = null }: { initialProject?: string 
                     effort: activeSelection?.effort ?? null,
                     backend_type: backendType,
                     project_name: selectedProject,
+                    local_work_dir: localWorkDir,
                   },
                   {
                     onError: () => setSubmission(null),
@@ -162,7 +164,10 @@ export function AgentsHome({ initialProject = null }: { initialProject?: string 
               backendType={backendType}
               onBackendTypeChange={handleBackendTypeChange}
               selectedProject={selectedProject}
-              onProjectChange={setSelectedProject}
+              onProjectChange={(project, workDir) => {
+                setSelectedProject(project)
+                setLocalWorkDir(workDir ?? null)
+              }}
             />
             {createError ? (
               <p className="mt-3 w-full border-l-2 border-[var(--ui-danger)] bg-[var(--ui-panel)] px-3 py-2 text-sm text-[color:var(--ui-danger)]">

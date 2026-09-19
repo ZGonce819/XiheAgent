@@ -57,7 +57,13 @@ export function SkillRow({ skill, index, onDelete }: SkillRowProps) {
           <h3 className="text-xs font-medium">{skill.name}</h3>
           <span className="rounded-sm border border-border bg-muted px-1.5 py-0.5 text-[0.625rem] text-muted-foreground">
             {skill.scopeLabel}
-            {skill.projectName ? ` · ${skill.projectName}` : ""}
+            {skill.scope === "local"
+              ? skill.localFolderName
+                ? ` · ${skill.localFolderName}`
+                : ""
+              : skill.projectName
+                ? ` · ${skill.projectName}`
+                : ""}
           </span>
           {meta.label && (
             <span

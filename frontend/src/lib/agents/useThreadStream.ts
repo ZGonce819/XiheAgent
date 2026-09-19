@@ -59,6 +59,7 @@ interface ThreadMetaPayload {
   conversationVersions?: AgentThread["conversationVersions"]
   localWorkDir?: string | null
   localWorkDirFull?: string | null
+  localFolderMode?: boolean
   backendType?: string
   projectName?: string | null
 }
@@ -351,6 +352,7 @@ function applyThreadMeta(
       data.conversationVersions ?? thread.conversationVersions,
     localWorkDir: data.localWorkDir ?? thread.localWorkDir,
     localWorkDirFull: data.localWorkDirFull ?? thread.localWorkDirFull,
+    localFolderMode: data.localFolderMode ?? thread.localFolderMode,
     backendType: data.backendType ?? thread.backendType,
     projectName: data.projectName ?? thread.projectName,
   }

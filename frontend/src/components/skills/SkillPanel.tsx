@@ -54,6 +54,8 @@ interface SkillPanelProps {
    * 进容器），只少「本地」一层——容器里没有项目本地文件夹。
    */
   backendType?: string
+  /** 当前会话实际使用的本地工作目录；本地技能严格以此为准。 */
+  localFolder?: string | null
   onOpenChange: (open: boolean) => void
 }
 
@@ -68,6 +70,7 @@ export function SkillPanel({
   open,
   projectName,
   backendType,
+  localFolder,
   onOpenChange,
 }: SkillPanelProps) {
   /**
@@ -86,8 +89,8 @@ export function SkillPanel({
 
   const queryClient = useQueryClient()
   const skills = useQuery({
-    queryKey: ["skills", projectName ?? "*", backendType ?? "*"],
-    queryFn: () => api.skills(projectName, backendType),
+    queryKey: ["skills", projectName ?? "*", backendType ?? "*", localFolder ?? "*"],
+    queryFn: () => api.skills(projectName, backendType, localFolder, true),
     enabled: open,
   })
 
@@ -231,7 +234,13 @@ export function SkillPanel({
                         <p className="text-xs font-medium">{skill.name}</p>
                         <span className="rounded-sm border border-border bg-muted px-1.5 py-0.5 text-[0.625rem] text-muted-foreground">
                           {skill.scopeLabel}
-                          {skill.projectName ? ` · ${skill.projectName}` : ""}
+                          {skill.scope === "local"
+                            ? skill.localFolderName
+                              ? ` · ${skill.localFolderName}`
+                              : ""
+                            : skill.projectName
+                              ? ` · ${skill.projectName}`
+                              : ""}
                         </span>
                       </div>
                       <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
@@ -249,6 +258,7 @@ export function SkillPanel({
       <SkillUploadDialog
         open={formOpen}
         projectName={projectName}
+        localFolder={localFolder}
         writableScopes={uploadScopes}
         onOpenChange={setFormOpen}
         onDone={invalidate}
@@ -260,6 +270,7 @@ export function SkillPanel({
 interface SkillUploadDialogProps {
   open: boolean
   projectName: string | null
+  localFolder?: string | null
   /** 当前会话真正可写的工作域；未指定本地工作目录时只有「全局」。 */
   writableScopes: Array<SkillScope>
   onOpenChange: (open: boolean) => void
@@ -275,6 +286,7 @@ interface SkillUploadDialogProps {
 function SkillUploadDialog({
   open,
   projectName,
+  localFolder,
   writableScopes,
   onOpenChange,
   onDone,
@@ -316,6 +328,7 @@ function SkillUploadDialog({
         const result = await api.uploadSkill(file, {
           scope: effectiveScope,
           projectName: projectArg,
+          localFolder: effectiveScope === "local" ? localFolder : null,
           overwrite,
         })
         const [firstFailed] = result.failed
@@ -330,6 +343,7 @@ function SkillUploadDialog({
         body,
         scope: effectiveScope,
         project_name: projectArg,
+        local_folder: effectiveScope === "local" ? localFolder : null,
       })
       return `已创建技能「${name}」，下次构建智能体时生效`
     },

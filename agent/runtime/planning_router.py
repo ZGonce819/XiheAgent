@@ -90,16 +90,6 @@ def run_plan_response_task(
     if _effective_backend is None:
         from config.app_config import get_settings as _get_settings
         _effective_backend = "sandbox" if _get_settings().use_sandbox else "local"
-    if _effective_backend != "sandbox":
-        import os
-        from agent.runtime._helpers import resolve_project_local_folder
-        from config.app_config import get_settings as _get_settings
-        _local_folder = resolve_project_local_folder(thread_id)
-        if _local_folder:
-            os.makedirs(_local_folder, exist_ok=True)
-        else:
-            _settings = _get_settings()
-            os.makedirs(_settings.projects_dir / repo.repo, exist_ok=True)
 
     plan_source = prompt
     previous_plan_text: str | None = None
@@ -126,10 +116,27 @@ def run_plan_response_task(
     )
     run_id = run_id or str(uuid.uuid4())
     store.record_run(run_id=run_id, thread_id=thread_id, status="running")
+    from agent.runtime.task_router import _ensure_repository
+
+    repository_path = _ensure_repository(
+        thread_id=thread_id,
+        repo=repo,
+        backend_type=_effective_backend,
+    )
+    repository_available = repository_path is not None
+    repository_agent_path = (
+        str(repository_path) if _effective_backend == "sandbox" and repository_path else None
+    )
     record_event(thread_id, "agent", "构建方案生成 Agent", status="in_progress")
     # 方案任务也使用 DeepAgent，是因为它需要读取仓库结构、测试方式、关键文件等上下文。
     # 但 task_kind 固定为 planning，中间件和工具权限会保持只读。
-    agent = build_agent_for_runtime(thread_id=thread_id, task_kind="planning", repo_url=repo.clone_url, model_id=model_id, backend_type=backend_type)
+    agent = build_agent_for_runtime(
+        thread_id=thread_id,
+        task_kind="planning",
+        repo_url=repo.clone_url if repository_available else None,
+        model_id=model_id,
+        backend_type=backend_type,
+    )
     record_event(thread_id, "agent", "构建方案生成 Agent", status="completed")
 
     try:
@@ -146,6 +153,8 @@ def run_plan_response_task(
                 else prompt,
                 previous_plan=previous_plan_text,
                 revision_prompt=revision_prompt,
+                repository_available=repository_available,
+                repository_path=repository_agent_path,
             ),
             task_kind="planning",
             event_sink=event_sink,

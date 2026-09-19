@@ -51,6 +51,8 @@ def route(monkeypatch: pytest.MonkeyPatch):
         local_folder: str | None = None,
     ) -> FakeStore:
         thread = {"project_name": project_name} if project_name is not None else {}
+        if local_folder is not None:
+            thread["local_work_dir"] = local_folder
         store = FakeStore(thread=thread, local_folder=local_folder)
         monkeypatch.setattr("agent.runtime._helpers.get_store", lambda: store)
         monkeypatch.setattr("agent.graph.graph.get_store", lambda: store)
@@ -72,7 +74,7 @@ def test_sandbox_with_project_mounts_project_set_layer(route):
 
     assert server._resolve_skill_sources("t1", "sandbox") == [
         "/workspace/skills/",
-        "/workspace/skills/.project-set/Xihe/",
+        "/workspace/.project-set/Xihe/",
     ]
 
 
@@ -82,7 +84,7 @@ def test_sandbox_never_mounts_local_layer(route, tmp_path: Path):
 
     assert server._resolve_skill_sources("t1", "sandbox") == [
         "/workspace/skills/",
-        "/workspace/skills/.project-set/Xihe/",
+        "/workspace/.project-set/Xihe/",
     ]
 
 
@@ -99,18 +101,37 @@ def test_local_with_unbound_project_mounts_project_set(route):
 
     assert server._resolve_skill_sources("t1", "local") == [
         VIRTUAL_GLOBAL_SKILLS,
-        VIRTUAL_PROJECT_SET_SKILLS,
+        f"{VIRTUAL_PROJECT_SET_SKILLS}Xihe/",
     ]
 
 
 def test_local_with_bound_project_mounts_all_three(route, tmp_path: Path):
-    """绑定了本地文件夹时三层齐全，顺序为全局 → 项目集合 → 本地。"""
+    """会话选择了本地工作目录时三层齐全，顺序为全局 → 项目集合 → 本地。"""
     route(project_name="Xihe", local_folder=str(tmp_path))
 
     assert server._resolve_skill_sources("t1", "local") == [
         VIRTUAL_GLOBAL_SKILLS,
-        VIRTUAL_PROJECT_SET_SKILLS,
+        f"{VIRTUAL_PROJECT_SET_SKILLS}Xihe/",
         VIRTUAL_LOCAL_SKILLS,
+    ]
+
+
+def test_local_ignores_stale_project_folder_binding(monkeypatch, tmp_path: Path):
+    """项目的旧绑定不能让一个没有本地工作目录的会话加载本地技能。"""
+    class Store(FakeStore):
+        def get_thread(self, _thread_id: str) -> dict[str, Any]:
+            return {"project_name": "Xihe", "local_work_dir": None}
+
+        def get_project_folder(self, _project_name: str) -> dict[str, Any]:
+            return {"local_folder": str(tmp_path / "old-project")}
+
+    store = Store()
+    monkeypatch.setattr("agent.runtime._helpers.get_store", lambda: store)
+    monkeypatch.setattr("agent.graph.graph.get_store", lambda: store)
+
+    assert server._resolve_skill_sources("t1", "local") == [
+        VIRTUAL_GLOBAL_SKILLS,
+        f"{VIRTUAL_PROJECT_SET_SKILLS}Xihe/",
     ]
 
 

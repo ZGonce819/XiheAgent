@@ -107,7 +107,7 @@ INITIAL_REPO_MEMORY_TEMPLATE: Final[Template] = Template("""\
 
 ## 已知约定
 - 文件工具使用 `$virtual_project_dir/...` 这样的虚拟路径。
-- `execute` 默认在 `/projects` 对应的本地目录下执行，命令里直接使用 `$command_repo_dir`，不要写 `projects/$command_repo_dir`。
+- `execute` 默认目录为 `$execute_base_dir`，命令中使用 `$command_repo_dir`。
 - 不得把 token、私钥、`.env`、`.secrets` 或本机敏感路径写入记忆。
 - 如果本记忆与真实仓库文件冲突，以真实文件和实际命令输出为准。
 

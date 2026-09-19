@@ -232,7 +232,7 @@ def _local_work_dirs(thread: dict[str, Any]) -> tuple[str, str] | None:
     """解析本地环境会话的本地工作目录（相对路径 + 绝对路径）。
 
     解析规则与运行时保持一致：
-    1. 优先取项目绑定的本地文件夹（通过 project_name 反查）。
+    1. 优先取会话自己选择的本地工作目录。
     2. 其次取仓库映射表登记的目录。
     3. 未登记时回退到默认的 ``projects/<repo>``。
     沙箱环境或未指定仓库时返回 ``None``。
@@ -254,23 +254,14 @@ def _local_work_dirs(thread: dict[str, Any]) -> tuple[str, str] | None:
 
         store = get_store()
         workspace_root = get_settings().workspace_root.resolve()
-        thread_id = str(thread.get("thread_id") or "")
-
-        # 优先取项目绑定的本地文件夹（与运行时 resolve_project_local_folder 对齐）
-        project_name = thread.get("project_name")
-        if project_name:
+        folder = thread.get("local_work_dir")
+        if isinstance(folder, str) and folder.strip():
+            abs_path = Path(folder)
             try:
-                record = store.get_project_folder(project_name)
-                folder = record.get("local_folder") if record else None
-                if isinstance(folder, str) and folder.strip():
-                    abs_path = Path(folder)
-                    try:
-                        relative = abs_path.resolve().relative_to(workspace_root).as_posix()
-                    except ValueError:
-                        relative = abs_path.name
-                    return relative, str(abs_path)
-            except Exception:
-                logger.warning("解析项目本地文件夹失败：project_name=%s", project_name, exc_info=True)
+                relative = abs_path.resolve().relative_to(workspace_root).as_posix()
+            except ValueError:
+                relative = abs_path.name
+            return relative, str(abs_path)
 
         # 回退到仓库映射表
         from services.repo_rollback import repository_path
@@ -328,6 +319,11 @@ def thread_payload(
         "projectName": thread.get("project_name"),
         "localWorkDir": work_dirs[0] if work_dirs else None,
         "localWorkDirFull": work_dirs[1] if work_dirs else None,
+        "localFolderMode": bool(
+            (thread.get("backend_type") or "local") == "local"
+            and isinstance(thread.get("local_work_dir"), str)
+            and thread.get("local_work_dir", "").strip()
+        ),
         "createdAt": iso_to_millis(thread.get("created_at")),
         "updatedAt": iso_to_millis(thread.get("updated_at")),
         "messages": message_payload(thread),
@@ -366,13 +362,13 @@ def thread_payload(
 
 def thread_meta_payload(thread: dict[str, Any]) -> dict[str, Any]:
     """返回不含 messages 的会话元信息。
-    
+
     实时流只能更新状态、分支、PR 等元信息，不能把历史 messages 重新推给前端，
     否则会覆盖前端当前轮已经追加的用户输入和流式正文。
-    
+
     Args:
         thread: 包含会话原始字段的字典。
-    
+
     Returns:
         去除 messages 后的 thread DTO 字典。
     """

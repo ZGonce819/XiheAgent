@@ -167,7 +167,19 @@ def refresh_sandbox_skills(
 
         try:
             written = sync_sandbox_skills(backend, thread_project)
-        except Exception:
+        except Exception as exc:
+            # 沙箱已被 Docker 回收（超时、手动删除等），缓存中的 backend 已失效。
+            # 从缓存中移除并销毁底层资源，避免后续操作继续访问幽灵沙箱。
+            if "SANDBOX_NOT_FOUND" in str(exc):
+                _BACKENDS.pop(thread_id, None)
+                try:
+                    backend.destroy()
+                except Exception:
+                    pass
+                logger.info(
+                    "沙箱已失效，清除缓存：thread_id=%s", thread_id
+                )
+                continue
             logger.warning("同步技能到沙箱失败：thread_id=%s", thread_id, exc_info=True)
             summary["failed"].append(thread_id)
             continue

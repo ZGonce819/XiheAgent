@@ -108,7 +108,9 @@ def _extract_owner_repo_from_namespace(namespace: tuple[str, ...]) -> tuple[str,
     return None
 
 
-def build_initial_repo_memory(*, repo: ScmRepo, project_dir: str) -> str:
+def build_initial_repo_memory(
+    *, repo: ScmRepo, project_dir: str, sandbox_mode: bool = False
+) -> str:
     """生成首次识别仓库时的记忆文件模板。
 
     不猜测技术栈和启动命令，只写入已确定的仓库地址、本地目录和安全约定。
@@ -117,26 +119,34 @@ def build_initial_repo_memory(*, repo: ScmRepo, project_dir: str) -> str:
     Args:
         repo: 已解析的仓库信息，包含 owner、repo、clone_url。
         project_dir: 本地项目目录，用于推导虚拟路径和命令目录。
+        sandbox_mode: 是否使用远程沙盒的真实目录布局。
 
     Returns:
         Markdown 格式的记忆文件内容。
     """
     now = datetime.now(UTC).isoformat()
     normalized = project_dir.replace("\\", "/").strip()
-    if normalized in {".", "", "/"}:
+    if sandbox_mode:
+        virtual_project_dir = f"/workspace/projects/{repo.repo}"
+        command_repo_dir = virtual_project_dir
+        execute_base_dir = "/workspace"
+    elif normalized in {".", "", "/"}:
         # 本地文件夹模式：文件夹即项目根，虚拟路径为 /projects，命令目录为当前目录。
         virtual_project_dir = "/projects"
         command_repo_dir = "."
+        execute_base_dir = "/projects"
     else:
         virtual_project_dir = "/" + normalized.strip("/")
         command_repo_dir = normalized.removeprefix("projects/").strip("/")
         command_repo_dir = command_repo_dir or repo.repo
+        execute_base_dir = "/projects"
     return INITIAL_REPO_MEMORY_TEMPLATE.substitute(
         owner=repo.owner,
         repo=repo.repo,
         clone_url=repo.clone_url,
         virtual_project_dir=virtual_project_dir,
         command_repo_dir=command_repo_dir,
+        execute_base_dir=execute_base_dir,
         now=now,
     )
 
@@ -167,6 +177,7 @@ def ensure_repo_memory_initialized(
     store: BaseStore,
     repo: ScmRepo,
     project_dir: str,
+    sandbox_mode: bool = False,
 ) -> bool:
     """确保指定仓库的记忆文件已初始化。
 
@@ -177,6 +188,7 @@ def ensure_repo_memory_initialized(
         store: LangGraph Store 实例。
         repo: 已解析的仓库信息。
         project_dir: 本地项目目录，用于生成记忆模板中的路径信息。
+        sandbox_mode: 是否使用远程沙盒的真实目录布局。
 
     Returns:
         本次新建了记忆文件返回 ``True``；文件已存在返回 ``False``。
@@ -188,6 +200,10 @@ def ensure_repo_memory_initialized(
     if existing is not None:
         return False
 
-    initial_content = build_initial_repo_memory(repo=repo, project_dir=project_dir)
+    initial_content = build_initial_repo_memory(
+        repo=repo,
+        project_dir=project_dir,
+        sandbox_mode=sandbox_mode,
+    )
     store.put(namespace, new_key, create_file_data(initial_content))
     return True

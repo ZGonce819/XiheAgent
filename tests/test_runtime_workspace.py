@@ -45,3 +45,26 @@ def test_repository_path_uses_runtime_workspace_root(
     monkeypatch.setattr(get_settings(), "workspace_root", workspace)
 
     assert repository_path("https://gitee.com/acme/example.git", Store()) == workspace / "projects" / "example"
+
+
+def test_local_work_directory_belongs_to_the_thread_not_the_project(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """同一项目的不同会话可以选择不同工作目录，不能再按项目名共享。"""
+    from agent.runtime import _helpers
+
+    class Store:
+        def get_thread(self, thread_id: str) -> dict[str, str]:
+            return {
+                "thread_id": thread_id,
+                "project_name": "SameProject",
+                "local_work_dir": f"D:/work/{thread_id}",
+            }
+
+        def get_project_folder(self, _project_name: str) -> dict[str, str]:
+            raise AssertionError("工作目录不应再通过项目绑定反查")
+
+    monkeypatch.setattr(_helpers, "get_store", lambda: Store())
+
+    assert _helpers.resolve_project_local_folder("thread-a") == "D:/work/thread-a"
+    assert _helpers.resolve_project_local_folder("thread-b") == "D:/work/thread-b"

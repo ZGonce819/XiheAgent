@@ -125,10 +125,13 @@ export interface ProjectItem {
   name: string
   path: string
   local_folder?: string | null
+  source: "created" | "workspace"
 }
 
 export interface ProjectList {
   projects: Array<ProjectItem>
+  created_projects: Array<ProjectItem>
+  workspace_projects: Array<ProjectItem>
   projects_dir: string
 }
 
@@ -294,6 +297,7 @@ export interface AgentSkill {
   scope: SkillScope
   scopeLabel: string
   projectName: string | null
+  localFolderName?: string
   origin: SkillOrigin
   extraFiles: Array<string>
   sourcePath: string
@@ -327,6 +331,7 @@ export interface SkillCreateBody {
   content?: string
   scope?: SkillScope
   project_name?: string | null
+  local_folder?: string | null
 }
 
 export interface SkillUploadResult {
@@ -372,11 +377,18 @@ export const api = {
   saveProfile: (body: ProfileUpdate) =>
     request<Profile>("/profile", { method: "PUT", body: JSON.stringify(body) }),
   repos: () => request<ReposPayload>("/repos"),
-  skills: (projectName?: string | null, backendType?: string | null) => {
+  skills: (
+    projectName?: string | null,
+    backendType?: string | null,
+    localFolder?: string | null,
+    sessionScoped = false
+  ) => {
     const params = new URLSearchParams()
     if (projectName) params.set("project_name", projectName)
     // 沙箱会话没有项目本地文件夹，后端据此隐藏「本地」层，避免出现死选项。
     if (backendType) params.set("backend_type", backendType)
+    if (localFolder) params.set("local_folder", localFolder)
+    if (sessionScoped) params.set("session_scoped", "true")
     const query = params.toString()
     return request<SkillsPayload>(`/skills${query ? `?${query}` : ""}`)
   },
@@ -420,6 +432,7 @@ export const api = {
       projectName?: string | null
       name?: string
       overwrite?: boolean
+      localFolder?: string | null
     } = {}
   ): Promise<SkillUploadResult> => {
     const form = new FormData()
@@ -427,6 +440,7 @@ export const api = {
     form.append("scope", options.scope ?? "global")
     if (options.projectName) form.append("project_name", options.projectName)
     if (options.name) form.append("name", options.name)
+    if (options.localFolder) form.append("local_folder", options.localFolder)
     form.append("overwrite", String(options.overwrite ?? false))
 
     const res = await fetch(`${API_BASE}/dashboard/api/skills/upload`, {
@@ -561,8 +575,8 @@ export const api = {
     }),
   pickFolder: () => request<{ path: string | null }>("/workspace/pick-folder"),
   listProjects: () => request<ProjectList>("/workspace/projects"),
-  bindProjectFolder: (body: { project_name: string; local_folder: string }) =>
-    request<{ project_name: string; local_folder: string }>(
+  bindProjectFolder: (body: { project_name: string; local_folder?: string }) =>
+    request<{ project_name: string }>(
       "/workspace/projects/bind-folder",
       { method: "POST", body: JSON.stringify(body) }
     ),
@@ -570,6 +584,11 @@ export const api = {
     request<{ project_name: string; unbound: boolean }>(
       `/workspace/projects/${encodeURIComponent(projectName)}/unbind-folder`,
       { method: "DELETE" }
+    ),
+  updateProjectDisplayName: (body: { project_name: string; display_name: string }) =>
+    request<{ project_name: string; display_name: string; updated: boolean }>(
+      "/workspace/projects/update-display-name",
+      { method: "PATCH", body: JSON.stringify(body) }
     ),
 }
 

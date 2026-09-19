@@ -1011,10 +1011,26 @@ class LocalShellBackend(BaseSandbox):
         if re.match(r"^[A-Za-z]:[\\/]", raw):
             resolved = Path(raw).resolve()
         else:
-            normalized = raw.replace("\\", "/")
-            if normalized.startswith("/"):
-                normalized = normalized[1:]
-            resolved = (self.root / normalized).resolve()
+            normalized = raw.replace("\\", "/").strip("/")
+            if not normalized:
+                return self.root
+            first, _, rest = normalized.partition("/")
+            roots = {
+                "projects": self.projects_dir,
+                "skills": self.skills_dir,
+                "skills-global": self.global_skills_dir,
+                "skills-set": self.project_set_skills_dir,
+                "policies": self.policies_dir,
+                "reviews": self.reviews_dir,
+                "runtimes": self.runtimes_dir,
+                "tmp": self.tmp_dir,
+                "logs": self.logs_dir,
+            }
+            base = roots.get(first)
+            if base is not None:
+                resolved = (base / rest).resolve() if rest else base.resolve()
+            else:
+                resolved = (self.root / normalized).resolve()
         if not self._is_under_root(resolved):
             raise PermissionError(f"path outside local workspace is denied: {path}")
         return resolved

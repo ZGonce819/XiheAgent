@@ -157,8 +157,8 @@ class RoundResult:
 MAX_APPROVAL_VOTES_PER_ROUND = 5
 """一轮里最多表决几次。
 
-用满之后这一轮就退回等人工 —— 保留原有的 ``awaiting_approval`` 行为作为兜底。
-没有这个上限，模型可以一直换做法、一直撞审批，每撞一次烧三次模型调用。
+全流程自动化用满之后会终止本轮，不会退回人工审批。没有这个上限，模型可以一直
+换做法、一直撞审批，每撞一次烧三次模型调用。
 """
 
 RoundRunner = Callable[[RoundRequest], RoundResult]

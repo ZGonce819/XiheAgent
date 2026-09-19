@@ -12,6 +12,7 @@ import {
 import { IoLogoGithub, IoLogoSlack } from "react-icons/io5"
 import { SiLinear } from "react-icons/si"
 import { Dialog } from "@base-ui/react/dialog"
+import { useQueryClient } from "@tanstack/react-query"
 import {
   useEffect,
   useLayoutEffect,
@@ -30,7 +31,11 @@ import {
   SidebarFrame,
   useSidebarLayout,
 } from "@/components/sidebar-layout"
-import { useAgentThreads, useDeleteAgentThread, useRenameProject } from "@/lib/agents/queries"
+import {
+  useAgentThreads,
+  useDeleteAgentThread,
+  useRenameProject,
+} from "@/lib/agents/queries"
 import {
   claimAnonymousThreadReveal,
   consumeThreadReveal,
@@ -372,25 +377,36 @@ export function ProjectGroup({
   }
 
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const renameProject = useRenameProject()
   const [renameOpen, setRenameOpen] = useState(false)
   const [renameValue, setRenameValue] = useState(projectName)
+  const [saving, setSaving] = useState(false)
 
   const openRename = () => {
     setRenameValue(projectName)
     setRenameOpen(true)
   }
 
-  const confirmRename = () => {
+  const confirmRename = async () => {
     const next = renameValue.trim()
     if (!next || next === projectName) {
       setRenameOpen(false)
       return
     }
-    renameProject.mutate(
-      { oldName: projectName, newName: next },
-      { onSuccess: () => setRenameOpen(false) }
-    )
+    setSaving(true)
+    try {
+      await renameProject.mutateAsync({ oldName: projectName, newName: next })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["workspace-projects"] }),
+        queryClient.invalidateQueries({ queryKey: ["agent-threads"] }),
+      ])
+      setRenameOpen(false)
+    } catch {
+      // 忽略错误，保持对话框打开
+    } finally {
+      setSaving(false)
+    }
   }
 
   // 新建对话：跳转新任务页并预填项目名（本地环境、无本地工作目录）
@@ -414,7 +430,7 @@ export function ProjectGroup({
         >
           <CaretDownIcon
             className={cn(
-              "size-2.5 shrink-0 transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)]",
+              "size-2.5 shrink-0 transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
               collapsed && "-rotate-90"
             )}
           />
@@ -479,7 +495,7 @@ export function ProjectGroup({
             >
               <CaretDownIcon
                 className={cn(
-                  "size-3 transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)]",
+                  "size-3 transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
                   expanded && "rotate-180"
                 )}
               />
@@ -536,10 +552,10 @@ export function ProjectGroup({
               </Button>
               <Button
                 size="sm"
-                disabled={!renameValue.trim() || renameValue.trim() === projectName || renameProject.isPending}
+                disabled={!renameValue.trim() || renameValue.trim() === projectName || saving}
                 onClick={confirmRename}
               >
-                保存
+                {saving ? "保存中…" : "保存"}
               </Button>
             </div>
           </Dialog.Popup>
@@ -666,18 +682,7 @@ function ThreadRow({
           exiting && "sidebar-thread-exit"
         )}
         style={
-          exiting
-            ? {
-                height: 0,
-                marginBottom: 0,
-                marginTop: 0,
-                paddingTop: 0,
-                paddingBottom: 0,
-                overflow: "hidden",
-                opacity: 0,
-                transition: "height 200ms ease-in, margin 200ms ease-in, padding 200ms ease-in, opacity 200ms ease-in",
-              }
-            : animateDelay !== undefined
+          animateDelay !== undefined && !exiting
               ? { animationDelay: `${animateDelay}ms` }
               : undefined
         }
