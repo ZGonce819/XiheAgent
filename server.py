@@ -508,29 +508,34 @@ def get_agent(config: RunnableConfig):
         result = evaluate_command(command, effective_backend_type)
         return result.reason
 
+    general_tools = [
+        web_search,
+        fetch_url,
+        load_default_review_rules,
+        get_review_diff_summary,
+        validate_review_finding_location,
+        add_review_finding,
+        list_review_findings,
+        list_skills,
+        create_skill,
+    ]
+    platform_tools = [
+        open_gitee_pull_request,
+        publish_gitee_pr_comment,
+        get_gitee_pull_request_context,
+        open_github_pull_request,
+        publish_github_pr_comment,
+        get_github_pull_request_context,
+        open_codeup_merge_request,
+        publish_codeup_mr_comment,
+        get_codeup_merge_request_context,
+    ]
+    tools = general_tools + (platform_tools if repo_url else [])
+
     return create_deep_agent(
         model=main_model,
-        tools=[
-            web_search,
-            fetch_url,
-            open_gitee_pull_request,
-            publish_gitee_pr_comment,
-            get_gitee_pull_request_context,
-            open_github_pull_request,
-            publish_github_pr_comment,
-            get_github_pull_request_context,
-            open_codeup_merge_request,
-            publish_codeup_mr_comment,
-            get_codeup_merge_request_context,
-            load_default_review_rules,
-            get_review_diff_summary,
-            validate_review_finding_location,
-            add_review_finding,
-            list_review_findings,
-            list_skills,
-            create_skill,
-        ],
-        system_prompt=get_system_prompt(task_kind),
+        tools=tools,
+        system_prompt=get_system_prompt(task_kind, has_repo=bool(repo_url)),
         subagents=[
             _general_purpose_subagent(subagent_model, skill_sources, skill_middleware),
             _code_reviewer_subagent(subagent_model, skill_sources, skill_middleware),

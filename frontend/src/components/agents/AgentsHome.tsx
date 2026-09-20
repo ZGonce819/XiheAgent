@@ -30,7 +30,6 @@ export function AgentsHome({ initialProject = null }: { initialProject?: string 
     initialProject ? "local" : (profileQuery.data?.backendType ?? "local")
   )
   const [sandboxWarning, setSandboxWarning] = useState(false)
-  const [repoWarning, setRepoWarning] = useState(false)
   const [selectedProject, setSelectedProject] = useState<string | null>(initialProject)
   const [localWorkDir, setLocalWorkDir] = useState<string | null>(null)
 
@@ -129,10 +128,6 @@ export function AgentsHome({ initialProject = null }: { initialProject?: string 
           <div className="w-full">
             <AgentPromptBar
               onSubmit={(prompt, images) => {
-                if (!repo) {
-                  setRepoWarning(true)
-                  return false
-                }
                 setSubmission({ prompt, images })
                 // 新任务页此刻还没有 threadId：先标记一次匿名出现信号，
                 // 侧边栏/顶部栏拿到新建对话后立即补播动画，不等流式响应
@@ -187,17 +182,6 @@ export function AgentsHome({ initialProject = null }: { initialProject?: string 
           if (!open) setSandboxWarning(false)
         }}
         onConfirm={() => setSandboxWarning(false)}
-      />
-      <ConfirmDialog
-        open={repoWarning}
-        title="未选择仓库"
-        description="请先选择一个代码仓库后再发送消息"
-        confirmText="知道了"
-        showCancel={false}
-        onOpenChange={(open) => {
-          if (!open) setRepoWarning(false)
-        }}
-        onConfirm={() => setRepoWarning(false)}
       />
     </div>
   )

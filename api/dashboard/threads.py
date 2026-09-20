@@ -154,10 +154,7 @@ async def dashboard_decide_approval(
 @router.post("/stream-message")
 async def dashboard_stream_new_message(body: DashboardThreadMessageRequest) -> StreamingResponse:
     """创建新会话并开始流式对话。"""
-    try:
-        repo_url = normalize_repo_url(body.repo)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    repo_url = normalize_repo_url(body.repo)
     requested_backend = body.backend_type or ("sandbox" if get_settings().use_sandbox else "local")
     if requested_backend == "sandbox" and not get_settings().use_sandbox:
         raise HTTPException(status_code=400, detail="您未开启沙盒配置，请开启后再尝试")
@@ -202,10 +199,7 @@ async def dashboard_stream_existing_message(
                 status_code=409,
                 detail=f"此对话在{env_label}环境中创建，请切换到{env_label}模式后继续",
             )
-    try:
-        repo_url = normalize_repo_url(body.repo, fallback=(task or {}).get("repo_url"))
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    repo_url = normalize_repo_url(body.repo, fallback=(task or {}).get("repo_url"))
     if body.edit_message_id:
         if not body.rollback_confirmed:
             raise HTTPException(status_code=400, detail="请先确认回退影响")

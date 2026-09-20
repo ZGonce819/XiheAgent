@@ -68,7 +68,7 @@ def sse_part(event: str, data: dict[str, Any]) -> str:
 def build_streaming_response(
     *,
     thread_id: str,
-    repo_url: str,
+    repo_url: str | None,
     content: str,
     rollback_message_id: str | None = None,
     rollback_message_content: str | None = None,

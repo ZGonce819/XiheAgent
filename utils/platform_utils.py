@@ -150,7 +150,7 @@ def parse_repo_url(repo_url: str) -> ScmRepo:
     return parse_gitee_repo_url(repo_url)
 
 
-def normalize_repo_url(repo: str | None, *, fallback: str | None = None) -> str:
+def normalize_repo_url(repo: str | None, *, fallback: str | None = None) -> str | None:
     """把前端传入的仓库字段规范化为标准 clone URL。
 
     支持 Gitee、GitHub 和 Codeup 三个平台，自动按域名识别。
@@ -167,14 +167,14 @@ def normalize_repo_url(repo: str | None, *, fallback: str | None = None) -> str:
         fallback: 当 ``repo`` 为空时使用的备选地址，通常来自已有 thread 的 repo_url。
 
     Returns:
-        规范化后的完整 HTTPS clone URL。
+        规范化后的完整 HTTPS clone URL；如果 ``repo`` 和 ``fallback`` 都为空则返回 ``None``。
 
     Raises:
-        ValueError: 仓库地址缺失或格式无法解析。
+        ValueError: 仓库地址格式无法解析。
     """
     text = (repo or fallback or "").strip()
     if not text:
-        raise ValueError("未提供仓库地址，请先配置仓库 URL。")
+        return None
 
     if text.startswith(("http://", "https://")):
         result = parse_repo_url(text).clone_url

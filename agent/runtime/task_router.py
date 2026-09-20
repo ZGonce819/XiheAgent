@@ -225,7 +225,7 @@ def _ensure_repository(
 
 def initialize_task_record(
     *,
-    repo_url: str,
+    repo_url: str | None,
     prompt: str,
     thread_id: str | None = None,
     record_user_message: bool = True,
@@ -244,17 +244,27 @@ def initialize_task_record(
     """
 
     thread_id = thread_id or str(uuid.uuid4())
-    repo = parse_repo_url(repo_url)
     if backend_type is None:
         from config.app_config import get_settings
         backend_type = "sandbox" if get_settings().use_sandbox else "local"
+    if repo_url:
+        repo = parse_repo_url(repo_url)
+        title = prompt[:80] or f"{repo.owner}/{repo.repo}"
+        store_repo_url = repo.clone_url
+        repo_owner = repo.owner
+        repo_name = repo.repo
+    else:
+        title = prompt[:80]
+        store_repo_url = ""
+        repo_owner = ""
+        repo_name = ""
     get_store().upsert_thread(
         thread_id=thread_id,
-        title=prompt[:80] or f"{repo.owner}/{repo.repo}",
+        title=title,
         user_prompt=prompt,
-        repo_url=repo.clone_url,
-        repo_owner=repo.owner,
-        repo_name=repo.repo,
+        repo_url=store_repo_url,
+        repo_owner=repo_owner,
+        repo_name=repo_name,
         latest_run_status="running",
         backend_type=backend_type,
         project_name=project_name,
@@ -267,7 +277,7 @@ def initialize_task_record(
 
 def run_agent_task(
     *,
-    repo_url: str,
+    repo_url: str | None,
     prompt: str,
     thread_id: str | None = None,
     event_sink: RuntimeEventSink | None = None,
@@ -388,38 +398,56 @@ def run_agent_task(
         record_event(thread_id, "plan:approved", "用户已确认技术方案", kind="other", status="completed")
     logger.info("任务开始：thread_id=%s repo_url=%s", thread_id, repo_url)
     record_event(thread_id, "created", "任务已创建", status="completed")
-    record_event(thread_id, "repo", "解析仓库", status="in_progress")
-    repo = parse_repo_url(repo_url)
-    logger.info("仓库解析成功：owner=%s repo=%s", repo.owner, repo.repo)
-    record_event(thread_id, "repo", "解析仓库", status="completed")
     if backend_type is None:
         from config.app_config import get_settings
         backend_type = "sandbox" if get_settings().use_sandbox else "local"
-    store.upsert_thread(
-        thread_id=thread_id,
-        title=coding_prompt[:80] or f"{repo.owner}/{repo.repo}",
-        user_prompt=display_prompt,
-        repo_url=repo.clone_url,
-        repo_owner=repo.owner,
-        repo_name=repo.repo,
-        latest_run_status="running",
-        backend_type=backend_type,
-        project_name=existing_thread.get("project_name") if existing_thread else None,
-    )
-    run_id = run_id or str(uuid.uuid4())
-    repository_path = _ensure_repository(
-        thread_id=thread_id,
-        repo=repo,
-        backend_type=backend_type,
-    )
-    repository_available = repository_path is not None
-    repository_agent_path = (
-        str(repository_path) if backend_type == "sandbox" and repository_path else None
-    )
+    if repo_url:
+        record_event(thread_id, "repo", "解析仓库", status="in_progress")
+        repo = parse_repo_url(repo_url)
+        logger.info("仓库解析成功：owner=%s repo=%s", repo.owner, repo.repo)
+        record_event(thread_id, "repo", "解析仓库", status="completed")
+        store.upsert_thread(
+            thread_id=thread_id,
+            title=coding_prompt[:80] or f"{repo.owner}/{repo.repo}",
+            user_prompt=display_prompt,
+            repo_url=repo.clone_url,
+            repo_owner=repo.owner,
+            repo_name=repo.repo,
+            latest_run_status="running",
+            backend_type=backend_type,
+            project_name=existing_thread.get("project_name") if existing_thread else None,
+        )
+        run_id = run_id or str(uuid.uuid4())
+        repository_path = _ensure_repository(
+            thread_id=thread_id,
+            repo=repo,
+            backend_type=backend_type,
+        )
+        repository_available = repository_path is not None
+        repository_agent_path = (
+            str(repository_path) if backend_type == "sandbox" and repository_path else None
+        )
+        repo_clone_url = repo.clone_url
+    else:
+        store.upsert_thread(
+            thread_id=thread_id,
+            title=coding_prompt[:80],
+            user_prompt=display_prompt,
+            repo_url="",
+            repo_owner="",
+            repo_name="",
+            latest_run_status="running",
+            backend_type=backend_type,
+            project_name=existing_thread.get("project_name") if existing_thread else None,
+        )
+        run_id = run_id or str(uuid.uuid4())
+        repository_available = False
+        repository_agent_path = None
+        repo_clone_url = ""
     # 延迟导入，避免 services 包的兼容导出在 runtime 初始化期间形成循环依赖。
     from services.repo_rollback import git_head, git_parent
     base_commit = (
-        git_head(repo.clone_url, store)
+        git_head(repo_clone_url, store)
         if repository_available and backend_type != "sandbox"
         else None
     )
@@ -429,7 +457,7 @@ def run_agent_task(
     agent = build_agent_for_runtime(
         thread_id=thread_id,
         task_kind=task_kind,
-        repo_url=repo.clone_url if repository_available else None,
+        repo_url=repo_clone_url if repository_available else None,
         model_id=model_id,
         backend_type=backend_type,
     )
@@ -444,7 +472,7 @@ def run_agent_task(
             thread_id=thread_id,
             run_id=run_id,
             content=build_agent_user_content(
-                repo_url=repo.clone_url,
+                repo_url=repo_clone_url,
                 task_kind=task_kind,
                 prompt=coding_prompt,
                 display_prompt=display_prompt,
@@ -462,7 +490,7 @@ def run_agent_task(
                 run_id=run_id,
                 interrupt_id=str(result.get("interrupt_id") or ""),
                 approval=result.get("approval") or {},
-                repo_url=repo.clone_url,
+                repo_url=repo_clone_url,
                 backend_type=backend_type,
                 task_kind=task_kind,
                 model_id=model_id,
@@ -484,14 +512,14 @@ def run_agent_task(
         store.finish_open_run_events(thread_id, status="completed")
         store.update_thread_status(thread_id, "completed")
         head_commit = (
-            git_head(repo.clone_url, store)
+            git_head(repo_clone_url, store)
             if repository_available and backend_type != "sandbox"
             else None
         )
         # 首次任务可能由 Agent 自己完成 clone，启动前尚无 HEAD。此时第一
         # 个提交的父提交就是可回退的仓库基线。
         if base_commit is None and head_commit:
-            base_commit = git_parent(repo.clone_url, store)
+            base_commit = git_parent(repo_clone_url, store)
         store.record_run(
             run_id=run_id,
             thread_id=thread_id,
@@ -503,7 +531,7 @@ def run_agent_task(
         record_event(thread_id, "done", "任务完成", status="completed")
         messages = result.get("messages", [])
         final_answer = extract_final_assistant_text(messages)
-        if final_answer:
+        if final_answer and repo_url:
             from agent.graph.graph import get_langgraph_store
 
             latest_thread = store.get_thread(thread_id) or {}
@@ -585,7 +613,11 @@ def resume_agent_task(
         )
         model_id = pending.get("modelId")
         run_id = str(pending.get("runId") or uuid.uuid4())
-        repo = parse_repo_url(repo_url)
+        if repo_url:
+            repo = parse_repo_url(repo_url)
+            repo_clone_url = repo.clone_url
+        else:
+            repo_clone_url = ""
         latest_run = store.get_latest_run(thread_id) or {}
         base_commit = latest_run.get("base_commit")
 
@@ -599,7 +631,7 @@ def resume_agent_task(
         agent = build_agent_for_runtime(
             thread_id=thread_id,
             task_kind=task_kind,
-            repo_url=repo.clone_url,
+            repo_url=repo_clone_url or None,
             model_id=model_id,
             backend_type=backend_type,
         )
@@ -634,7 +666,7 @@ def resume_agent_task(
                 run_id=run_id,
                 interrupt_id=str(result.get("interrupt_id") or ""),
                 approval=result.get("approval") or {},
-                repo_url=repo.clone_url,
+                repo_url=repo_clone_url,
                 backend_type=backend_type,
                 task_kind=task_kind,
                 model_id=model_id,
@@ -672,7 +704,7 @@ def resume_agent_task(
         from services.repo_rollback import git_head
 
         head_commit = (
-            git_head(repo.clone_url, store) if backend_type != "sandbox" else None
+            git_head(repo_clone_url, store) if backend_type != "sandbox" and repo_clone_url else None
         )
         store.record_run(
             run_id=run_id,
