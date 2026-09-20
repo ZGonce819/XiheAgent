@@ -41,7 +41,7 @@ class RunRepo(ConnectionManager):
             try:
                 self.execute(f"ALTER TABLE runs ADD COLUMN {column} VARCHAR(64) NULL")
             except Exception:
-                # Existing installations already have the column.
+                # 已有该列的旧安装会抛异常，忽略即可。
                 pass
 
     def record_run(
@@ -65,6 +65,8 @@ class RunRepo(ConnectionManager):
             status: 运行状态。
             error: 可选的错误信息。
             finished: 是否已结束，默认 ``False``。
+            base_commit: 运行时的基准提交哈希。
+            head_commit: 运行结束时的最新提交哈希。
 
         Returns:
             无返回值。
@@ -107,7 +109,14 @@ class RunRepo(ConnectionManager):
         )
 
     def count_runs(self, thread_id: str) -> int:
-        """统计某个 thread 的运行次数。"""
+        """统计某个 thread 的运行次数。
+
+        Args:
+            thread_id: 所属会话 ID。
+
+        Returns:
+            该 thread 下的运行记录条数。
+        """
         row = self.fetch_one(
             "SELECT COUNT(*) AS cnt FROM runs WHERE thread_id = %s",
             (thread_id,),

@@ -1,4 +1,4 @@
-"""Unified command classification for local and OpenSandbox execution."""
+"""本地与沙箱执行环境的统一命令分类策略。"""
 
 from __future__ import annotations
 
@@ -40,8 +40,8 @@ _CATEGORY_PATTERNS: tuple[tuple[str, str], ...] = (
     ("modify_workspace_files", r"^(?:cp|copy|xcopy|robocopy|mv|move|ren|rename|mkdir|md|touch|new-item)\b"),
     ("install_dependencies", r"^(?:(?:python(?:3)?\s+-m\s+)?pip(?:3)?\s+(?:install|uninstall)|npm\s+(?:install|i|uninstall|ci)|pnpm\s+(?:install|add|remove)|yarn\s+(?:install|add|remove))\b"),
     ("run_tests", r"^(?:pytest\b|python(?:3)?\s+-m\s+pytest\b|npm\s+(?:test|run\s+test)\b|pnpm\s+test\b|yarn\s+test\b)"),
-    # Maven/Gradle commands cover both dependency inspection and project builds.
-    # They are still governed by the user's backend preference for run_build.
+    # Maven/Gradle 命令同时覆盖依赖检查和项目构建。
+    # 它们仍然受用户对 run_build 的后端偏好设置管辖。
     ("run_build", r"^(?:mvn|mvnw|gradle|gradlew)\b|^(?:ruff|mypy|flake8|black|isort|tsc|vite|webpack|rollup)\b|^(?:npm|pnpm|yarn)\s+(?:run\s+)?(?:build|lint|format|typecheck)\b"),
     ("run_project_script", r"^(?:python(?:3)?\s+(?!-m\s+(?:pip|pytest)\b).+|node\s+.+|(?:npm|pnpm|yarn)\s+run\s+.+)$"),
     ("git_commit", r"^git\s+(?:add|commit|merge|rebase|cherry-pick|revert|stash)\b"),
@@ -85,7 +85,14 @@ git 允许把全局选项写在子命令前面（``git -C <路径> status``、``
 
 
 def _parts(command: str) -> list[str]:
-    """Split common compound shell forms so every segment is classified."""
+    """拆分复合 Shell 命令，使每一段都能独立分类。
+
+    Args:
+        command: 原始命令字符串，可包含 ``&&``、``||``、``;``、``|`` 等连接符。
+
+    Returns:
+        拆分后的非空命令片段列表。
+    """
     return [part.strip() for part in re.split(r"\s*(?:&&|\|\||;|\|)\s*", command) if part.strip()]
 
 
@@ -108,7 +115,15 @@ def _strip_git_global_options(part: str) -> str:
 
 
 def evaluate_command(command: str, backend_type: str) -> CommandPolicyResult:
-    """Apply immutable rules first, then preferences and backend defaults."""
+    """对命令执行分类：先应用不可变规则，再结合偏好设置与后端默认值。
+
+    Args:
+        command: 待分类的原始命令字符串。
+        backend_type: 后端类型（``"local"`` 或 ``"sandbox"``）。
+
+    Returns:
+        包含 ``action``、``category``、``reason`` 的分类结果。
+    """
     normalized = command.strip()
     if not normalized:
         return CommandPolicyResult("deny", "invalid", "禁止执行空命令")
@@ -157,8 +172,7 @@ def evaluate_command(command: str, backend_type: str) -> CommandPolicyResult:
     if any(item.action == "approval" for item in decisions):
         item = next(item for item in decisions if item.action == "approval")
         return CommandPolicyResult("approval", item.category, item.reason)
-    # Compound commands commonly start with ``cd``.  Preserve the meaningful
-    # category of the actual operation instead of reporting the navigation step
-    # as ``read_only``.
+    # 复合命令通常以 ``cd`` 开头。保留实际操作的有意义分类，
+    # 而不是把导航步骤报告为 ``read_only``。
     chosen = next((item for item in reversed(decisions) if item.category != "read_only"), decisions[0])
     return CommandPolicyResult("allow", chosen.category, chosen.reason)

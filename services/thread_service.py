@@ -21,6 +21,16 @@ logger = logging.getLogger(__name__)
 
 
 def _last_user_text(messages: list[dict[str, Any]]) -> str:
+    """从消息列表末尾提取最后一条用户消息的纯文本内容。
+
+    用于比对保存的会话快照与当前消息是否一致，以决定是否复用缓存视图。
+
+    Args:
+        messages: 前端消息字典列表。
+
+    Returns:
+        最后一条用户消息的拼接文本；无用户消息时返回空字符串。
+    """
     for message in reversed(messages):
         author = message.get("author") or message.get("role")
         if author != "user":
@@ -208,7 +218,16 @@ def conversation_snapshot(
     *,
     edited_message_id: str | None = None,
 ) -> dict[str, Any]:
-    """Build the read-only UI state archived before a message edit."""
+    """构建消息编辑前归档的只读 UI 状态快照。
+
+    Args:
+        thread: 包含会话原始字段的字典。
+        edited_message_id: 正在编辑的用户消息 ID，留空表示非编辑场景。
+
+    Returns:
+        包含 ``messages``、``runEvents``、``editedMessageId``
+        和 ``editedUserIndex`` 的字典。
+    """
 
     messages = message_payload(thread)
     edited_user_index = None

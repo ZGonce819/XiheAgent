@@ -26,6 +26,10 @@ class DiffFile:
 
     ``changed_lines`` 只记录新文件中的新增或修改行号，用于校验 review finding
     是否真的落在本次 diff 上。删除行没有新文件行号，不作为行级 finding 目标。
+
+    Attributes:
+        path: 规范化后的文件路径（正斜杠，无 ``a/`` 或 ``b/`` 前缀）。
+        changed_lines: 新文件中的新增或修改行号元组。
     """
 
     path: str
@@ -34,7 +38,14 @@ class DiffFile:
 
 @dataclass(frozen=True)
 class DiffSummary:
-    """本次 review diff 的结构化摘要。"""
+    """本次 review diff 的结构化摘要。
+
+    Attributes:
+        base: 对比基准分支或 commit。
+        head: 可选目标分支。
+        files: 变更文件列表。
+        raw_diff: 原始 unified diff 文本。
+    """
 
     base: str
     head: str | None

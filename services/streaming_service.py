@@ -100,9 +100,8 @@ def build_streaming_response(
         redis_client = getattr(checkpointer, "_redis", None) or getattr(checkpointer, "client", None)
         if redis_client is not None:
             checkpoint_id = checkpoint_before_latest_user(redis_client, thread_id)
-        # A first-turn edit has no parent checkpoint. Removing only the graph
-        # state gives the edited prompt a clean branch while preserving the
-        # dashboard thread and its audit records.
+        # 首轮编辑没有父 checkpoint，仅清理图状态即可让编辑后的提示
+        # 获得一条干净分支，同时保留 dashboard 会话及其审计记录。
         if checkpoint_id is None:
             # 某些 RedisSaver 版本在分支运行后无法枚举旧父节点。此时
             # 当前请求已经通过前端确认了回退影响，清理图状态并从编辑后的
@@ -259,8 +258,9 @@ def build_streaming_response(
                         event_sink=event_sink,
                     )
                 # 某些 LangGraph/模型版本会正常返回最终消息，但不发出可解析的
-                # content-block-delta。此时前端没有正文和工具记录，会误显示“任务已停止”。
-                # 用最终 checkpoint 输出补发一次正文，且仅在流式正文完全缺失时执行，避免重复。
+                # content-block-delta。此时前端没有正文和工具记录，会误显示
+                # “任务已停止”。用最终 checkpoint 输出补发一次正文，且仅在
+                # 流式正文完全缺失时执行，避免重复。
                 # 只补发当前末条 AI 回复；审批/工具结尾不能向前捞出上一轮方案。
                 result_messages = result.get("messages", [])
                 last_message = result_messages[-1] if result_messages else {}

@@ -138,6 +138,16 @@ class LocalMySQLStore:
     def list_thread_ids_by_source(
         self, source: str, *, repo_url: str | None = None, user_prompt: str | None = None
     ) -> list[str]:
+        """按来源查询匹配的 thread ID 列表。
+
+        Args:
+            source: 会话来源标识。
+            repo_url: 可选的仓库 URL 过滤条件。
+            user_prompt: 可选的用户输入过滤条件。
+
+        Returns:
+            匹配的 thread ID 字符串列表。
+        """
         return self.thread_repo.list_thread_ids_by_source(
             source, repo_url=repo_url, user_prompt=user_prompt
         )
@@ -269,19 +279,54 @@ class LocalMySQLStore:
         return self.run_repo.get_latest_run(thread_id)
 
     def count_runs(self, thread_id: str) -> int:
-        """统计某个 thread 的运行次数。"""
+        """统计某个 thread 的运行次数。
+
+        Args:
+            thread_id: 会话唯一标识。
+
+        Returns:
+            运行次数。
+        """
         return self.run_repo.count_runs(thread_id)
 
     def add_conversation_version(self, thread_id: str, payload: dict[str, Any]) -> None:
+        """保存一条会话版本快照。
+
+        Args:
+            thread_id: 会话唯一标识。
+            payload: 版本内容字典。
+        """
         self.conversation_version_repo.add_version(thread_id, payload)
 
     def list_conversation_versions(self, thread_id: str) -> list[dict[str, Any]]:
+        """读取某个会话的所有版本快照。
+
+        Args:
+            thread_id: 会话唯一标识。
+
+        Returns:
+            版本字典列表。
+        """
         return self.conversation_version_repo.list_versions(thread_id)
 
     def save_conversation_view(self, thread_id: str, messages: list[dict[str, Any]]) -> None:
+        """保存当前会话的消息视图快照。
+
+        Args:
+            thread_id: 会话唯一标识。
+            messages: 当前页面完整消息列表。
+        """
         self.conversation_version_repo.save_current_view(thread_id, messages)
 
     def get_conversation_view(self, thread_id: str) -> list[dict[str, Any]] | None:
+        """读取某个会话最近保存的消息视图快照。
+
+        Args:
+            thread_id: 会话唯一标识。
+
+        Returns:
+            消息字典列表，未找到时返回 None。
+        """
         return self.conversation_version_repo.get_current_view(thread_id)
 
     # ── Run Event 操作 ───────────────────────────────────────────────────────

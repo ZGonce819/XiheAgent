@@ -42,7 +42,17 @@ logger = logging.getLogger(__name__)
 
 
 def _is_latest_user_message(message_id: str, thread_id: str, messages: list[dict[str, Any]], original_content: str | None = None) -> bool:
-    """校验消息确实是当前线程最后一条用户消息。"""
+    """校验消息确实是当前线程最后一条用户消息。
+
+    Args:
+        message_id: 待校验的消息 ID。
+        thread_id: 所属会话 ID。
+        messages: 当前会话的可见消息列表。
+        original_content: 消息原始内容，用于 ID 前缀匹配回退。
+
+    Returns:
+        ``True`` 表示该消息确认为最后一条用户消息。
+    """
     user_messages = [message for message in messages if message.get("role") == "user"]
     if not user_messages:
         return False
@@ -94,6 +104,7 @@ def dashboard_thread_detail(thread_id: str) -> dict[str, Any]:
 
 @router.get("/{thread_id}/approval")
 def dashboard_pending_approval(thread_id: str) -> dict[str, Any] | None:
+    """返回指定会话的待审批操作信息。"""
     if get_task(thread_id) is None:
         raise HTTPException(status_code=404, detail="thread not found")
     return public_approval(get_pending_approval(thread_id))
@@ -103,6 +114,15 @@ def dashboard_pending_approval(thread_id: str) -> dict[str, Any] | None:
 async def dashboard_explain_approval(
     thread_id: str, body: dict[str, Any]
 ) -> dict[str, str]:
+    """为待审批操作生成自然语言解释。
+
+    Args:
+        thread_id: 会话 ID。
+        body: 包含 ``approval_id`` 的请求体。
+
+    Returns:
+        包含 ``explanation`` 字段的字典。
+    """
     if get_task(thread_id) is None:
         raise HTTPException(status_code=404, detail="thread not found")
     pending = get_pending_approval(thread_id)
@@ -115,7 +135,7 @@ async def dashboard_explain_approval(
         explanation = await asyncio.to_thread(explain_pending_approval, pending)
     except Exception as exc:
         logger.warning(
-            "Failed to explain pending approval for thread %s (%s)",
+            "解释待审批操作失败：thread_id=%s error=%s",
             thread_id,
             type(exc).__name__,
         )
@@ -129,6 +149,7 @@ async def dashboard_explain_approval(
 async def dashboard_decide_approval(
     thread_id: str, body: dict[str, Any]
 ) -> StreamingResponse:
+    """对命令审批做出同意或拒绝决定，并返回流式响应。"""
     task = get_task(thread_id)
     pending = get_pending_approval(thread_id)
     if task is None:
@@ -243,6 +264,7 @@ async def dashboard_stream_existing_message(
 
 @router.post("/{thread_id}/edit-preview")
 def dashboard_edit_preview(thread_id: str, body: DashboardEditPreviewRequest) -> dict[str, Any]:
+    """预览编辑消息的影响范围，返回受消息数和代码变更状态。"""
     task = get_task(thread_id)
     if task is None:
         raise HTTPException(status_code=404, detail="thread not found")
@@ -272,6 +294,7 @@ def dashboard_edit_preview(thread_id: str, body: DashboardEditPreviewRequest) ->
 
 @router.put("/{thread_id}/view-snapshot", status_code=204)
 def dashboard_save_view_snapshot(thread_id: str, body: DashboardViewSnapshotRequest) -> None:
+    """保存对话视图快照，供前端恢复展示状态。"""
     if get_task(thread_id) is None:
         raise HTTPException(status_code=404, detail="thread not found")
     get_store().save_conversation_view(thread_id, body.messages)
@@ -280,6 +303,7 @@ def dashboard_save_view_snapshot(thread_id: str, body: DashboardViewSnapshotRequ
 
 @router.patch("/{thread_id}/title")
 def dashboard_update_thread_title(thread_id: str, body: DashboardThreadTitleUpdateRequest) -> dict[str, Any]:
+    """更新会话标题。"""
     task = get_task(thread_id)
     if task is None:
         raise HTTPException(status_code=404, detail="thread not found")

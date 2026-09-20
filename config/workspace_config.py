@@ -1,4 +1,4 @@
-"""Workspace directory preferences persisted for the local dashboard user."""
+"""本地仪表板用户的工作区目录偏好持久化配置。"""
 
 from __future__ import annotations
 
@@ -22,11 +22,11 @@ def _path() -> Path:
 
 
 def load_workspace_config() -> dict[str, str]:
-    """Load persisted workspace configuration.
+    """加载已持久化的工作区配置。
 
     Returns:
-        Dictionary with workspace_root, projects_dir, skills_dir if persisted.
-        Empty dict if no configuration has been saved.
+        包含 ``workspace_root``、``projects_dir``、``skills_dir`` 的字典；
+        未保存过配置时返回空字典。
     """
     path = _path()
     if not path.exists():
@@ -43,17 +43,17 @@ def save_workspace_config(
     projects_dir: str | None = None,
     skills_dir: str | None = None,
 ) -> dict[str, str]:
-    """Persist workspace configuration.
+    """持久化工作区配置。
 
-    Only provided values are updated; others remain unchanged.
+    仅更新已提供的字段，其余保持不变。
 
     Args:
-        workspace_root: New workspace root path.
-        projects_dir: New projects directory path.
-        skills_dir: New skills directory path.
+        workspace_root: 新的工作区根目录路径。
+        projects_dir: 新的项目目录路径。
+        skills_dir: 新的技能目录路径。
 
     Returns:
-        The updated configuration dictionary.
+        更新后的配置字典。
     """
     stored = load_workspace_config()
 

@@ -1,4 +1,4 @@
-"""Persistent automation configuration for the dashboard."""
+"""仪表板自动化任务配置的持久化存储。"""
 
 from __future__ import annotations
 
@@ -14,10 +14,22 @@ _AUTOMATIONS_FILENAME = "automations.json"
 
 
 def _automations_path() -> Path:
+    """返回自动化任务配置文件的完整路径。
+
+    Returns:
+        数据目录下的 ``automations.json`` 路径。
+    """
     return get_settings().data_dir / _AUTOMATIONS_FILENAME
 
 
 def _load_automations() -> list[dict[str, Any]]:
+    """从磁盘加载所有自动化任务定义。
+
+    文件不存在或格式损坏时返回空列表，不抛异常。
+
+    Returns:
+        自动化任务定义列表。
+    """
     path = _automations_path()
     if not path.exists():
         return []
@@ -29,6 +41,11 @@ def _load_automations() -> list[dict[str, Any]]:
 
 
 def _save_automations(automations: list[dict[str, Any]]) -> None:
+    """将自动化任务定义列表写入磁盘。
+
+    Args:
+        automations: 待持久化的自动化任务定义列表。
+    """
     path = _automations_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -38,6 +55,11 @@ def _save_automations(automations: list[dict[str, Any]]) -> None:
 
 
 def list_automations() -> list[dict[str, Any]]:
+    """返回所有自动化任务定义，按更新时间倒序排列。
+
+    Returns:
+        按 ``updatedAt`` 降序排列的自动化任务定义列表。
+    """
     return sorted(
         _load_automations(),
         key=lambda item: str(item.get("updatedAt") or ""),
@@ -92,6 +114,14 @@ def get_automation(automation_id: str) -> dict[str, Any] | None:
 
 
 def create_automation(payload: dict[str, Any]) -> dict[str, Any]:
+    """创建一条新的自动化任务定义并持久化。
+
+    Args:
+        payload: 包含任务名称、指令、执行计划等字段的请求体。
+
+    Returns:
+        新创建的自动化任务定义字典。
+    """
     now = datetime.now(UTC).isoformat()
     automation = {
         "id": str(uuid.uuid4())[:8],
@@ -120,6 +150,15 @@ def create_automation(payload: dict[str, Any]) -> dict[str, Any]:
 def update_automation(
     automation_id: str, payload: dict[str, Any]
 ) -> dict[str, Any] | None:
+    """更新一条自动化任务定义的可修改字段。
+
+    Args:
+        automation_id: 自动化任务 ID。
+        payload: 需要更新的字段字典，仅处理已知可修改的键。
+
+    Returns:
+        更新后的自动化任务定义；ID 不存在时返回 ``None``。
+    """
     automations = _load_automations()
     aliases = {"model_id": "model"}
     allowed = {
@@ -151,6 +190,14 @@ def update_automation(
 
 
 def delete_automation(automation_id: str) -> bool:
+    """删除一条自动化任务定义。
+
+    Args:
+        automation_id: 自动化任务 ID。
+
+    Returns:
+        成功删除返回 ``True``，ID 不存在返回 ``False``。
+    """
     automations = _load_automations()
     remaining = [item for item in automations if item.get("id") != automation_id]
     if len(remaining) == len(automations):

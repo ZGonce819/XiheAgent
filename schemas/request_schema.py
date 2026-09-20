@@ -38,15 +38,38 @@ class DashboardThreadMessageRequest(BaseModel):
 
 
 class DashboardEditPreviewRequest(BaseModel):
+    """编辑消息预览请求体。
+
+    用于在实际编辑前校验消息 ID 并获取预览内容。
+
+    Attributes:
+        message_id: 待编辑的用户消息 ID。
+        original_content: 消息原文，用于校验实时 ID。
+    """
+
     message_id: str = Field(min_length=1, description="待编辑的用户消息 ID")
     original_content: str | None = Field(default=None, description="消息原文，用于校验实时 ID")
 
 
 class DashboardViewSnapshotRequest(BaseModel):
+    """页面视图快照请求体。
+
+    用于将前端当前完整消息视图同步到后端。
+
+    Attributes:
+        messages: 当前页面完整消息视图。
+    """
+
     messages: list[dict[str, Any]] = Field(description="当前页面完整消息视图")
 
 
 class DashboardThreadTitleUpdateRequest(BaseModel):
+    """会话标题更新请求体。
+
+    Attributes:
+        title: 新的会话标题。
+    """
+
     title: str = Field(min_length=1, max_length=500, description="新的会话标题")
 
 

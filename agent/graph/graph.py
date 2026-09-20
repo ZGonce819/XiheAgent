@@ -1,4 +1,4 @@
-"""xihe-agent LangGraph 基础设施入口。
+"""LangGraph 基础设施入口。
 
 提供 checkpointer、store 和 Agent 构建器的 singleton 访问器。
 所有对象采用懒初始化模式：首次调用时创建并缓存，后续调用直接返回缓存实例。

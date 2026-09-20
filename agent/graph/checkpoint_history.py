@@ -382,12 +382,19 @@ def extract_messages_from_writes(redis_client: Any, thread_id: str) -> list[dict
 
 
 def checkpoint_before_latest_user(redis_client: Any, thread_id: str) -> str | None:
-    """Return the checkpoint immediately before the latest user message.
+    """获取最新用户消息之前的 checkpoint。
 
-    ``None`` means the latest user message is the first turn, so callers should
-    start the thread from an empty checkpoint. Writes are scanned along the
-    active lineage and message ids are deduplicated because some saver versions
-    persist cumulative message lists.
+    沿着活跃 lineage 扫描 checkpoint writes，找到最后一条用户消息所在的
+    checkpoint，然后返回它前一个 checkpoint。如果最新用户消息是首轮对话，
+    则返回 ``None``，调用方应从空 checkpoint 启动线程。
+
+    Args:
+        redis_client: Redis 客户端实例（来自 checkpointer 或直连）。
+        thread_id: LangGraph checkpoint 的会话标识。
+
+    Returns:
+        最新用户消息前一个 checkpoint 的 ID；如果用户消息是首轮则返回
+        ``None``。
     """
 
     lineage = _build_checkpoint_lineage(redis_client, thread_id)

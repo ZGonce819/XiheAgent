@@ -28,7 +28,19 @@ SCOPE_LABELS_CN = {
 def _skill_scope_context(
     scope: str, project_name: str | None, local_folder: str | None = None
 ) -> tuple[str, str | None]:
-    """规范化技能作用域参数并做可用性校验。"""
+    """规范化技能作用域参数并做可用性校验。
+
+    Args:
+        scope: 作用域原始字符串（global / project_set / local）。
+        project_name: 项目集合名称，全局作用域时可省略。
+        local_folder: 本地作用域的直接文件夹路径，无需项目绑定。
+
+    Returns:
+        ``(normalized_scope, project_name)`` 二元组。
+
+    Raises:
+        HTTPException: 作用域非法或必填参数缺失时。
+    """
     from services.skill_registry import (
         GLOBAL_SCOPE,
         LOCAL_SCOPE,
@@ -71,7 +83,14 @@ def _skill_scope_context(
 
 
 def _refresh_sandbox_skills(scope: str, project_name: str | None) -> None:
-    """技能落盘后把最新技能集同步进活跃沙箱。"""
+    """技能落盘后把最新技能集同步进活跃沙箱。
+
+    同步失败时仅记录警告，不向上层抛出异常。
+
+    Args:
+        scope: 已规范化的作用域字符串。
+        project_name: 项目名称，全局作用域时为 ``None``。
+    """
     try:
         from services.sandbox_skill_sync import refresh_sandbox_skills
 
@@ -86,7 +105,14 @@ def _refresh_sandbox_skills(scope: str, project_name: str | None) -> None:
 
 
 def _slug_or_fallback(raw_name: str) -> str:
-    """把技能名规范化为合法的目录名，失败时给出编号回退。"""
+    """把技能名规范化为合法的目录名，失败时给出编号回退。
+
+    Args:
+        raw_name: 用户提供的原始技能名称。
+
+    Returns:
+        仅包含 ASCII 合法字符的目录名 slug。
+    """
     from services.skill_registry import coerce_ascii_name
 
     return coerce_ascii_name(raw_name)
@@ -99,7 +125,17 @@ def dashboard_skills(
     local_folder: str | None = None,
     session_scoped: bool = False,
 ) -> dict[str, Any]:
-    """列出可见的 DeepAgents 技能，并标注作用域与来源。"""
+    """列出可见的 DeepAgents 技能，并标注作用域与来源。
+
+    Args:
+        project_name: 项目集合名称，不传时汇总所有项目。
+        backend_type: 后端类型，为 ``"sandbox"`` 时排除本地作用域。
+        local_folder: 本地作用域的直接文件夹路径。
+        session_scoped: 是否为会话级别查询。
+
+    Returns:
+        包含技能列表、作用域信息和可写作用域的字典。
+    """
     from services.skill_registry import (
         GLOBAL_SCOPE,
         LOCAL_SCOPE,
@@ -238,7 +274,19 @@ def dashboard_skills(
 def dashboard_skill_detail(
     skill_id: str, scope: str = "global", project_name: str | None = None
 ) -> dict[str, Any]:
-    """读取单个技能的完整内容。"""
+    """读取单个技能的完整内容。
+
+    Args:
+        skill_id: 技能唯一标识符。
+        scope: 作用域字符串，默认为 ``"global"``。
+        project_name: 项目名称，全局作用域时可省略。
+
+    Returns:
+        技能元数据与 SKILL.md 正文内容的字典。
+
+    Raises:
+        HTTPException: 技能不存在或读取失败时。
+    """
     from services.skill_registry import SKILL_FILE_NAME, scope_dir, read_skill
 
     normalized, name = _skill_scope_context(scope, project_name)
@@ -257,7 +305,21 @@ def dashboard_skill_detail(
 
 @router.post("", status_code=201)
 def dashboard_create_skill(body: DashboardSkillCreateRequest) -> dict[str, Any]:
-    """创建技能。"""
+    """创建技能。
+
+    支持通过 ``body.content`` 提交完整 Markdown 内容（含 frontmatter），
+    也可分别提供 ``name``、``description``、``body`` 字段。
+    当 ``content`` 包含 frontmatter 时，优先从中提取 ``name`` 和 ``description``。
+
+    Args:
+        body: 技能创建请求体。
+
+    Returns:
+        新创建技能的元数据字典。
+
+    Raises:
+        HTTPException: 参数校验失败或技能写入失败时。
+    """
     from services.skill_registry import (
         SkillValidationError,
         create_skill,
@@ -337,7 +399,20 @@ def dashboard_create_skill(body: DashboardSkillCreateRequest) -> dict[str, Any]:
 def dashboard_update_skill(
     skill_id: str, body: DashboardSkillUpdateRequest
 ) -> dict[str, Any]:
-    """更新技能内容。"""
+    """更新技能内容。
+
+    支持通过 ``body.content`` 提交完整 Markdown 内容，也可分别更新各字段。
+
+    Args:
+        skill_id: 技能唯一标识符。
+        body: 技能更新请求体。
+
+    Returns:
+        更新后的技能元数据字典。
+
+    Raises:
+        HTTPException: 技能不存在、参数校验失败或更新失败时。
+    """
     from services.skill_registry import SkillValidationError, split_frontmatter, update_skill
 
     scope, project_name = _skill_scope_context(body.scope, body.project_name)
@@ -381,7 +456,16 @@ def dashboard_update_skill(
 def dashboard_delete_skill(
     skill_id: str, scope: str = "global", project_name: str | None = None
 ) -> None:
-    """删除技能。"""
+    """删除技能。
+
+    Args:
+        skill_id: 技能唯一标识符。
+        scope: 作用域字符串，默认为 ``"global"``。
+        project_name: 项目名称，全局作用域时可省略。
+
+    Raises:
+        HTTPException: 技能不存在或删除失败时。
+    """
     from services.skill_registry import SkillValidationError, delete_skill
 
     normalized, name = _skill_scope_context(scope, project_name)
@@ -405,7 +489,22 @@ def dashboard_upload_skill(
     overwrite: bool = Form(False, description="同名技能已存在时是否覆盖"),
     local_folder: str | None = Form(None, description="本地作用域的直接文件夹路径（无需项目绑定）"),
 ) -> dict[str, Any]:
-    """通过上传 ZIP 包或单个 SKILL.md 创建技能。"""
+    """通过上传 ZIP 包或单个 SKILL.md 创建技能。
+
+    Args:
+        file: 上传的文件，支持 ``.zip`` 技能包或单个 ``.md`` 文件。
+        scope: 作用域字符串，默认为 ``"global"``。
+        project_name: 项目集合名或项目名。
+        name: 技能名，仅在单文件上传且缺少 frontmatter 时使用。
+        overwrite: 同名技能已存在时是否覆盖。
+        local_folder: 本地作用域的直接文件夹路径。
+
+    Returns:
+        包含 ``created`` 和 ``failed`` 列表的字典。
+
+    Raises:
+        HTTPException: 文件过大、内容为空、ZIP 损坏或格式不支持时。
+    """
     import io
     import zipfile
 
@@ -451,7 +550,14 @@ def dashboard_upload_skill(
         document: str,
         attachments: dict[str, bytes] | None = None,
     ) -> None:
-        """校验并落盘一个技能。"""
+        """校验并落盘一个技能。
+
+        Args:
+            skill_name: 技能显示名称。
+            directory_name: 技能目录名（slug）。
+            document: 完整的 SKILL.md 文档内容。
+            attachments: 附属文件映射，键为相对路径，值为文件字节内容。
+        """
         validate_skill_content(document)
         _, markup_body = split_frontmatter(document)
         final_name = directory_name

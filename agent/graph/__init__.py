@@ -1,4 +1,4 @@
-"""xihe-agent LangGraph 基础设施子包。
+""" LangGraph 基础设施子包。
 
 提供 Agent 运行所需的底层支撑：
 

@@ -1,4 +1,4 @@
-"""Record and restore the repository revision associated with an Agent run."""
+"""记录并恢复 Agent 运行关联的仓库版本。"""
 
 from __future__ import annotations
 
@@ -19,6 +19,18 @@ _COMMIT_RE = re.compile(r"^[0-9a-f]{7,64}$", re.IGNORECASE)
 
 
 def repository_path(repo_url: str, store: Any | None = None) -> Path:
+    """根据仓库 URL 解析本地工作目录路径。
+
+    优先从项目绑定映射表获取；未命中时回退到默认的
+    ``projects/<repo>`` 目录。
+
+    Args:
+        repo_url: Gitee 仓库完整 URL。
+        store: 可选的数据存储实例，用于查询项目绑定。
+
+    Returns:
+        仓库对应的本地绝对路径。
+    """
     workspace_root = get_settings().workspace_root
     repo = parse_repo_url(repo_url)
     if store is not None:
@@ -32,7 +44,14 @@ def repository_path(repo_url: str, store: Any | None = None) -> Path:
 
 
 def _git_untracked_files(path: Path) -> set[str]:
-    """Return repository-relative untracked file paths without touching them."""
+    """获取仓库中未跟踪的文件路径集合，不修改任何文件。
+
+    Args:
+        path: Git 仓库本地路径。
+
+    Returns:
+        仓库相对路径的集合；命令失败时返回空集合。
+    """
 
     result = subprocess.run(
         ["git", "-C", str(path), "ls-files", "--others", "--exclude-standard", "-z"],
@@ -50,7 +69,16 @@ def _git_untracked_files(path: Path) -> set[str]:
 
 
 def _git_added_files(path: Path, base: str, head: str) -> set[str]:
-    """Return files introduced between the recorded base and head commits."""
+    """获取两个提交之间新增的文件路径集合。
+
+    Args:
+        path: Git 仓库本地路径。
+        base: 基准提交哈希。
+        head: 目标提交哈希。
+
+    Returns:
+        新增文件的仓库相对路径集合；命令失败时返回空集合。
+    """
 
     result = subprocess.run(
         [
@@ -78,7 +106,15 @@ def _git_added_files(path: Path, base: str, head: str) -> set[str]:
 
 
 def _event_generated_paths(run: dict[str, Any], store: Any | None) -> set[str]:
-    """Read file paths written by the superseded run from its tool events."""
+    """从运行事件中提取本次 Agent 写入的文件路径集合。
+
+    Args:
+        run: 运行记录字典。
+        store: 数据存储实例。
+
+    Returns:
+        本次运行通过 ``write_file`` 工具写入的文件路径集合。
+    """
 
     thread_id = str(run.get("thread_id") or "")
     if not thread_id or store is None:
@@ -112,7 +148,17 @@ def _event_generated_paths(run: dict[str, Any], store: Any | None) -> set[str]:
 
 
 def _repo_relative_event_path(raw_path: str, repo_path: Path) -> str | None:
-    """Normalize a recorded write path to a repository-relative POSIX path."""
+    """将记录的写入路径规范化为仓库相对的 POSIX 路径。
+
+    支持绝对路径和 ``projects/<repo>/...`` 前缀两种格式。
+
+    Args:
+        raw_path: 原始记录的文件路径。
+        repo_path: 仓库本地根目录。
+
+    Returns:
+        仓库相对 POSIX 路径；无法解析时返回 ``None``。
+    """
 
     raw = raw_path.replace("\\", "/").strip()
     if re.match(r"^[A-Za-z]:/", raw):
@@ -146,7 +192,17 @@ def _recycle_generated_files(
     *,
     added_files: set[str] | None = None,
 ) -> list[Path]:
-    """Recycle committed additions and recorded untracked files from this run."""
+    """回收本次运行新增的已提交文件和未跟踪文件。
+
+    Args:
+        repo_path: Git 仓库本地路径。
+        run: 运行记录字典。
+        store: 数据存储实例。
+        added_files: 可选的已提交新增文件集合。
+
+    Returns:
+        已移入回收站的路径列表。
+    """
 
     recorded = {
         relative
@@ -173,6 +229,15 @@ def _recycle_generated_files(
 
 
 def git_head(repo_url: str, store: Any | None = None) -> str | None:
+    """获取仓库当前 HEAD 提交的哈希值。
+
+    Args:
+        repo_url: Gitee 仓库完整 URL。
+        store: 可选的数据存储实例。
+
+    Returns:
+        HEAD 提交哈希字符串；仓库不存在或命令失败时返回 ``None``。
+    """
     path = repository_path(repo_url, store)
     if not (path / ".git").exists():
         return None
@@ -192,7 +257,15 @@ def git_head(repo_url: str, store: Any | None = None) -> str | None:
 
 
 def git_parent(repo_url: str, store: Any | None = None) -> str | None:
-    """Return the first parent of the current commit when one exists."""
+    """获取当前 HEAD 提交的第一个父提交哈希。
+
+    Args:
+        repo_url: Gitee 仓库完整 URL。
+        store: 可选的数据存储实例。
+
+    Returns:
+        父提交哈希字符串；无父提交或命令失败时返回 ``None``。
+    """
     path = repository_path(repo_url, store)
     if not (path / ".git").exists():
         return None
@@ -210,7 +283,17 @@ def git_parent(repo_url: str, store: Any | None = None) -> str | None:
 
 
 def git_changed_files(repo_url: str, base: str, head: str, store: Any | None = None) -> list[str]:
-    """Return file paths changed between two commits."""
+    """获取两个提交之间变更的文件路径列表。
+
+    Args:
+        repo_url: Gitee 仓库完整 URL。
+        base: 基准提交哈希。
+        head: 目标提交哈希。
+        store: 可选的数据存储实例。
+
+    Returns:
+        变更文件的仓库相对路径列表；命令失败时返回空列表。
+    """
     path = repository_path(repo_url, store)
     if not (path / ".git").exists():
         return []
@@ -229,7 +312,16 @@ def git_changed_files(repo_url: str, base: str, head: str, store: Any | None = N
 
 
 def git_files_dirty(repo_url: str, files: list[str], store: Any | None = None) -> bool:
-    """Check whether any of the given files have uncommitted changes."""
+    """检查给定文件列表中是否存在未提交的改动。
+
+    Args:
+        repo_url: Gitee 仓库完整 URL。
+        files: 待检查的文件路径列表。
+        store: 可选的数据存储实例。
+
+    Returns:
+        存在未提交改动时返回 ``True``，否则返回 ``False``。
+    """
     path = repository_path(repo_url, store)
     if not (path / ".git").exists():
         return False
@@ -248,7 +340,22 @@ def git_files_dirty(repo_url: str, files: list[str], store: Any | None = None) -
 
 
 def rollback_run(repo_url: str, run: dict[str, Any], store: Any | None = None) -> bool:
-    """Restore tracked files and recycle untracked files created by one Agent run."""
+    """回退一次 Agent 运行：恢复跟踪文件并回收未跟踪的新增文件。
+
+    如果运行包含提交变更，则执行 ``git reset --hard`` 回退到基准提交；
+    否则仅回收本次运行通过 ``write_file`` 创建的文件。
+
+    Args:
+        repo_url: Gitee 仓库完整 URL。
+        run: 运行记录字典，需包含 ``base_commit`` 和 ``head_commit``。
+        store: 可选的数据存储实例。
+
+    Returns:
+        成功回退时返回 ``True``。
+
+    Raises:
+        RuntimeError: 提交无效、仓库已有新提交或文件存在未提交改动时抛出。
+    """
 
     base = str(run.get("base_commit") or "")
     head = str(run.get("head_commit") or "")

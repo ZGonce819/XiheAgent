@@ -238,6 +238,9 @@ SANDBOX_MAX_PER_THREAD=3             # 每个线程最多保留的沙箱数量
 
 ```bash
 pip install -e ".[dev]"
+
+# 如需启用联网搜索工具（web_search），额外安装智谱 SDK：
+pip install -e ".[search]"
 ```
 
 ### 配置环境变量
@@ -482,8 +485,7 @@ xihe-agent/
 │   ├── start_all.py       # 启动脚本
 │   ├── stop_all.py        # 停止脚本
 │   ├── start_backend.cmd  # Windows 后端启动脚本
-│   ├── start_ui.cmd       # Windows 前端启动脚本
-│   └── prune_orphan_automation_states.py # 收走没有对应定义的循环状态文件（默认归档，`--delete` 才删）
+│   └── start_ui.cmd       # Windows 前端启动脚本
 │
 ├── frontend/              # 前端项目（React + Vite）
 │   ├── src/

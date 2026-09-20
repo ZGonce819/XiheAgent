@@ -42,11 +42,10 @@ import json
 import logging
 import os
 import re
-import shutil
 import threading
 import time
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -550,60 +549,6 @@ def list_state_ids() -> list[str]:
         for path in directory.glob("*.json")
         if _ID_PATTERN.match(path.stem)
     )
-
-
-def orphan_state_ids(known_ids: Iterable[str]) -> list[str]:
-    """找出没有对应定义的孤儿状态文件。
-
-    删除自动化时如果没有顺手删状态文件，状态目录就会只增不减 —— 界面上一个任务
-    都没有，磁盘上却堆着一批点不进去的历史。id 是随机短串，不会被复用，留着只会
-    让人对着「0 个任务 / 100 多个状态文件」的落差困惑。
-
-    Args:
-        known_ids: 当前仍然存在的自动化 id。
-
-    Returns:
-        需要清理的 id，按文件名排序。
-    """
-    known = {str(item).strip() for item in known_ids if str(item).strip()}
-    return [item for item in list_state_ids() if item not in known]
-
-
-def prune_orphan_states(
-    known_ids: Iterable[str], *, archive_dir: Path | str | None = None
-) -> list[str]:
-    """清掉没有对应定义的状态文件。
-
-    历史里有真实跑过的记录，删掉不可恢复，所以支持先归档：给了 ``archive_dir``
-    就把文件**移过去**（同名已存在时覆盖），没给才真的删。归档目录是纯手工的
-    逃生口，程序本身不读它。
-
-    Args:
-        known_ids: 当前仍然存在的自动化 id。
-        archive_dir: 归档目录；为 ``None`` 时直接删除。
-
-    Returns:
-        被清理（或归档）的 id，按文件名排序。
-    """
-    pruned: list[str] = []
-    for identifier in orphan_state_ids(known_ids):
-        source = state_dir() / f"{identifier}.json"
-        try:
-            if archive_dir is None:
-                source.unlink()
-            else:
-                target_dir = Path(archive_dir)
-                target_dir.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(source), str(target_dir / source.name))
-        except FileNotFoundError:
-            continue
-        except OSError:
-            # 单个文件清不掉不该让整批停住，也不该把异常抛给调用方（这可能挂在
-            # 删除任务的路径上，用户的任务已经删掉了）。
-            logger.warning("清理孤儿状态文件失败：%s", source, exc_info=True)
-            continue
-        pruned.append(identifier)
-    return pruned
 
 
 def delete_state(automation_id: Any) -> bool:

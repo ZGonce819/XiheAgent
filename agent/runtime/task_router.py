@@ -577,7 +577,7 @@ def resume_agent_task(
     reject_message: str | None = None,
     event_sink: RuntimeEventSink | None = None,
 ) -> dict[str, Any]:
-    """Resume the exact LangGraph checkpoint paused for command approval.
+    """恢复因命令审批而暂停的 LangGraph checkpoint，继续执行任务。
 
     Args:
         thread_id: 会话 id。

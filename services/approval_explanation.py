@@ -1,4 +1,4 @@
-"""Generate concise explanations for pending command approvals."""
+"""为待审批的命令生成简洁解释。"""
 
 from __future__ import annotations
 
@@ -18,7 +18,18 @@ _MAX_OUTPUT_LENGTH = 1_200
 
 
 def explain_pending_approval(pending: dict[str, Any]) -> str:
-    """Ask the configured model to explain a server-side approval record."""
+    """调用模型为一条服务端审批记录生成解释文本。
+
+    Args:
+        pending: 待审批记录字典，需包含 ``actions`` 列表，
+            可选 ``modelId`` 指定模型。
+
+    Returns:
+        模型生成的解释字符串，长度截断至 ``_MAX_OUTPUT_LENGTH``。
+
+    Raises:
+        RuntimeError: 模型未返回任何有效解释时抛出。
+    """
     actions = pending.get("actions")
     safe_actions: list[dict[str, str]] = []
     if isinstance(actions, list):

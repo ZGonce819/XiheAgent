@@ -1,4 +1,4 @@
-"""xihe-agent 模型工厂模块。
+"""模型工厂模块。
 
 负责创建 Agent 使用的大语言模型实例。当前项目统一使用 OpenAI 兼容接口。
 模型分为两类：
@@ -22,7 +22,18 @@ from config.model_config import get_builtin_override, get_custom_model, get_defa
 def _build_model_from_custom(
     custom: dict, *, streaming: bool, max_tokens: int, temperature: float,
 ) -> BaseChatModel:
-    """根据自定义模型配置创建 ChatModel 实例。"""
+    """根据自定义模型配置创建 ChatModel 实例。
+
+    Args:
+        custom: 自定义模型配置字典，需包含 ``model_name``、``api_key``、
+            ``api_base`` 字段。
+        streaming: 是否启用流式输出。
+        max_tokens: 模型最大生成 token 数。
+        temperature: 采样温度，值越高输出越随机。
+
+    Returns:
+        配置好的 BaseChatModel 实例。
+    """
     return init_chat_model(
         model=custom["model_name"],
         model_provider="openai",

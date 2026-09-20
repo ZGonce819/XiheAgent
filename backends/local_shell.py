@@ -526,7 +526,7 @@ class LocalShellBackend(BaseSandbox):
             return EditResult(error=str(exc))
 
     def delete(self, file_path: str) -> DeleteResult:
-        """Move a project file or directory into the global workspace recycle bin."""
+        """将项目文件或目录移入全局工作区回收站。"""
 
         try:
             resolved = self._resolve_virtual_path(file_path)

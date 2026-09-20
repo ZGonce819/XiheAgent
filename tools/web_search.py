@@ -59,6 +59,12 @@ def _get_zhipu_client() -> Any:
 
 
 class WebSearchSchema(BaseModel):
+    """联网搜索工具的输入参数定义。
+
+    Attributes:
+        query: 需要搜索的关键词或问题。
+    """
+
     query: str = Field(description="需要搜索的关键词或问题。")
 
 

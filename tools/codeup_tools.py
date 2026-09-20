@@ -28,6 +28,17 @@ logger = logging.getLogger("agent.run.codeup")
 
 
 class OpenCodeupMergeRequestSchema(BaseModel):
+    """创建 Codeup Merge Request 的参数模型。
+
+    Attributes:
+        owner: Codeup 仓库 owner（命名空间）。
+        repo: Codeup 仓库名称。
+        head: 已推送的源分支。
+        base: 目标分支，默认 master。
+        title: MR 标题。
+        body: MR 描述。
+    """
+
     owner: str = Field(description="Codeup 仓库 owner（命名空间）。")
     repo: str = Field(description="Codeup 仓库名称。")
     head: str = Field(description="已推送的源分支。")
@@ -106,6 +117,15 @@ def open_codeup_merge_request(
 
 
 class PublishCodeupMrCommentSchema(BaseModel):
+    """发布 Codeup MR 评论的参数模型。
+
+    Attributes:
+        owner: Codeup 仓库 owner（命名空间）。
+        repo: Codeup 仓库名称。
+        number: MR 局部编号（localId）。
+        body: 评论正文。
+    """
+
     owner: str = Field(description="Codeup 仓库 owner（命名空间）。")
     repo: str = Field(description="Codeup 仓库名称。")
     number: int = Field(description="MR 局部编号（localId）。")
@@ -137,6 +157,14 @@ def publish_codeup_mr_comment(owner: str, repo: str, number: int, body: str) -> 
 
 
 class GetCodeupMergeRequestContextSchema(BaseModel):
+    """读取 Codeup MR 审查上下文的参数模型。
+
+    Attributes:
+        owner: Codeup 仓库 owner（命名空间）。
+        repo: Codeup 仓库名称。
+        number: MR 局部编号（localId）。
+    """
+
     owner: str = Field(description="Codeup 仓库 owner（命名空间）。")
     repo: str = Field(description="Codeup 仓库名称。")
     number: int = Field(description="MR 局部编号（localId）。")

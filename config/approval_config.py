@@ -1,4 +1,4 @@
-"""Command approval preferences persisted for the local dashboard user."""
+"""本地仪表板用户的命令审批偏好持久化配置。"""
 
 from __future__ import annotations
 
@@ -75,10 +75,22 @@ LOCKED_RULES = (
 
 
 def _path() -> Path:
+    """返回审批偏好配置文件的完整路径。
+
+    Returns:
+        数据目录下的 ``command_approval.json`` 路径。
+    """
     return get_settings().data_dir / _FILENAME
 
 
 def _load_overrides() -> dict[str, dict[str, str]]:
+    """从磁盘加载用户自定义的审批偏好覆盖。
+
+    文件不存在或格式损坏时返回空字典，不抛异常。
+
+    Returns:
+        按后端类型分组的偏好覆盖字典。
+    """
     path = _path()
     if not path.exists():
         return {}
@@ -90,6 +102,14 @@ def _load_overrides() -> dict[str, dict[str, str]]:
 
 
 def _validated_profile(value: Any) -> dict[str, str]:
+    """过滤并校验单个后端的偏好配置，只保留合法类别和动作。
+
+    Args:
+        value: 原始偏好配置字典。
+
+    Returns:
+        经过类别和动作白名单过滤后的有效配置字典。
+    """
     if not isinstance(value, dict):
         return {}
     return {
@@ -100,7 +120,11 @@ def _validated_profile(value: Any) -> dict[str, str]:
 
 
 def get_command_approval_preferences() -> dict[str, Any]:
-    """Return effective local/sandbox policies and immutable rule metadata."""
+    """返回生效的本地/沙箱策略及不可变规则元数据。
+
+    Returns:
+        包含 ``local``、``sandbox``、``categories``、``lockedRules`` 的响应字典。
+    """
     with _LOCK:
         overrides = _load_overrides()
     local = {**LOCAL_DEFAULTS, **_validated_profile(overrides.get("local"))}
@@ -120,7 +144,17 @@ def get_command_approval_preferences() -> dict[str, Any]:
 
 
 def update_command_approval_preferences(payload: Any) -> dict[str, Any]:
-    """Persist only known, user-configurable categories."""
+    """持久化用户可配置的审批偏好，仅保留已知类别。
+
+    Args:
+        payload: 新的审批偏好配置，必须为字典格式。
+
+    Returns:
+        更新后的完整审批偏好配置。
+
+    Raises:
+        ValueError: ``payload`` 不是字典时。
+    """
     if not isinstance(payload, dict):
         raise ValueError("审批设置格式无效")
     stored = {
@@ -137,6 +171,15 @@ def update_command_approval_preferences(payload: Any) -> dict[str, Any]:
 
 
 def preference_for(backend_type: str, category: str) -> str:
+    """查询指定后端类型下某类命令的审批动作。
+
+    Args:
+        backend_type: 后端类型（``"local"`` 或 ``"sandbox"``）。
+        category: 命令类别。
+
+    Returns:
+        对应的动作字符串（``"allow"``、``"approval"`` 或 ``"deny"``）。
+    """
     preferences = get_command_approval_preferences()
     profile = preferences["sandbox" if backend_type == "sandbox" else "local"]
     return str(profile.get(category, "approval"))

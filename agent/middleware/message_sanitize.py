@@ -434,7 +434,6 @@ class MessageSanitizeMiddleware(AgentMiddleware):
         Returns:
             下游返回的模型响应。
         """
-        """同步模型调用包装器，先清洗再调用下游 handler。"""
         return handler(self._clean_request(request))
 
     async def awrap_model_call(
@@ -451,5 +450,4 @@ class MessageSanitizeMiddleware(AgentMiddleware):
         Returns:
             下游返回的模型响应。
         """
-        """异步模型调用包装器，先清洗再调用下游 handler。"""
         return await handler(self._clean_request(request))

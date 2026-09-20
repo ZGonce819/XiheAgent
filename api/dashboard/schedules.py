@@ -47,6 +47,15 @@ logger = logging.getLogger(__name__)
 
 
 def _validate_automation_payload(body: dict[str, Any], partial: bool = False) -> None:
+    """校验自动化任务请求体的必填字段和格式。
+
+    Args:
+        body: 请求体字典。
+        partial: 是否为部分更新；为 ``True`` 时只校验已提供的字段。
+
+    Raises:
+        HTTPException: 当必填字段为空或格式不正确时。
+    """
     for field, label in (("name", "名称"), ("prompt", "任务指令"), ("schedule", "执行计划")):
         if (not partial or field in body) and not str(body.get(field) or "").strip():
             raise HTTPException(status_code=400, detail=f"{label}不能为空")
@@ -59,7 +68,17 @@ def _validate_automation_payload(body: dict[str, Any], partial: bool = False) ->
 
 
 def _normalize_schedule_repo(body: dict[str, Any]) -> dict[str, Any]:
-    """规范化自动化任务仓库字段，兼容 ``owner/repo`` 简写。"""
+    """规范化自动化任务仓库字段，兼容 ``owner/repo`` 简写。
+
+    Args:
+        body: 包含 ``repo`` 字段的请求体。
+
+    Returns:
+        仓库地址已规范化的请求体副本。
+
+    Raises:
+        HTTPException: 仓库地址格式非法时。
+    """
     normalized = dict(body)
     raw = normalized.get("repo")
     if not raw:
@@ -78,7 +97,14 @@ def _normalize_schedule_repo(body: dict[str, Any]) -> dict[str, Any]:
 
 
 def _schedule_state_payload(schedule_id: str) -> dict[str, Any]:
-    """拼出循环状态的响应体。"""
+    """拼出循环状态的响应体。
+
+    Args:
+        schedule_id: 自动化任务 ID。
+
+    Returns:
+        包含 state、text、stopped、stopReason、stopSource 的响应字典。
+    """
     source, reason = stop_decision(schedule_id)
     return {
         "state": load_state(schedule_id),
@@ -91,13 +117,27 @@ def _schedule_state_payload(schedule_id: str) -> dict[str, Any]:
 
 @router.get("")
 def dashboard_schedules() -> list[dict[str, Any]]:
-    """Return persisted automation definitions."""
+    """返回所有已持久化的自动化任务定义。
+
+    Returns:
+        自动化任务定义列表。
+    """
     return list_automations()
 
 
 @router.post("", status_code=201)
 def dashboard_create_schedule(body: dict[str, Any]) -> dict[str, Any]:
-    """Create an automation definition."""
+    """创建一条自动化任务定义。
+
+    Args:
+        body: 包含任务名称、指令、执行计划等字段的请求体。
+
+    Returns:
+        新创建的自动化任务定义字典。
+
+    Raises:
+        HTTPException: 必填字段缺失或格式有误时。
+    """
     _validate_automation_payload(body)
     return create_automation(_normalize_schedule_repo(body))
 
@@ -106,7 +146,18 @@ def dashboard_create_schedule(body: dict[str, Any]) -> dict[str, Any]:
 def dashboard_update_schedule(
     schedule_id: str, body: dict[str, Any]
 ) -> dict[str, Any]:
-    """Update an automation definition."""
+    """更新一条自动化任务定义。
+
+    Args:
+        schedule_id: 自动化任务 ID。
+        body: 需要更新的字段字典，仅校验已提供的字段。
+
+    Returns:
+        更新后的自动化任务定义字典。
+
+    Raises:
+        HTTPException: 任务不存在或字段格式有误时。
+    """
     _validate_automation_payload(body, partial=True)
     result = update_automation(schedule_id, _normalize_schedule_repo(body))
     if result is None:
@@ -116,7 +167,16 @@ def dashboard_update_schedule(
 
 @router.delete("/{schedule_id}", status_code=204)
 def dashboard_delete_schedule(schedule_id: str) -> None:
-    """删除一个自动化任务，连同它的循环状态文件。"""
+    """删除一个自动化任务，连同它的循环状态文件。
+
+    同时清理该任务关联的所有会话线程。
+
+    Args:
+        schedule_id: 自动化任务 ID。
+
+    Raises:
+        HTTPException: 任务不存在时。
+    """
     automation = get_automation(schedule_id)
     if automation is None:
         raise HTTPException(status_code=404, detail="自动化任务不存在")
@@ -145,7 +205,17 @@ def dashboard_delete_schedule(schedule_id: str) -> None:
 
 @router.get("/{schedule_id}/state")
 def dashboard_schedule_state(schedule_id: str) -> dict[str, Any]:
-    """返回某个自动化任务的循环状态。"""
+    """返回某个自动化任务的循环状态。
+
+    Args:
+        schedule_id: 自动化任务 ID。
+
+    Returns:
+        包含 state、text、stopped、stopReason、stopSource 的响应字典。
+
+    Raises:
+        HTTPException: 任务不存在时。
+    """
     if get_automation(schedule_id) is None:
         raise HTTPException(status_code=404, detail="自动化任务不存在")
     return _schedule_state_payload(schedule_id)
@@ -153,7 +223,20 @@ def dashboard_schedule_state(schedule_id: str) -> dict[str, Any]:
 
 @router.post("/{schedule_id}/resume")
 def dashboard_resume_schedule(schedule_id: str) -> dict[str, Any]:
-    """让一个被停下的循环重新可以触发。"""
+    """让一个被停下的循环重新可以触发。
+
+    支持清除手动停止标记和等待审批状态；若循环因预算超限而停止，
+    需调整预算上限后方可恢复。
+
+    Args:
+        schedule_id: 自动化任务 ID。
+
+    Returns:
+        更新后的循环状态字典。
+
+    Raises:
+        HTTPException: 任务不存在或无法直接恢复时。
+    """
     if get_automation(schedule_id) is None:
         raise HTTPException(status_code=404, detail="自动化任务不存在")
 
@@ -176,7 +259,17 @@ def dashboard_resume_schedule(schedule_id: str) -> dict[str, Any]:
 
 @router.post("/{schedule_id}/reset")
 def dashboard_reset_schedule(schedule_id: str) -> dict[str, Any]:
-    """清空一个自动化任务的循环历史，保留任务本身。"""
+    """清空一个自动化任务的循环历史，保留任务本身。
+
+    Args:
+        schedule_id: 自动化任务 ID。
+
+    Returns:
+        重置后的循环状态字典。
+
+    Raises:
+        HTTPException: 任务不存在时。
+    """
     if get_automation(schedule_id) is None:
         raise HTTPException(status_code=404, detail="自动化任务不存在")
     reset_state(schedule_id)
@@ -187,7 +280,21 @@ def dashboard_reset_schedule(schedule_id: str) -> dict[str, Any]:
 def dashboard_update_schedule_budget(
     schedule_id: str, body: dict[str, Any]
 ) -> dict[str, Any]:
-    """改一个自动化任务的预算上限。"""
+    """更新自动化任务的预算上限。
+
+    至少需要提供 ``maxRuns``、``maxTokens``、``maxConsecutiveFailures``
+    中的一个字段。
+
+    Args:
+        schedule_id: 自动化任务 ID。
+        body: 包含预算上限字段的请求体。
+
+    Returns:
+        更新后的循环状态字典。
+
+    Raises:
+        HTTPException: 任务不存在、参数缺失或值非法时。
+    """
     if get_automation(schedule_id) is None:
         raise HTTPException(status_code=404, detail="自动化任务不存在")
 
@@ -224,7 +331,20 @@ def dashboard_update_schedule_budget(
 def dashboard_run_schedule(
     schedule_id: str, background: BackgroundTasks
 ) -> dict[str, Any]:
-    """手动跑一轮循环。"""
+    """手动触发一轮循环执行。
+
+    在后台线程中异步执行一轮自动化循环，立即返回接受确认。
+
+    Args:
+        schedule_id: 自动化任务 ID。
+        background: FastAPI 后台任务管理器（未实际使用，改用手动线程）。
+
+    Returns:
+        包含 ``automationId``、``accepted``、``threadId``、``roundNumber`` 的响应字典。
+
+    Raises:
+        HTTPException: 任务不存在、已停止、缺少仓库配置或已有运行中的轮次时。
+    """
     automation = get_automation(schedule_id)
     if automation is None:
         raise HTTPException(status_code=404, detail="自动化任务不存在")
@@ -299,6 +419,10 @@ def dashboard_run_schedule(
         raise
 
     def run_once() -> None:
+        """在后台线程中执行单次循环并记录结果。
+
+        异常时记录日志，无论成败均释放运行锁。
+        """
         try:
             result = run_cycle(
                 automation,

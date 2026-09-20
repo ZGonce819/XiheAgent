@@ -209,14 +209,21 @@ def _outcome_from_status(status: str) -> str:
 
 @dataclass(frozen=True)
 class _Settled:
-    """开着表决时，这一轮撞上的审批处理完之后落到哪。"""
+    """开着表决时，这一轮撞上的审批处理完之后落到哪。
+
+    Attributes:
+        status: 处理之后的会话状态。
+        messages: 处理之后的消息列表。
+        votes: 本轮各次表决的状态字典。
+        vote_tokens: 表决消耗的 token 总数。
+        stalled_reason: 非空表示全流程自动化无法继续，并已将本轮收口为失败。
+    """
 
     status: str
     messages: list[Any]
     votes: tuple[dict[str, Any], ...] = ()
     vote_tokens: int = 0
     stalled_reason: str = ""
-    """非空表示全流程自动化无法继续，并已将本轮收口为失败。"""
 
 
 def _reject_message(reason: str) -> str:

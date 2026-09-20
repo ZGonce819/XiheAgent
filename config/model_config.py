@@ -49,7 +49,11 @@ def _save_models(models: list[dict[str, Any]]) -> None:
 
 
 def list_custom_models() -> list[dict[str, Any]]:
-    """返回所有自定义模型配置（API Key 脱敏）。"""
+    """返回所有自定义模型配置（API Key 已脱敏）。
+
+    Returns:
+        自定义模型配置字典列表，``api_key`` 字段已脱敏。
+    """
     models = _load_models()
     result = []
     for m in models:
@@ -61,7 +65,14 @@ def list_custom_models() -> list[dict[str, Any]]:
 
 
 def get_custom_model(model_id: str) -> dict[str, Any] | None:
-    """按 ID 查找自定义模型（返回完整配置，含 API Key）。"""
+    """按 ID 查找自定义模型（返回完整配置，含 API Key）。
+
+    Args:
+        model_id: 自定义模型 ID。
+
+    Returns:
+        匹配的模型配置字典；未找到返回 ``None``。
+    """
     for m in _load_models():
         if m.get("id") == model_id:
             return m
@@ -69,7 +80,14 @@ def get_custom_model(model_id: str) -> dict[str, Any] | None:
 
 
 def create_custom_model(payload: dict[str, Any]) -> dict[str, Any]:
-    """新增一个自定义模型。"""
+    """新增一个自定义模型。
+
+    Args:
+        payload: 包含 ``name``、``api_base``、``api_key``、``model_name`` 等字段的请求体。
+
+    Returns:
+        新创建的模型配置字典，``api_key`` 已脱敏。
+    """
     models = _load_models()
     set_default = bool(payload.get("set_default", False))
     if set_default:
@@ -92,7 +110,15 @@ def create_custom_model(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def update_custom_model(model_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
-    """更新自定义模型配置。"""
+    """更新自定义模型配置。
+
+    Args:
+        model_id: 自定义模型 ID。
+        payload: 需要更新的字段字典。
+
+    Returns:
+        更新后的模型配置字典（``api_key`` 已脱敏）；ID 不存在返回 ``None``。
+    """
     models = _load_models()
     for i, m in enumerate(models):
         if m.get("id") == model_id:
@@ -116,7 +142,14 @@ def update_custom_model(model_id: str, payload: dict[str, Any]) -> dict[str, Any
 
 
 def delete_custom_model(model_id: str) -> bool:
-    """删除自定义模型。"""
+    """删除自定义模型。
+
+    Args:
+        model_id: 自定义模型 ID。
+
+    Returns:
+        成功删除返回 ``True``；ID 不存在返回 ``False``。
+    """
     models = _load_models()
     new_models = [m for m in models if m.get("id") != model_id]
     if len(new_models) == len(models):
@@ -126,7 +159,11 @@ def delete_custom_model(model_id: str) -> bool:
 
 
 def get_default_custom_model() -> dict[str, Any] | None:
-    """返回标记为默认的自定义模型（含完整 API Key）。"""
+    """返回标记为默认的自定义模型（含完整 API Key）。
+
+    Returns:
+        标记为默认的模型配置字典；无默认时返回 ``None``。
+    """
     for m in _load_models():
         if m.get("is_default"):
             return m

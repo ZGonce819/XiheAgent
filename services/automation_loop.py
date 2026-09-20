@@ -109,7 +109,21 @@ class RoundRequest:
 
 @dataclass(frozen=True)
 class RoundResult:
-    """「跑一轮」交回来的结果。"""
+    """「跑一轮」交回来的结果。
+
+    Attributes:
+        outcome: 这一轮的结论，取值为 ``succeeded`` / ``failed`` / ``blocked``。
+        summary: 给人看的一轮摘要。
+        changed: 这一轮改动的文件路径。
+        next_steps: 模型建议的后续步骤。
+        tokens: 这一轮消耗的 token 数。
+        waiting_approval: 这一轮是不是停在等人工确认。
+        thread_id: 这一轮的会话 id。
+        workspace: 这一轮实际在哪个目录里跑的。
+        approval_votes: 这一轮里几次审批表决的过程记录。
+        run_id: 这一轮在运行记录里的 id。
+        container_exec: 仓库在沙箱容器里时，验证命令该怎么进容器执行。
+    """
 
     outcome: str = "succeeded"
     summary: str = ""
@@ -123,6 +137,7 @@ class RoundResult:
     下一轮只会卡在同一个地方。
     """
     thread_id: str | None = None
+    """这一轮的会话 id。"""
     workspace: str | None = None
     """这一轮实际在哪个目录里跑的，供验证命令当工作目录。
 
@@ -162,11 +177,29 @@ MAX_APPROVAL_VOTES_PER_ROUND = 5
 """
 
 RoundRunner = Callable[[RoundRequest], RoundResult]
+"""跑一轮的可调用对象类型：接收 :class:`RoundRequest`，返回 :class:`RoundResult`。
+
+由调用方注入具体实现，使循环可以在不调用任何模型的情况下被完整测试。
+"""
 
 
 @dataclass(frozen=True)
 class CycleResult:
-    """一轮循环跑完之后的结论。"""
+    """一轮循环跑完之后的结论。
+
+    Attributes:
+        automation_id: 自动化任务的 id。
+        ran: 这一轮有没有实际执行。
+        outcome: 执行结论。
+        summary: 给人看的摘要。
+        verification: 验证结果。
+        stopped: 是否被停止条件拦住。
+        stop_reason: 被拦住时的原因。
+        skipped_reason: 跳过本轮时的原因。
+        approval_votes: 本轮发生的审批表决。
+        run_id: 本轮在运行记录里的 id。
+        inner_iterations: 本次触发内的迭代次数。
+    """
 
     automation_id: str
     ran: bool
@@ -177,11 +210,8 @@ class CycleResult:
     stop_reason: str | None = None
     skipped_reason: str | None = None
     approval_votes: tuple[dict[str, Any], ...] = ()
-    """本轮发生的审批表决，供调度器判断有没有需要写进定义的异常。"""
     run_id: str | None = None
-    """本轮在运行记录里的 id，供调用方写回定义的 ``lastRunId``。"""
     inner_iterations: int = 1
-    """本次触发内的迭代次数。大于 1 表示内层循环跑了多次（验证未通过后重试）。"""
 
     def as_dict(self) -> dict[str, Any]:
         """转成可以直接返回给前端的字典。
@@ -206,12 +236,15 @@ class CycleResult:
 
 @dataclass(frozen=True)
 class DueScan:
-    """一次「谁该跑了」的扫描结果。"""
+    """一次「谁该跑了」的扫描结果。
+
+    Attributes:
+        due: 该跑的自动化定义列表。
+        problems: 扫不动或者配错了的自动化，``(id, 原因)`` 形式。
+    """
 
     due: tuple[dict[str, Any], ...] = ()
     problems: tuple[tuple[str, str], ...] = ()
-    """扫不动或者配错了的自动化：``(id, 原因)``。**不静默跳过** ——
-    一个写错的执行计划如果没人提，表现为「任务再也没跑过」，很难查。"""
 
 
 def _parse_moment(value: Any) -> datetime | None:

@@ -28,7 +28,15 @@ class _WorkspaceUpdateRequest(BaseModel):
 
 
 def _ensure_writable(path: Path, label: str) -> None:
-    """确保目录存在且可写，不存在时自动创建。"""
+    """确保目录存在且可写，不存在时自动创建。
+
+    Args:
+        path: 待检查的目录路径。
+        label: 用于错误提示的目录中文标签。
+
+    Raises:
+        HTTPException: 目录无法创建或不可写时。
+    """
     if not path.exists():
         try:
             path.mkdir(parents=True, exist_ok=True)
@@ -47,7 +55,17 @@ def _migrate_workspace(
     new_workspace: Path,
     progress_callback: callable | None = None,
 ) -> dict[str, Any]:
-    """迁移工作区项目目录到新位置。"""
+    """迁移工作区项目目录到新位置。
+
+    Args:
+        old_workspace: 原工作区根目录。
+        new_workspace: 目标工作区根目录。
+        progress_callback: 可选的进度回调函数，签名
+            ``(current, total, message)``。
+
+    Returns:
+        包含 ``migrated``（成功迁移数）和 ``errors``（失败原因列表）的字典。
+    """
     import shutil
 
     old_projects = old_workspace / "projects"

@@ -60,11 +60,20 @@ VOTE_TIMEOUT_SECONDS = 60.0
 """单个评审的等待上限。超时的那一票记为「没能得出」，整次表决因此不上表。"""
 
 VoteDecision = Literal["approve", "reject", "undecided", "refused"]
-"""``undecided`` / ``refused`` 都表示**没有得出可执行的结论**，必须交回人工。"""
+"""表决结论的取值。
+
+``approve`` 与 ``reject`` 表示得出了可执行的结论；
+``undecided`` / ``refused`` 都表示**没有得出可执行的结论**，必须交回人工。
+"""
 
 
 class ApprovalVote(BaseModel):
-    """一个评审对这批命令的结论。"""
+    """一个评审对这批命令的结论。
+
+    Attributes:
+        approve: 同意放行填 ``true``，反对填 ``false``。
+        reason: 简体中文一句话理由，不超过 80 字；反对时必须写清卡在哪一点。
+    """
 
     approve: bool = Field(description="同意放行这批命令填 true，反对填 false。")
     reason: str = Field(
@@ -102,7 +111,14 @@ class ApprovalVote(BaseModel):
 
 @dataclass(frozen=True)
 class VoterRole:
-    """一个评审的角色：只回答一个问题。"""
+    """一个评审的角色：只回答一个问题。
+
+    Attributes:
+        key: 角色的唯一标识，用于存档与日志。
+        label: 给人看的角色名称。
+        question: 这个评审要回答的核心问题。
+        guidance: 判定指南，告诉评审什么情况下该投反对。
+    """
 
     key: str
     label: str
@@ -146,7 +162,13 @@ VOTER_ROLES: tuple[VoterRole, ...] = (
 
 @dataclass(frozen=True)
 class VoteAnswer:
-    """一个评审交回来的票。"""
+    """一个评审交回来的票。
+
+    Attributes:
+        approve: 是否同意放行。
+        reason: 评审给出的理由。
+        tokens: 这一票消耗的 token 数。
+    """
 
     approve: bool
     reason: str
@@ -155,7 +177,16 @@ class VoteAnswer:
 
 @dataclass(frozen=True)
 class VoteCast:
-    """存档用的一票：谁投的、投了什么、为什么；``error`` 非空表示没投出来。"""
+    """存档用的一票：谁投的、投了什么、为什么。
+
+    Attributes:
+        role: 评审角色的唯一标识。
+        label: 评审角色的显示名称。
+        approve: 是否同意放行。
+        reason: 评审给出的理由。
+        error: 非空表示评审没能给出结论。
+        tokens: 这一票消耗的 token 数。
+    """
 
     role: str
     label: str
@@ -163,7 +194,6 @@ class VoteCast:
     reason: str
     error: str = ""
     tokens: int = 0
-    """这一票消耗的 token。**不进状态文件** —— 状态里只需要总量。"""
 
     def as_state_dict(self) -> dict[str, Any]:
         """转成写进循环状态的字典。
@@ -182,7 +212,15 @@ class VoteCast:
 
 @dataclass(frozen=True)
 class VoteOutcome:
-    """一次表决的整体结论。"""
+    """一次表决的整体结论。
+
+    Attributes:
+        commands: 本次表决涉及的命令。
+        votes: 各评审的票。
+        decision: 表决结论。
+        reason: 结论的说明。
+        tokens: 本次表决消耗的总 token 数。
+    """
 
     commands: tuple[str, ...]
     votes: tuple[VoteCast, ...]

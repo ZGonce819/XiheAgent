@@ -1,7 +1,7 @@
 [project]
 name = "xihe-agent"
 version = "1.0.0"
-description = "xihe-agent (羲和) - A powerful AI-powered coding assistant built with FastAPI and LangGraph"
+description = "XiheAgent (羲和) - A powerful AI-powered coding assistant built with FastAPI and LangGraph"
 authors = [
     { name = "Apolleo", email = "ZGonce819@foxmail.com" }
 ]
@@ -44,6 +44,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+search = [
+    "zhipuai>=2.0.0",  # 智谱 SDK，web_search 工具使用（不装则该工具调用会报错）
+]
 dev = [
     "ruff>=0.4.0",
     "black>=24.1.0",

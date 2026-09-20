@@ -37,6 +37,7 @@ class _TextExtractor(HTMLParser):
     """
 
     def __init__(self) -> None:
+        """初始化解析器，设置跳过计数器和文本片段列表。"""
         super().__init__()
         # script/style/noscript 内通常不是正文内容，使用深度计数处理嵌套标签。
         self._skip_depth = 0
@@ -44,6 +45,12 @@ class _TextExtractor(HTMLParser):
         self.parts: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        """处理开始标签，跳过脚本区域并在块级标签前补换行。
+
+        Args:
+            tag: HTML 标签名称。
+            attrs: 标签属性列表。
+        """
         # 跳过脚本、样式和 noscript 内容，避免把页面代码喂给模型。
         if tag in {"script", "style", "noscript"}:
             self._skip_depth += 1
@@ -52,6 +59,11 @@ class _TextExtractor(HTMLParser):
             self.parts.append("\n")
 
     def handle_endtag(self, tag: str) -> None:
+        """处理结束标签，恢复跳过区域并补换行。
+
+        Args:
+            tag: HTML 标签名称。
+        """
         # 结束跳过区域时减少深度，避免误丢后续正文。
         if tag in {"script", "style", "noscript"} and self._skip_depth:
             self._skip_depth -= 1
@@ -60,6 +72,11 @@ class _TextExtractor(HTMLParser):
             self.parts.append("\n")
 
     def handle_data(self, data: str) -> None:
+        """处理文本数据，跳过脚本区域并压缩空白。
+
+        Args:
+            data: HTML 中的文本内容。
+        """
         if self._skip_depth:
             return
         # HTML 实体解码后压缩片段内空白，减少模型上下文浪费。
@@ -68,6 +85,11 @@ class _TextExtractor(HTMLParser):
             self.parts.append(text)
 
     def text(self) -> str:
+        """合并片段并归一化空白，输出稳定的正文文本。
+
+        Returns:
+            提取并清理后的纯文本。
+        """
         # 合并片段后清理多余空白和连续空行，输出稳定的正文文本。
         raw = " ".join(self.parts)
         raw = re.sub(r"[ \t]+\n", "\n", raw)
@@ -101,6 +123,13 @@ def _html_to_markdown(content: str) -> str:
 
 
 class FetchUrlSchema(BaseModel):
+    """读取 URL 工具的参数模型。
+
+    Attributes:
+        url: 需要读取的 HTTP/HTTPS URL。
+        timeout: 请求超时时间，单位秒，默认 30。
+    """
+
     url: str = Field(description="需要读取的 HTTP/HTTPS URL。")
     timeout: int = Field(default=30, description="请求超时时间，单位秒，默认 30。")
 
