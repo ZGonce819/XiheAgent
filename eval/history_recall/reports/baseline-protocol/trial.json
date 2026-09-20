@@ -1,0 +1,284 @@
+{
+  "kind": "trial",
+  "label": "baseline-protocol",
+  "tasks_path": "eval\\history_recall\\trial_tasks.jsonl",
+  "tasks_revision": "1dc288c28765cd24e5b9a86c72626122",
+  "repeats": 1,
+  "started_at": "2026-09-17 23:09:13",
+  "duration_ms": 0,
+  "tasks": [
+    {
+      "task_id": "tr-structure-001",
+      "category": "structure_repeat",
+      "prompt": "这个仓库的测试入口是什么？先确认再告诉我怎么运行完整测试。只回答当前的做法。",
+      "expects_history": true,
+      "answer_must_contain": [
+        "pytest"
+      ],
+      "answer_must_contain_any": [],
+      "answer_must_not_contain": [],
+      "note": "入口查找：有历史依据时应当少跑几次全仓搜索，是「重复工具调用下降」的主要度量项"
+    },
+    {
+      "task_id": "tr-structure-002",
+      "category": "structure_repeat",
+      "prompt": "仓库里的限流逻辑放在哪个模块？给我文件路径。",
+      "expects_history": true,
+      "answer_must_contain": [
+        "rate_limit"
+      ],
+      "answer_must_contain_any": [],
+      "answer_must_not_contain": [],
+      "note": "重复结构分析：同一类问题在不同会话里反复出现，正是召回要省的搜索"
+    },
+    {
+      "task_id": "tr-structure-003",
+      "category": "structure_repeat",
+      "prompt": "这个项目的配置是怎么加载的？入口文件是哪个？",
+      "expects_history": true,
+      "answer_must_contain": [
+        "app_config"
+      ],
+      "answer_must_contain_any": [],
+      "answer_must_not_contain": [],
+      "note": "重复结构分析：配置入口是被反复问到的固定事实"
+    },
+    {
+      "task_id": "tr-structure-004",
+      "category": "structure_repeat",
+      "prompt": "知识库的建表迁移入口是哪个函数？在哪个文件里？",
+      "expects_history": true,
+      "answer_must_contain": [
+        "run_knowledge_migrations"
+      ],
+      "answer_must_contain_any": [],
+      "answer_must_not_contain": [],
+      "note": "重复结构分析：迁移入口属于「只问一次就该记住」的事实"
+    },
+    {
+      "task_id": "tr-decision-001",
+      "category": "historical_decision",
+      "prompt": "为什么 checkpoint 用 Redis 而不是 PostgreSQL？这个决定有记录吗？",
+      "expects_history": true,
+      "answer_must_contain": [
+        "Redis"
+      ],
+      "answer_must_contain_any": [],
+      "answer_must_not_contain": [],
+      "note": "历史决策：答案在代码里看不出来，只能来自当时讨论的记录"
+    },
+    {
+      "task_id": "tr-decision-002",
+      "category": "historical_decision",
+      "prompt": "日志和证据里出现的令牌是怎么脱敏的？实现在哪里？",
+      "expects_history": true,
+      "answer_must_contain": [
+        "mask_token"
+      ],
+      "answer_must_contain_any": [],
+      "answer_must_not_contain": [],
+      "note": "历史决策：脱敏是安全约定，实现位置易被重新搜索多次"
+    },
+    {
+      "task_id": "tr-decision-003",
+      "category": "historical_decision",
+      "prompt": "仓库的长期记忆文件放在什么路径？",
+      "expects_history": true,
+      "answer_must_contain": [
+        "/memories/"
+      ],
+      "answer_must_contain_any": [],
+      "answer_must_not_contain": [],
+      "note": "历史决策：路径规范属于团队约定，读代码也能找到但更慢"
+    },
+    {
+      "task_id": "tr-incident-001",
+      "category": "incident_fix",
+      "prompt": "CI 上跑 pytest 时收集不到中文用例名，这个仓库以前遇到过吗？当时怎么处理的？",
+      "expects_history": true,
+      "answer_must_contain": [
+        "pytest"
+      ],
+      "answer_must_contain_any": [],
+      "answer_must_not_contain": [],
+      "note": "旧故障修复：典型「同样的问题第二次遇到」，召回价值最高的一类"
+    },
+    {
+      "task_id": "tr-incident-002",
+      "category": "incident_fix",
+      "prompt": "MySQL 连接报 authentication plugin 相关错误，之前有解决办法吗？",
+      "expects_history": true,
+      "answer_must_contain": [
+        "cryptography"
+      ],
+      "answer_must_contain_any": [],
+      "answer_must_not_contain": [],
+      "note": "旧故障修复：依赖缺包的坑，答案是一条具体的补依赖动作"
+    },
+    {
+      "task_id": "tr-incident-003",
+      "category": "incident_fix",
+      "prompt": "PostgreSQL 的模糊匹配依赖哪个扩展？装不上会怎样？",
+      "expects_history": true,
+      "answer_must_contain": [
+        "pg_trgm"
+      ],
+      "answer_must_contain_any": [],
+      "answer_must_not_contain": [],
+      "note": "旧故障修复：扩展缺失有明确的降级行为，属于「当时踩过」的知识"
+    },
+    {
+      "task_id": "tr-stale-001",
+      "category": "stale_knowledge",
+      "prompt": "这个仓库现在怎么部署？只回答当前方案。",
+      "expects_history": true,
+      "answer_must_contain": [
+        "Kubernetes"
+      ],
+      "answer_must_contain_any": [],
+      "answer_must_not_contain": [
+        "Docker Compose"
+      ],
+      "note": "过期知识：当前方案是 Kubernetes，答案里出现 Docker Compose 即视为把旧结论当作当前事实"
+    },
+    {
+      "task_id": "tr-stale-002",
+      "category": "stale_knowledge",
+      "prompt": "缓存现在用什么？只回答当前方案。",
+      "expects_history": true,
+      "answer_must_contain": [
+        "Redis"
+      ],
+      "answer_must_contain_any": [],
+      "answer_must_not_contain": [
+        "Memcached"
+      ],
+      "note": "过期知识：缓存从 Memcached 迁到 Redis，旧结论不得作为当前事实出现在答案里"
+    },
+    {
+      "task_id": "tr-noanswer-001",
+      "category": "no_answer",
+      "prompt": "这个仓库的 Kubernetes 部署清单在哪个目录？",
+      "expects_history": false,
+      "answer_must_contain": [],
+      "answer_must_contain_any": [
+        "没有",
+        "不存在",
+        "未找到",
+        "not found"
+      ],
+      "answer_must_not_contain": [],
+      "note": "无答案：正确行为是明确说没有并回到实时工具，而不是从别处的历史里拼一个答案出来"
+    },
+    {
+      "task_id": "tr-version-001",
+      "category": "version_change",
+      "prompt": "依赖里的 cryptography 是用来做什么的？为什么不能去掉？",
+      "expects_history": true,
+      "answer_must_contain": [
+        "cryptography"
+      ],
+      "answer_must_contain_any": [],
+      "answer_must_not_contain": [],
+      "note": "版本/依赖变更：依赖的存在理由往往有历史记录，且与具体版本相关"
+    }
+  ],
+  "verdicts": [],
+  "metrics": {
+    "tasks": 14,
+    "pairs": 0,
+    "arms": [
+      {
+        "arm": "no_recall",
+        "tasks": 0,
+        "executed_tasks": 0,
+        "errored": 0,
+        "correct": 0,
+        "correctness": null,
+        "tool_calls_median": null,
+        "duplicate_calls_median": null,
+        "citations_total": 0,
+        "citations_openable": 0,
+        "citation_openable_rate": null,
+        "expired_adopted": 0,
+        "latency_p50_ms": null,
+        "latency_p95_ms": null
+      },
+      {
+        "arm": "with_recall",
+        "tasks": 0,
+        "executed_tasks": 0,
+        "errored": 0,
+        "correct": 0,
+        "correctness": null,
+        "tool_calls_median": null,
+        "duplicate_calls_median": null,
+        "citations_total": 0,
+        "citations_openable": 0,
+        "citation_openable_rate": null,
+        "expired_adopted": 0,
+        "latency_p50_ms": null,
+        "latency_p95_ms": null
+      }
+    ],
+    "by_category": [],
+    "gates": [
+      {
+        "name": "对照条件一致",
+        "target": "除有无召回外全部相同",
+        "observed": "未运行",
+        "applicable": false,
+        "passed": null,
+        "note": "每条任务每臂重复 1 次；模型、仓库、提交、语料与任务集指纹逐项核对"
+      },
+      {
+        "name": "引用可打开率（有召回臂）",
+        "target": "≥ 95%",
+        "observed": "该臂没有引用任何历史结论",
+        "applicable": false,
+        "passed": null,
+        "note": "没有引用就没有可打开率；这一项既不能算通过，也不能算失败"
+      },
+      {
+        "name": "重复工具调用数中位数下降",
+        "target": "≥ 20%（结构分析类）",
+        "observed": "无基线（无召回臂的重复调用中位数为 0，比例无从计算）",
+        "applicable": false,
+        "passed": null,
+        "note": "计入全部工具调用（含新鲜度检查与检索本身），不只计模型可见调用"
+      },
+      {
+        "name": "整体正确率不低于基线",
+        "target": "有召回 ≥ 无召回",
+        "observed": "两臂没有可判定的任务",
+        "applicable": false,
+        "passed": null,
+        "note": "按类别分别统计的理由：简单题会掩盖复杂题，整体数字上升不代表每一类都好"
+      },
+      {
+        "name": "过期内容被当作当前事实采用",
+        "target": "0 条",
+        "observed": "0 条",
+        "applicable": false,
+        "passed": null,
+        "note": "不设容忍区间：任务清单里的「不得出现」说法一旦出现在答案里即算采用。字符串清单会漏掉改写表达，也可能误判「提到旧值但已写明它已废弃」，因此它是第一道自动筛，逐条命中都在报告里列出供人工复核"
+      },
+      {
+        "name": "成本可接受",
+        "target": "计划未给阈值",
+        "observed": "未运行",
+        "applicable": false,
+        "passed": null,
+        "note": "计划把「成本可接受」列为进入条件但没有给数值，这里只报告实测值，不编造阈值把它变成一个假门槛"
+      }
+    ],
+    "invalid_reason": null,
+    "unmeasured": [
+      "纯数据库检索 p95（目标 ≤300ms）：本实验上报的是整轮任务耗时，未把检索单独计时",
+      "候选抽取成本与额外输入量：需要模型计费口径与 token 统计，本次未采集",
+      "证据存储增长：需要按来源统计写入量，本次未采集",
+      "沙箱路径的时延预算：本实验在本地路径上运行，未覆盖沙箱"
+    ]
+  },
+  "not_run_reason": "未接入运行器：对照试验需要完整运行时（MySQL/Redis/PostgreSQL 与可用模型）和一个可固定提交的代码快照。本次只校验任务集并产出协议说明，所有门槛一律不适用 —— 不适用不等于通过。"
+}
