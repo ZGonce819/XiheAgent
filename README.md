@@ -548,46 +548,8 @@ xihe-agent/
 │   ├── package.json       # 前端依赖与脚本
 │   └── vite.config.ts     # Vite 配置（代理到后端）
 │
-├── tests/                 # 后端 pytest 测试
-│   ├── conftest.py        # 夹具：临时技能目录 / 临时数据目录 + 技能写入工厂
-│   ├── test_sandbox_skill_paths.py # 技能分层 → 沙箱落点的路径契约
-│   ├── test_sandbox_skill_sync.py  # 幂等同步与刷新调度
-│   ├── test_cron_schedule.py       # cron 解析与命中（含日/周同时限定的「或」语义）
-│   ├── test_automation_state.py    # 循环状态的读写、记账与停止条件
-│   ├── test_automation_guard.py    # 运行登记（同任务二次抢要拒、Redis 被占时不留残留、降级）
-│   ├── test_automation_verification.py # 验证门（审批闸、没配检查项不算通过、容器内执行）
-│   ├── test_automation_loop.py     # 一轮循环的编排顺序与状态流转
-│   ├── test_automation_runner.py   # 任务范围的放行与拒绝边界（写入任务要配检查项）
-│   ├── test_automation_scheduler.py # 常驻调度（先写触发标记再启动、不重复触发、不重入、扫描租约与运行登记）
-│   ├── test_task_router_routing.py # 任务类型判定只看用户写的那一句
-│   ├── test_plan_source_accumulation.py # 方案修订时原始需求的保留与回退（存在会话上）
-│   ├── test_run_cancellation.py    # 协作式停止（没在跑就拒、嵌套登记、cancelled 不算失败、接口接线）
-│   ├── test_app_lifespan.py        # 调度有没有被正确地拉起与停掉
-│   ├── test_automation_api.py      # 循环状态接口与手动触发接口（含「已经有一轮在跑」的 409）
-│   ├── test_approval_vote.py       # 审批表决（三评审多数决、硬拒绝拦截、报错回退人工）
-│   ├── test_command_policy.py      # 命令审批策略引擎
-│   ├── test_skill_retrieval_switch.py # 技能检索开关（off/auto/on 模式切换与 fail-open）
-│   ├── test_skill_source_routing.py   # 技能作用域路由（四层加载顺序与覆盖）
-│   ├── test_skill_tools.py            # 技能工具（create_skill / list_skills）
-│   ├── test_recycle_bin.py            # 代码回退回收站
-│   ├── test_tool_tracking.py          # 工具调用追踪
-│   ├── test_final_response.py         # 最终响应处理
-│   ├── test_tool_error.py             # 工具异常处理
-│   ├── test_local_skill_virtual_paths.py # 本地技能虚拟路径映射
-│   ├── test_dashboard_projects.py     # Dashboard 项目接口
-│   ├── test_dashboard_skill_context.py # Dashboard 技能上下文
-│   ├── test_streaming_messages.py     # 流式消息处理
-│   ├── test_mysql_event_visibility.py # 事件跨连接可见性（轮询能看到别处已提交的事件）
-│   ├── test_runtime_events.py         # 运行时事件
-│   ├── test_runtime_workspace.py      # 运行时工作区
-│   └── test_task_router_repository.py # 任务路由仓储层
-│
 ├── docs/                  # 补充文档
 │   └── DEAD_CODE_AUDIT.md # 死代码排查记录
-│
-├── eval/                  # 端到端评估（`python -m eval.<名字>` 运行，不进 pytest）
-│   ├── skill_retrieval/   # 技能检索开关评估（驱动器与报告都在）
-│   └── history_recall/    # 历史消息召回评估（**只剩历史报告**，驱动器已丢失，数字不可复现）
 │
 ├── data/                  # 运行时数据（JSON 配置与状态，已 gitignore）
 │   ├── automations.json   # 自动化任务定义
@@ -1153,16 +1115,7 @@ mypy .
 
 # 分层依赖契约（utils 禁止反向依赖上层业务包）
 lint-imports
-
-# 单元测试
-pytest                 # 收集 tests/ 下的全部用例
-pytest tests/test_sandbox_skill_sync.py -q
-
-# 跑全量时把 basetemp 放到仓库外
-pytest --basetemp=D:/tmp/xihe-tmp/run1
 ```
-
-> ⚠️ `--basetemp` 落在仓库目录内时，`save_state` 的「写临时文件 + `os.replace`」会**间歇**报 `PermissionError: WinError 5`。这跟目录位置有关、跟代码无关，所以跑全量请显式指到仓库外。
 
 ### 前端
 
@@ -1176,31 +1129,6 @@ npm run preview        # 预览构建产物（127.0.0.1:3000）
 npm run typecheck      # 类型检查（tsc --noEmit）
 npm test               # 运行全部单元测试（vitest run；watch 模式直接跑 npx vitest）
 ```
-
-### 测试约定
-
-后端测试使用 pytest，统一放在仓库根的 `tests/`（`pyproject.toml` 里 `testpaths = ["tests"]`）。
-
-- `tests/conftest.py` 会把 `Settings.skills_dir` 指向临时目录，用例不会读写开发机上真实的技能目录；新增涉及技能落盘的测试请复用 `skills_root` / `make_skill` 夹具。
-- 涉及自动化任务的测试要复用 `data_root` 夹具（把 `Settings.data_dir` 指向临时目录），否则会读写开发机上真实的 `data/automations.json`。
-- 沙箱相关测试不需要真实容器：`OpenSandboxBackend` 只用到底层沙箱的 `id` 与 `files` 两个接口，用记录调用的假对象即可覆盖同步行为（见 `tests/test_sandbox_skill_sync.py`）。
-- **需要模型的判断一律打桩**。任务类型识别（`classify_task_kind`）会真的调模型，一次几秒且结果随模型变，把它写进断言会让用例既慢又不稳。要测的是「拿到某个判断结果之后怎么处置」。
-- **导入 `app` 的测试必须先换掉副作用，且在 `import app` 之前**（`configure_logging`、`ensure_default_skills` 会在模块导入时就执行），参考 `tests/test_app_lifespan.py`。
-- `pytest.raises(match=...)` 绑的是**用户可见文案**。改了文案之后记得 grep 一遍对应的测试，否则会变成一条看不出原因的失败。
-
-### 离线评估
-
-评估**不进 pytest**，每个子目录一套独立流程，用模块方式运行、报告落在自己的 `reports/<标签>/` 下：
-
-```bash
-.venv/Scripts/python.exe -m eval.skill_retrieval --label baseline
-```
-
-前端测试使用 Vitest + Testing Library，测试文件与被测组件同目录（`*.test.tsx`）。
-
-> `src/routes/` 下**可以**放测试文件：`vite.config.ts` 给 TanStack Router 配了 `routeFileIgnorePattern`（匹配 `*.test.*` / `*.spec.*`），生成路由树时会跳过它们（例如 `routes/automations.test.tsx`）。不配这个的话，每个测试文件都会刷一条 `does not export a Route`。
->
-> `Dialog.Portal` 会把内容渲染到 `document.body`，不在 `render()` 返回的 `container` 里 —— 断言门户内容需用 `document.querySelector`。
 
 ## 日志
 
