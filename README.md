@@ -312,7 +312,7 @@ npm install  # 首次需要安装依赖
 npm run dev  # 启动 Vite 开发服务器，端口 3000
 ```
 
-访问 http://127.0.0.1:3000 即可使用完整应用。开发服务器会把 `/dashboard/api` 代理到后端（默认 `http://127.0.0.1:2024`）；后端换地址时用 `VITE_DASHBOARD_API_BASE_URL` 指定。注意这是**前端构建期**变量，写在仓库根的 `.env` 里不生效 —— Vite 的工作目录是 `frontend/`，要放在 `frontend/.env` 或直接作为命令的环境变量传进去。
+访问 http://127.0.0.1:3000 即可使用完整应用。开发服务器会把 `/api/v1` 代理到后端（默认 `http://127.0.0.1:2024`）；后端换地址时用 `VITE_DASHBOARD_API_BASE_URL` 指定。注意这是**前端构建期**变量，写在仓库根的 `.env` 里不生效 —— Vite 的工作目录是 `frontend/`，要放在 `frontend/.env` 或直接作为命令的环境变量传进去。
 
 ### 健康检查
 
@@ -393,7 +393,12 @@ xihe-agent/
 │
 ├── api/                   # HTTP 接口层
 │   ├── routes.py          # 基础路由（/health）
-│   └── dashboard.py       # Dashboard 前端接口（含技能管理、SSE 流式输出）
+│   └── dashboard/         # Dashboard 前端接口（按业务域拆分为子模块）
+│       ├── settings.py    # 用户、模型、审批、检索设置
+│       ├── schedules.py   # 自动化任务管理
+│       ├── skills.py      # 技能管理
+│       ├── threads.py     # 会话管理与 SSE 流式输出
+│       └── workspace.py   # 工作目录与项目管理
 │
 ├── backends/              # Backend 实现
 │   ├── workspace.py       # 工作区操作
@@ -548,9 +553,6 @@ xihe-agent/
 │   ├── package.json       # 前端依赖与脚本
 │   └── vite.config.ts     # Vite 配置（代理到后端）
 │
-├── docs/                  # 补充文档
-│   └── DEAD_CODE_AUDIT.md # 死代码排查记录
-│
 ├── data/                  # 运行时数据（JSON 配置与状态，已 gitignore）
 │   ├── automations.json   # 自动化任务定义
 │   ├── automation_state/  # 自动化任务跨轮状态
@@ -589,7 +591,7 @@ xihe-agent/
 
 ### 停止运行中的一轮 (`agent/runtime/cancellation.py`)
 
-输入框在运行中会变成「停止任务」按钮，对应 `POST /dashboard/api/threads/{id}/cancel`。这是**协作式**停止，不是强杀：
+输入框在运行中会变成「停止任务」按钮，对应 `POST /api/v1/threads/{id}/cancel`。这是**协作式**停止，不是强杀：
 
 - Agent 跑在 SSE worker 线程里，Python 线程无法安全强杀，LangGraph 的流式迭代也必须在一致的位置退出，否则 checkpoint 与 `runs` 表会留下一条永远 `running` 的记录。
 - 做法是按会话记一个停止请求，运行循环在**每两个协议事件之间**检查它，检查到就退出。所以接口返回时这一轮通常还没结束，前端要等 `thread_done` 事件拿终态。
@@ -660,7 +662,7 @@ xihe-agent/
 
 分开存有三个原因：多个任务可能同时跑，分开存不会互相覆盖；单个任务的历史变长不拖累其它任务；删除任务时直接删对应文件即可。
 
-**删除任务会连同状态文件一起删**（`DELETE /dashboard/api/schedules/{id}`）。只删定义的话状态目录只增不减，界面上一个任务都没有、磁盘上却堆着一批点不进去的历史。想重新观察一个已经跑歪的任务而不重建配置时，用「清空历史」（`POST /dashboard/api/schedules/{id}/reset`）—— 它保留任务本身，把轮数、token 用量、连续未通过次数与停止标记一起归零。
+**删除任务会连同状态文件一起删**（`DELETE /api/v1/schedules/{id}`）。只删定义的话状态目录只增不减，界面上一个任务都没有、磁盘上却堆着一批点不进去的历史。想重新观察一个已经跑歪的任务而不重建配置时，用「清空历史」（`POST /api/v1/schedules/{id}/reset`）—— 它保留任务本身，把轮数、token 用量、连续未通过次数与停止标记一起归零。
 
 `lastRunId` 只在**跑完一轮之后**写回定义。触发那一刻还不知道运行 id，所以它和 `lastTriggeredAt` 分开写：`lastTriggeredAt` 必须在启动这一轮**之前**落盘（`is_due` 靠它判「这一分钟跑过没有」），跑完再写一次就把这层判断改成了「跑完的时刻」，同一分钟可能被再触发一次。
 
@@ -686,7 +688,7 @@ xihe-agent/
 - **停在等人工确认** —— 这一轮撞上了需要审批的命令。无人值守时没人会去点那个确认，再跑一轮还是卡在同一条命令上，所以循环停下来等人。它排在上面三条上限之前报出来：只报「额度用完了」会把人引去调上限，调完还是卡在同一个地方。开了「全流程自动化」的任务一般不会停在这一条上（审批由表决处理），只有表决**得不出结论**时才会；
 - **显式停止** —— 由验证连续失败升级而来，也可以人工置位。
 
-上限写 `0` 表示不限制。五个来源的**恢复方式不一样**：「显式停止」和「停在等人工确认」能清掉标记继续跑（`POST /dashboard/api/schedules/{id}/resume`），其余三条要调高对应的上限（`PATCH /dashboard/api/schedules/{id}/budget`）。接口返回的 `stopSource` 会说明是哪一个，界面据此决定给「继续运行」按钮还是给一句提示。上限存在循环状态里而不是任务定义里 —— 它和「已经跑了多少轮 / 用掉多少 token」是一对，必须放在一起才不会算错。
+上限写 `0` 表示不限制。五个来源的**恢复方式不一样**：「显式停止」和「停在等人工确认」能清掉标记继续跑（`POST /api/v1/schedules/{id}/resume`），其余三条要调高对应的上限（`PATCH /api/v1/schedules/{id}/budget`）。接口返回的 `stopSource` 会说明是哪一个，界面据此决定给「继续运行」按钮还是给一句提示。上限存在循环状态里而不是任务定义里 —— 它和「已经跑了多少轮 / 用掉多少 token」是一对，必须放在一起才不会算错。
 
 验证的判定规则：配了检查项就**以检查项的结论为准**，没配检查项时退回看这一轮本身跑成没跑成；「没做完但也没报错」（`blocked`）不算失败。
 
@@ -747,7 +749,7 @@ xihe-agent/
 
 两条路都通：
 
-- **手动触发** —— 在自动化任务页面点「立即跑一轮」，或调 `POST /dashboard/api/schedules/{id}/run`。接口是受理式的，返回 `202` 表示这一轮已经派到后台，跑完会作为一条会话记录出现在会话列表里；这个任务已经有一轮在跑时返回 `409`（见下面「同一个任务不会同时跑两轮」）。
+- **手动触发** —— 在自动化任务页面点「立即跑一轮」，或调 `POST /api/v1/schedules/{id}/run`。接口是受理式的，返回 `202` 表示这一轮已经派到后台，跑完会作为一条会话记录出现在会话列表里；这个任务已经有一轮在跑时返回 `409`（见下面「同一个任务不会同时跑两轮」）。
 - **按 cron 自动触发** —— 服务启动时拉起一个后台扫描线程（`services/automation_scheduler.py`），默认每 30 秒扫一遍，到点的任务各起一个线程去跑。扫描顺序上**先把触发时间写进定义，再启动这一轮**：`is_due` 靠 `lastTriggeredAt` 判断「这一分钟跑过没有」，写晚了同一分钟会被重复触发。同一个任务已经有一轮在跑时，这一分钟跳过它。
 
 **同一个任务不会同时跑两轮**：调度线程和手动触发是两条路，两边共用 `services/automation_guard.py` 里那份运行登记（Redis key 前缀 `xihe:automation:running`，TTL 默认 1 小时）。先抢到的一方跑，后到的一方 —— 调度侧这一分钟跳过、接口侧当场返回 `409`。没有这份登记时，一次点击撞上一次自动触发就是两个线程同跑一轮：各自读同一份 `budget.runsUsed`，跑完再各自把状态写回去，轮次计数会丢、历史会互相盖。跑完**无论跑成什么样**都会放掉登记（一轮炸了、受理那一步就失败、线程都没起来，都会放），进程崩掉则等 TTL 超时自愈；放掉时核对凭据，不会撬开已经落到别人手里的锁。
@@ -802,7 +804,7 @@ E:/my_project/Xihe/.xihe-agent/skills/           ← local（项目文件夹已�
 设计要点：
 
 - **项目集合目录名保留用户输入的原始大小写**（`Xihe` 就是 `Xihe`，不会被折成小写）。注意这与**技能名**不同 —— 技能名受 Agent Skills 规范约束，必须是小写字母/数字/连字符。
-- **`local` 是按项目名反查绑定文件夹定位的**，接口不接受直接传路径；绑定关系通过 `POST /dashboard/api/workspace/projects/bind-folder` 建立，并持久化在 MySQL 的 `project_local_folders` 表。
+- **`local` 是按项目名反查绑定文件夹定位的**，接口不接受直接传路径；绑定关系通过 `POST /api/v1/workspace/projects/bind-folder` 建立，并持久化在 MySQL 的 `project_local_folders` 表。
 - 本地环境技能加载顺序为 `[/skills-global/, /skills-set/, /skills/]`，沙箱环境为 `[/workspace/skills/, /workspace/skills/.project-set/<项目集合名>/]`，由 DeepAgents `SkillsMiddleware` 的 `sources` 语义保证覆盖关系，无需自行实现合并逻辑。
 - **项目名不再按 backend 类型跳过反查**：项目集合层落在全局技能目录下，不依赖磁盘绑定，本地与沙箱两种环境都会挂载它。
 
@@ -825,7 +827,7 @@ E:/my_project/Xihe/.xihe-agent/skills/           ← local（项目文件夹已�
 | 对话内技能面板 · 上传对话框工作域 | 只有「全局」 | 全局 / 项目（项目已绑文件夹时含本地） | 全局 / 项目 |
 | 技能接口页 · 新建技能作用域 | 全局 / 项目 / 本地 | 全局 / 项目 / 本地 | — |
 
-- 两个下拉判定的是不同问题：**顶部筛选**是「这个会话所在环境有哪些技能层」，由 `SkillPanel` 按项目名与 `backendType` 判定；**上传工作域**是「这个会话能写到哪」，以后端 `GET /dashboard/api/skills` 的 `writableScopes` 为准——面板会把当前会话的 `backendType` 一并传给接口，后端据此把沙箱下的「本地」剔除。
+- 两个下拉判定的是不同问题：**顶部筛选**是「这个会话所在环境有哪些技能层」，由 `SkillPanel` 按项目名与 `backendType` 判定；**上传工作域**是「这个会话能写到哪」，以后端 `GET /api/v1/skills` 的 `writableScopes` 为准——面板会把当前会话的 `backendType` 一并传给接口，后端据此把沙箱下的「本地」剔除。
 - 技能接口页可在页内自由切换项目，且作用域是独立的意图表达，因此始终列全；选到当前不可用的层时，由下方的归属项目 / 本地目录字段引导补齐条件。
 
 #### 两个创建入口
@@ -944,49 +946,49 @@ GET  /health                    # 健康检查
 > 目前没有登录入口，也没有鉴权：`/me` 返回写死的单用户，前端仅用它显示登录名并做数据守卫。部署到公网前需要自己补上认证层。
 
 ```
-GET  /dashboard/api/me          # 当前用户信息（写死的单用户，恒返回 200，无登录入口）
-GET  /dashboard/api/options     # 页面选项（模型列表等）
-GET  /dashboard/api/profile     # 工作台默认配置
-GET  /dashboard/api/repos       # 可用仓库列表（占位实现，恒返回空列表）
-GET  /dashboard/api/threads     # 会话列表
-GET  /dashboard/api/threads/{id} # 会话详情
-POST /dashboard/api/threads/stream-message         # 创建新会话
-POST /dashboard/api/threads/{id}/stream-message    # 追加对话轮次
-POST /dashboard/api/threads/{id}/cancel            # 停止这一轮正在跑的任务（没在跑返回 409）
-DELETE /dashboard/api/threads/{id}                 # 删除会话
-PATCH /dashboard/api/threads/{id}/title            # 修改会话标题
-POST /dashboard/api/threads/{id}/edit-preview      # 编辑消息前预览影响
-PUT  /dashboard/api/threads/{id}/view-snapshot     # 保存会话视图快照
-GET  /dashboard/api/command-approval-settings      # 获取命令审批设置
-PUT  /dashboard/api/command-approval-settings      # 保存普通命令类别设置
-GET  /dashboard/api/threads/{id}/approval          # 获取待审批操作
-POST /dashboard/api/threads/{id}/approval          # 审批并恢复运行（SSE）
-POST /dashboard/api/threads/{id}/approval/explanation # 生成审批命令解释
+GET  /api/v1/me          # 当前用户信息（写死的单用户，恒返回 200，无登录入口）
+GET  /api/v1/options     # 页面选项（模型列表等）
+GET  /api/v1/profile     # 工作台默认配置
+GET  /api/v1/repos       # 可用仓库列表（占位实现，恒返回空列表）
+GET  /api/v1/threads     # 会话列表
+GET  /api/v1/threads/{id} # 会话详情
+POST /api/v1/threads/stream-message         # 创建新会话
+POST /api/v1/threads/{id}/stream-message    # 追加对话轮次
+POST /api/v1/threads/{id}/cancel            # 停止这一轮正在跑的任务（没在跑返回 409）
+DELETE /api/v1/threads/{id}                 # 删除会话
+PATCH /api/v1/threads/{id}/title            # 修改会话标题
+POST /api/v1/threads/{id}/edit-preview      # 编辑消息前预览影响
+PUT  /api/v1/threads/{id}/view-snapshot     # 保存会话视图快照
+GET  /api/v1/command-approval-settings      # 获取命令审批设置
+PUT  /api/v1/command-approval-settings      # 保存普通命令类别设置
+GET  /api/v1/threads/{id}/approval          # 获取待审批操作
+POST /api/v1/threads/{id}/approval          # 审批并恢复运行（SSE）
+POST /api/v1/threads/{id}/approval/explanation # 生成审批命令解释
 ```
 
 ### 自定义模型管理
 
 ```
-GET    /dashboard/api/custom-models              # 获取自定义模型列表
-POST   /dashboard/api/custom-models              # 创建自定义模型
-PUT    /dashboard/api/custom-models/{id}         # 更新自定义模型
-DELETE /dashboard/api/custom-models/{id}         # 删除自定义模型
-GET    /dashboard/api/builtin-model              # 获取内置模型配置
-PUT    /dashboard/api/builtin-model              # 更新内置模型配置
+GET    /api/v1/custom-models              # 获取自定义模型列表
+POST   /api/v1/custom-models              # 创建自定义模型
+PUT    /api/v1/custom-models/{id}         # 更新自定义模型
+DELETE /api/v1/custom-models/{id}         # 删除自定义模型
+GET    /api/v1/builtin-model              # 获取内置模型配置
+PUT    /api/v1/builtin-model              # 更新内置模型配置
 ```
 
 ### 自动化任务管理
 
 ```
-GET    /dashboard/api/schedules                  # 列出自动化任务
-POST   /dashboard/api/schedules                  # 创建自动化任务
-PATCH  /dashboard/api/schedules/{id}             # 更新自动化任务（支持局部字段）
-DELETE /dashboard/api/schedules/{id}             # 删除自动化任务（连同它的循环状态文件）
-GET    /dashboard/api/schedules/{id}/state       # 读这个任务的循环状态（只读，不会建出状态文件）
-POST   /dashboard/api/schedules/{id}/run         # 手动跑一轮（202 受理；不能跑时返回 404/409/400 与原因）
-POST   /dashboard/api/schedules/{id}/reset       # 清空循环历史（保留任务；返回与 /state 同构的状态）
-POST   /dashboard/api/schedules/{id}/resume      # 恢复已停止的自动化任务（清除显式停止/等人工确认标记）
-PATCH  /dashboard/api/schedules/{id}/budget      # 调整自动化任务的额度上限（轮数/token/连续失败次数）
+GET    /api/v1/schedules                  # 列出自动化任务
+POST   /api/v1/schedules                  # 创建自动化任务
+PATCH  /api/v1/schedules/{id}             # 更新自动化任务（支持局部字段）
+DELETE /api/v1/schedules/{id}             # 删除自动化任务（连同它的循环状态文件）
+GET    /api/v1/schedules/{id}/state       # 读这个任务的循环状态（只读，不会建出状态文件）
+POST   /api/v1/schedules/{id}/run         # 手动跑一轮（202 受理；不能跑时返回 404/409/400 与原因）
+POST   /api/v1/schedules/{id}/reset       # 清空循环历史（保留任务；返回与 /state 同构的状态）
+POST   /api/v1/schedules/{id}/resume      # 恢复已停止的自动化任务（清除显式停止/等人工确认标记）
+PATCH  /api/v1/schedules/{id}/budget      # 调整自动化任务的额度上限（轮数/token/连续失败次数）
 ```
 
 `POST /schedules/{id}/run` 的失败状态码：
@@ -1002,12 +1004,12 @@ PATCH  /dashboard/api/schedules/{id}/budget      # 调整自动化任务的额�
 ### 技能管理
 
 ```
-GET    /dashboard/api/skills                     # 列出可见技能 + 三层作用域配置 + 当前可写作用域
-GET    /dashboard/api/skills/{skill_id}          # 读取技能详情（含 SKILL.md 全文）
-POST   /dashboard/api/skills                     # 创建技能（JSON：name/description/body/scope/project_name）
-PUT    /dashboard/api/skills/{skill_id}          # 更新技能
-DELETE /dashboard/api/skills/{skill_id}          # 删除技能及其附属文件
-POST   /dashboard/api/skills/upload              # 上传技能（.md 或 .zip，支持附属文件与覆盖）
+GET    /api/v1/skills                     # 列出可见技能 + 三层作用域配置 + 当前可写作用域
+GET    /api/v1/skills/{skill_id}          # 读取技能详情（含 SKILL.md 全文）
+POST   /api/v1/skills                     # 创建技能（JSON：name/description/body/scope/project_name）
+PUT    /api/v1/skills/{skill_id}          # 更新技能
+DELETE /api/v1/skills/{skill_id}          # 删除技能及其附属文件
+POST   /api/v1/skills/upload              # 上传技能（.md 或 .zip，支持附属文件与覆盖）
 ```
 
 **作用域参数**（`scope`，创建/更新/删除时必填）：
@@ -1020,13 +1022,13 @@ POST   /dashboard/api/skills/upload              # 上传技能（.md 或 .zip�
 
 > 旧参数值 `project` 会自动折叠为 `local`，保持向后兼容。
 
-`GET /dashboard/api/skills` 返回的 `scopes` 始终包含三项（未指定项目时后两项标 `available: false`），`writableScopes` 则按当前项目实际可写性动态给出。
+`GET /api/v1/skills` 返回的 `scopes` 始终包含三项（未指定项目时后两项标 `available: false`），`writableScopes` 则按当前项目实际可写性动态给出。
 
 ### 技能检索设置
 
 ```
-GET    /dashboard/api/skill-retrieval-settings   # 读取检索开关（含模式选项与取值区间）
-PUT    /dashboard/api/skill-retrieval-settings   # 更新检索开关（mode/top_k/auto_threshold，均可缺省）
+GET    /api/v1/skill-retrieval-settings   # 读取检索开关（含模式选项与取值区间）
+PUT    /api/v1/skill-retrieval-settings   # 更新检索开关（mode/top_k/auto_threshold，均可缺省）
 ```
 
 配置持久化在 `<data_dir>/skill_retrieval.json`，未配置或文件损坏时回退为 `mode=off`。越界或非法的入参返回 400，不做静默夹取。语义见「技能系统 → 技能检索开关」。
@@ -1034,12 +1036,12 @@ PUT    /dashboard/api/skill-retrieval-settings   # 更新检索开关（mode/top
 ### 工作目录管理
 
 ```
-GET    /dashboard/api/workspace                  # 获取工作目录配置
-PUT    /dashboard/api/workspace                  # 更新工作目录配置（workspace_root/projects_dir/skills_dir）
-GET    /dashboard/api/workspace/projects         # 获取项目列表（含 local_folder 绑定信息）
-GET    /dashboard/api/workspace/pick-folder      # 打开系统文件夹选择对话框
-POST   /dashboard/api/workspace/projects/bind-folder    # 绑定项目到本地文件夹
-PATCH  /dashboard/api/workspace/projects/rename  # 重命名项目（级联更新所有关联会话）
+GET    /api/v1/workspace                  # 获取工作目录配置
+PUT    /api/v1/workspace                  # 更新工作目录配置（workspace_root/projects_dir/skills_dir）
+GET    /api/v1/workspace/projects         # 获取项目列表（含 local_folder 绑定信息）
+GET    /api/v1/workspace/pick-folder      # 打开系统文件夹选择对话框
+POST   /api/v1/workspace/projects/bind-folder    # 绑定项目到本地文件夹
+PATCH  /api/v1/workspace/projects/rename  # 重命名项目（级联更新所有关联会话）
 ```
 
 > 项目解绑与改显示名两个入口已移除；`project_local_folders.display_name` 这一列仍然保留，由重命名链路写入。

@@ -13,7 +13,7 @@ const config = defineConfig({
     host: "127.0.0.1",
     port: 3000,
     proxy: {
-      "/dashboard/api": {
+      "/api/v1": {
         target: apiTarget,
         changeOrigin: true,
       },
@@ -70,7 +70,7 @@ const config = defineConfig({
       },
       workbox: {
         navigateFallback: "/_shell.html",
-        navigateFallbackDenylist: [/^\/dashboard\/api\//, /^\/_serverFn\//],
+        navigateFallbackDenylist: [/^\/api\/v1\//, /^\/_serverFn\//],
         globPatterns: ["**/*.{js,css,png,svg,ico,webmanifest}"],
         additionalManifestEntries: [
           { url: "/_shell.html", revision: new Date().toISOString() },

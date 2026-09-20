@@ -1,6 +1,6 @@
 """用户信息响应 Schema。
 
-定义 ``/dashboard/api/me`` 接口返回的用户数据结构。
+定义 ``/api/v1/me`` 接口返回的用户数据结构。
 """
 
 from __future__ import annotations

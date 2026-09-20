@@ -36,7 +36,7 @@ try {
   let savedMessages;
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.route("**/dashboard/api/**", async (route) => {
+  await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
     if (path.endsWith("/stream-message")) return route.fulfill({ status: 200, contentType: "text/event-stream", body: sse });

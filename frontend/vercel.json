@@ -4,8 +4,8 @@
   "outputDirectory": ".output/public",
   "rewrites": [
     {
-      "source": "/dashboard/api/:path*",
-      "destination": "https://open-swe-v3-f2834ffc0df05a46a10262a9690e8490.us.langgraph.app/dashboard/api/:path*"
+      "source": "/api/v1/:path*",
+      "destination": "https://open-swe-v3-f2834ffc0df05a46a10262a9690e8490.us.langgraph.app/api/v1/:path*"
     },
     {
       "source": "/(.*)",

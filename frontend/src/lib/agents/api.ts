@@ -89,7 +89,7 @@ async function agentsRequest<T>(
   path: string,
   init: RequestInit = {}
 ): Promise<T> {
-  const res = await fetch(`${API_BASE}/dashboard/api${path}`, {
+  const res = await fetch(`${API_BASE}/api/v1${path}`, {
     ...init,
     credentials: "include",
     headers: {
@@ -120,7 +120,7 @@ async function agentsStreamRequest(
   path: string,
   init: RequestInit
 ): Promise<Response> {
-  const response = await fetch(`${API_BASE}/dashboard/api${path}`, {
+  const response = await fetch(`${API_BASE}/api/v1${path}`, {
     ...init,
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(init.headers ?? {}) },
@@ -212,7 +212,7 @@ export const agentsApi = {
       }
     ),
   createThread: (body: ThreadCreateRequest) =>
-    fetch(`${API_BASE}/dashboard/api/threads/stream-message`, {
+    fetch(`${API_BASE}/api/v1/threads/stream-message`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -244,7 +244,7 @@ export const agentsApi = {
     }),
   sendMessage: (threadId: string, body: ThreadMessageRequest) =>
     fetch(
-      `${API_BASE}/dashboard/api/threads/${encodeURIComponent(threadId)}/stream-message`,
+      `${API_BASE}/api/v1/threads/${encodeURIComponent(threadId)}/stream-message`,
       {
         method: "POST",
         credentials: "include",
@@ -317,7 +317,7 @@ export const agentsApi = {
       body: JSON.stringify({ approval_id: approvalId, decision }),
     }),
   streamUrl: (threadId: string) =>
-    `${API_BASE}/dashboard/api/threads/${encodeURIComponent(threadId)}/stream`,
+    `${API_BASE}/api/v1/threads/${encodeURIComponent(threadId)}/stream`,
 }
 
 export function formatRelativeTime(ts: number): string {

@@ -17,11 +17,11 @@ const thread = {
   ],
 };
 const fixtures = {
-  "/dashboard/api/me": { login: "reviewer", email: "reviewer@example.com", is_admin: true },
-  "/dashboard/api/threads": [thread],
-  "/dashboard/api/threads/task-details-check": thread,
-  "/dashboard/api/profile": {},
-  "/dashboard/api/options": { models: [], default_agent_model: null },
+  "/api/v1/me": { login: "reviewer", email: "reviewer@example.com", is_admin: true },
+  "/api/v1/threads": [thread],
+  "/api/v1/threads/task-details-check": thread,
+  "/api/v1/profile": {},
+  "/api/v1/options": { models: [], default_agent_model: null },
 };
 const browser = await chromium.launch({ executablePath: process.env.EDGE_PATH ?? "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe", headless: true });
 const output = process.argv[3] ?? "../.artifacts/task-details";
@@ -31,7 +31,7 @@ try {
     const page = await browser.newPage({ viewport, serviceWorkers: "block" });
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
-    await page.route("**/dashboard/api/**", (route) => {
+    await page.route("**/api/v1/**", (route) => {
       const payload = fixtures[new URL(route.request().url()).pathname];
       return route.fulfill({ status: payload ? 200 : 404, contentType: "application/json", body: JSON.stringify(payload ?? {}) });
     });

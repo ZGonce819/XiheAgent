@@ -25,7 +25,7 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(`${API_BASE}/dashboard/api${path}`, {
+  const res = await fetch(`${API_BASE}/api/v1${path}`, {
     ...init,
     credentials: "include",
     headers: {
@@ -325,7 +325,7 @@ export const api = {
     if (options.localFolder) form.append("local_folder", options.localFolder)
     form.append("overwrite", String(options.overwrite ?? false))
 
-    const res = await fetch(`${API_BASE}/dashboard/api/skills/upload`, {
+    const res = await fetch(`${API_BASE}/api/v1/skills/upload`, {
       method: "POST",
       credentials: "include",
       body: form,

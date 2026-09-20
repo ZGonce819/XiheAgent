@@ -7,7 +7,7 @@
 - 后端把 message、tool_calls、subagents 转成课程项目的 `run_events`。
 - 每一轮运行都把 run_id 写进事件 id，保证 plan、coding、review 多轮内容
   不会在前端互相覆盖或拼接到同一个消息里。
-- 前端仍只消费我们自己的 `/dashboard/api/.../stream`，不用绑定 LangGraph 本地服务。
+- 前端仍只消费我们自己的 `/api/v1/.../stream`，不用绑定 LangGraph 本地服务。
 
 核心能力：
 1. 从 raw protocol events 中提取 text-delta，实现正文流式展示。
@@ -990,7 +990,7 @@ def _run_agent_with_event_stream(
     - 后端把 message、tool_calls、subagents 转成课程项目的 `run_events`。
     - 每一轮运行都把 run_id 写进事件 id，保证 plan、coding、review 多轮内容
       不会在前端互相覆盖或拼接到同一个消息里。
-    - 前端仍只消费我们自己的 `/dashboard/api/.../stream`，不用绑定 LangGraph 本地服务。
+    - 前端仍只消费我们自己的 `/api/v1/.../stream`，不用绑定 LangGraph 本地服务。
 
     Args:
         agent: DeepAgent runnable 实例。

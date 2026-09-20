@@ -9,15 +9,15 @@ const executablePath =
   "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
 
 const reviewFixtures = {
-  "/dashboard/api/me": {
+  "/api/v1/me": {
     login: "reviewer",
     email: "reviewer@example.com",
     avatar_url: null,
     is_admin: true,
     slack_oauth_enabled: false,
   },
-  "/dashboard/api/threads": [],
-  "/dashboard/api/schedules": [
+  "/api/v1/threads": [],
+  "/api/v1/schedules": [
     {
       id: "dependency-check",
       name: "每日依赖检查",
@@ -31,7 +31,7 @@ const reviewFixtures = {
       lastError: null,
     },
   ],
-  "/dashboard/api/skills": {
+  "/api/v1/skills": {
     available: true,
     virtualRoot: "/skills",
     items: [
@@ -51,18 +51,18 @@ const reviewFixtures = {
       },
     ],
   },
-  "/dashboard/api/profile": {
+  "/api/v1/profile": {
     default_model: "deepseek-v4-pro",
     reasoning_effort: "medium",
     default_repo: "xihe/agent",
   },
-  "/dashboard/api/repos": {
+  "/api/v1/repos": {
     installations: [],
     repositories: [
       { full_name: "xihe/agent", name: "agent", default_branch: "main" },
     ],
   },
-  "/dashboard/api/options": {
+  "/api/v1/options": {
     models: [
       {
         id: "deepseek-v4-pro",
@@ -80,7 +80,7 @@ const reviewFixtures = {
 }
 
 async function attachReviewFixtures(page) {
-  await page.route("**/dashboard/api/**", async (route) => {
+  await page.route("**/api/v1/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname
     const payload = reviewFixtures[pathname]
     if (payload === undefined) {

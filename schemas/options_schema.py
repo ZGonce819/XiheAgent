@@ -1,6 +1,6 @@
 """模型选项响应 Schema。
 
-定义 ``/dashboard/api/options`` 接口返回的模型列表和默认配置。
+定义 ``/api/v1/options`` 接口返回的模型列表和默认配置。
 """
 
 from __future__ import annotations
