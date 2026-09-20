@@ -293,15 +293,6 @@ def update_skill_retrieval_preferences(payload: Any) -> dict[str, Any]:
     return get_skill_retrieval_preferences()
 
 
-def skill_retrieval_mode() -> str:
-    """返回当前生效的检索模式。
-
-    Returns:
-        ``off`` / ``auto`` / ``on``。
-    """
-    return str(_effective_preferences()["mode"])
-
-
 def skill_retrieval_active(skill_count: int) -> bool:
     """判断给定技能数量下是否应该走检索。
 

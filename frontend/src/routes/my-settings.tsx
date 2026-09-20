@@ -1,4 +1,4 @@
-import { Navigate, createFileRoute, useLocation } from "@tanstack/react-router"
+import { createFileRoute, useLocation } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Fragment,
@@ -1546,7 +1546,13 @@ function MySettingsPage() {
       </main>
     )
   }
-  if (!session.data) return <Navigate to="/login" />
+  if (!session.data) {
+    return (
+      <main className="p-6">
+        <p className="text-sm text-muted-foreground">读取会话信息失败，请刷新页面重试。</p>
+      </main>
+    )
+  }
 
   return (
     <AppShell user={session.data} title="个人设置">

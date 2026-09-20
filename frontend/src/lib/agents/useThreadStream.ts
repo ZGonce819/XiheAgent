@@ -933,7 +933,7 @@ export async function processStreamResponse(
             handleStreamPart(capturedThreadId, parsed, queryClient)
         }
       } catch {
-        console.debug("failed to parse stream event", block)
+        // 忽略无法解析的流事件块
       }
       boundary = buffer.indexOf("\n\n")
     }

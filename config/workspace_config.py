@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import threading
 from pathlib import Path
-from typing import Any
 
 from config.constants import PROJECT_ROOT
 from config.env_config import get_env

@@ -6,9 +6,12 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from database.mysql import ConnectionManager, utc_now
+
+logger = logging.getLogger(__name__)
 
 
 class ThreadRepo(ConnectionManager):
@@ -39,6 +42,7 @@ class ThreadRepo(ConnectionManager):
                 project_name VARCHAR(256),
                 local_work_dir VARCHAR(1000),
                 source VARCHAR(32) NOT NULL DEFAULT 'dashboard',
+                plan_source_prompt TEXT,
                 created_at VARCHAR(32) NOT NULL,
                 updated_at VARCHAR(32) NOT NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
@@ -51,11 +55,12 @@ class ThreadRepo(ConnectionManager):
             "ALTER TABLE threads ADD COLUMN project_name VARCHAR(256) NULL",
             "ALTER TABLE threads ADD COLUMN local_work_dir VARCHAR(1000) NULL",
             "ALTER TABLE threads ADD COLUMN source VARCHAR(32) NOT NULL DEFAULT 'dashboard'",
+            "ALTER TABLE threads ADD COLUMN plan_source_prompt TEXT NULL",
         ):
             try:
                 self.execute(ddl)
             except Exception:
-                pass
+                logger.debug("DDL 迁移跳过（列可能已存在）: %s", ddl[:80])
 
     def upsert_thread(
         self,
@@ -73,6 +78,7 @@ class ThreadRepo(ConnectionManager):
         project_name: str | None = None,
         local_work_dir: str | None = None,
         source: str | None = None,
+        plan_source_prompt: str | None = None,
     ) -> None:
         """创建或更新一条 thread 记录。
 
@@ -94,6 +100,9 @@ class ThreadRepo(ConnectionManager):
                 默认 ``None`` 表示不更新此字段。
             source: 会话来源（``"dashboard"`` / ``"schedule"`` 等），
                 默认 ``None`` 表示不更新此字段。
+            plan_source_prompt: 生成技术方案时用的完整原始需求。方案被多轮修订时
+                这里始终是**最早那一版需求**，不会退化成"再改一下"这类局部要求。
+                默认 ``None`` 表示不更新此字段。
 
         Returns:
             无返回值。
@@ -111,8 +120,8 @@ class ThreadRepo(ConnectionManager):
             """
             INSERT INTO threads
                 (thread_id, title, user_prompt, repo_url, repo_owner, repo_name,
-                 branch_name, pr_url, latest_run_status, backend_type, project_name, local_work_dir, source, created_at, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 branch_name, pr_url, latest_run_status, backend_type, project_name, local_work_dir, source, plan_source_prompt, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
                 user_prompt = COALESCE(VALUES(user_prompt), user_prompt),
                 repo_url = COALESCE(VALUES(repo_url), repo_url),
@@ -125,11 +134,12 @@ class ThreadRepo(ConnectionManager):
                 project_name = COALESCE(VALUES(project_name), project_name),
                 local_work_dir = COALESCE(VALUES(local_work_dir), local_work_dir),
                 source = COALESCE(VALUES(source), source),
+                plan_source_prompt = COALESCE(VALUES(plan_source_prompt), plan_source_prompt),
                 updated_at = VALUES(updated_at)
             """,
             (
                 thread_id, title, user_prompt, repo_url, repo_owner, repo_name,
-                branch_name, pr_url, latest_run_status, effective_backend, effective_project, effective_work_dir, effective_source, created_at, now,
+                branch_name, pr_url, latest_run_status, effective_backend, effective_project, effective_work_dir, effective_source, plan_source_prompt, created_at, now,
             ),
         )
 

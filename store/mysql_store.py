@@ -77,6 +77,7 @@ class LocalMySQLStore:
         project_name: str | None = None,
         local_work_dir: str | None = None,
         source: str | None = None,
+        plan_source_prompt: str | None = None,
     ) -> None:
         """创建或更新一条 thread 记录。
 
@@ -93,6 +94,7 @@ class LocalMySQLStore:
             backend_type: 执行环境类型（``"local"`` 或 ``"sandbox"``）。
             project_name: 关联的项目名称（来自 ProjectSelector）。
             source: 会话来源（``"dashboard"`` / ``"schedule"`` 等）。
+            plan_source_prompt: 生成技术方案时用的完整原始需求，多轮修订时保持不变。
         """
         self.thread_repo.upsert_thread(
             thread_id=thread_id,
@@ -108,6 +110,7 @@ class LocalMySQLStore:
             project_name=project_name,
             local_work_dir=local_work_dir,
             source=source,
+            plan_source_prompt=plan_source_prompt,
         )
 
     def get_thread(self, thread_id: str) -> dict[str, Any] | None:
@@ -465,38 +468,3 @@ class LocalMySQLStore:
             绑定记录字典列表。
         """
         return self.project_folder_repo.list_all()
-
-    def delete_project_folder(self, project_name: str) -> int:
-        """解除某个项目的本地文件夹绑定。
-
-        Args:
-            project_name: 项目名称。
-
-        Returns:
-            被删除的行数。
-        """
-        return self.project_folder_repo.delete(project_name)
-
-    def rename_project_folder(self, old_name: str, new_name: str) -> int:
-        """项目改名时同步更新本地文件夹绑定记录。
-
-        Args:
-            old_name: 原项目名称。
-            new_name: 新项目名称。
-
-        Returns:
-            受影响的行数。
-        """
-        return self.project_folder_repo.rename(old_name, new_name)
-
-    def update_project_display_name(self, project_name: str, display_name: str) -> int:
-        """更新项目的显示名称。
-
-        Args:
-            project_name: 项目名称。
-            display_name: 新的显示名称。
-
-        Returns:
-            受影响的行数。
-        """
-        return self.project_folder_repo.update_display_name(project_name, display_name)

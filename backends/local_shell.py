@@ -1464,24 +1464,3 @@ def get_local_shell_backend() -> LocalShellBackend:
     if _BACKEND is None or _BACKEND.root != configured_root:
         _BACKEND = LocalShellBackend(workspace=configured_root)
     return _BACKEND
-
-
-def create_local_shell_backend(_sandbox_id: str | None = None) -> LocalShellBackend:
-    """DeepAgents 工厂函数：创建（或复用）backend 实例。
-    
-    Args:
-        _sandbox_id: 保留参数，未使用。
-    
-    Returns:
-        全局 ``LocalShellBackend`` 实例。
-    """
-    return get_local_shell_backend()
-
-
-def validate_local_shell_startup_config() -> None:
-    """启动时验证：确保 backend 可以正常创建。
-
-    通过尝试获取全局单例来触发初始化流程，
-    如果工作区目录结构或环境变量配置有误，此方法会在启动阶段提前暴露问题。
-    """
-    get_local_shell_backend()

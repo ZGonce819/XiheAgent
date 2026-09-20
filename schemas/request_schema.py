@@ -73,18 +73,6 @@ class DashboardProjectBindFolderRequest(BaseModel):
     local_folder: str | None = Field(default=None, max_length=1000, description="技能本地作用域使用的文件夹")
 
 
-class DashboardProjectUpdateDisplayNameRequest(BaseModel):
-    """更新项目显示名称请求体。
-
-    Attributes:
-        project_name: 项目名称。
-        display_name: 新的显示名称。
-    """
-
-    project_name: str = Field(min_length=1, max_length=256, description="项目名称")
-    display_name: str = Field(min_length=1, max_length=256, description="项目显示名称")
-
-
 class TaskCreateRequest(BaseModel):
     """通用任务创建请求体。
 

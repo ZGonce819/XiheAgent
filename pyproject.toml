@@ -32,14 +32,10 @@ dependencies = [
     # HTTP & Utilities
     "python-multipart>=0.0.6",
     "httpx>=0.26.0",  # For async HTTP requests (SSRF-safe)
-    "aiofiles>=23.0.0",  # Async file operations
     "python-dotenv>=1.0.0",  # Environment variable loading
     
     # Gitee integration
     "requests>=2.31.0",  # Gitee API calls
-    
-    # Logging & Monitoring
-    "structlog>=24.0.0",  # Structured logging (optional)
     
     # Sandbox
     "opensandbox>=0.1.0",  # Ali OpenSandbox SDK - Python client library
@@ -59,8 +55,8 @@ dev = [
 ]
 
 [project.scripts]
-xihe-agent-start = "xihe.scripts.start_all:main"
-xihe-agent-stop = "xihe.scripts.stop_all:main"
+xihe-agent-start = "scripts.start_all:main"
+xihe-agent-stop = "scripts.stop_all:main"
 
 [tool.ruff]
 line-length = 100
@@ -164,4 +160,21 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["xihe*"]
+# 顶层包直接位于仓库根（没有 src/ 或 xihe/ 这一层），所以这里必须逐个列出。
+# 之前的 `include = ["xihe*"]` 匹配不到任何包，`pip install .` 会装出一个空壳。
+include = [
+    "agent*",
+    "api*",
+    "backends*",
+    "config*",
+    "database*",
+    "models*",
+    "schemas*",
+    "scripts*",
+    "services*",
+    "store*",
+    "tools*",
+    "utils*",
+]
+# 只用于开发/评估，不随包发布。
+exclude = ["tests*", "eval*", "data*", "logs*"]

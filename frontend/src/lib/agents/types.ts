@@ -1,14 +1,5 @@
 export type Author = "user" | "agent" | "system" | "tool"
 
-export type ChunkKind =
-  | "text"
-  | "code"
-  | "error"
-  | "list"
-  | "tool-execution"
-  | "todo"
-  | "image"
-
 export type TodoStatus = "pending" | "in_progress" | "completed"
 
 export type AgentStatus =
@@ -315,19 +306,4 @@ export interface PendingCommandApproval {
   backendType: string
   createdAt: string
   actions: Array<{ name: string; command: string; description: string }>
-}
-
-export type GitFileStatus =
-  | "index-modified"
-  | "index-added"
-  | "index-deleted"
-  | "modified"
-  | "deleted"
-  | "untracked"
-
-export interface GitStatusEntry {
-  path: string
-  status: GitFileStatus
-  staged: boolean
-  originalPath?: string
 }

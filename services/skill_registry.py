@@ -2,7 +2,7 @@
 
 把技能的「解析 / 校验 / 落盘 / 列举 / 删除」收敛到一处，作为技能链路的
 唯一事实来源。历史上这些逻辑散落在 ``services/skill_installer.py``（拷贝）
-与 ``api/dashboard.py::_skill_summary``（解析）里，两处容易分叉，导致出现
+与 dashboard 的技能接口（解析）里，两处容易分叉，导致出现
 「接口认为有效、但 SkillsMiddleware 加载不到」的幽灵技能。
 
 ## 作用域模型
@@ -50,6 +50,7 @@ Example:
 
 from __future__ import annotations
 
+import logging
 import re
 import shutil
 from dataclasses import dataclass, field
@@ -59,6 +60,8 @@ from typing import Any, Literal
 
 from config.app_config import get_settings
 from config.constants import PROJECT_ROOT
+
+logger = logging.getLogger(__name__)
 
 Scope = Literal["builtin", "global", "project_set", "local"]
 
@@ -175,7 +178,7 @@ class SkillRecord:
             try:
                 result["localFolderName"] = self.directory.parent.parent.parent.name
             except (AttributeError, IndexError):
-                pass
+                logger.debug("无法解析本地技能文件夹名：path=%s", self.directory)
         return result
 
 
@@ -813,37 +816,6 @@ def list_project_sets() -> list[str]:
         )
     except OSError:
         return []
-
-
-def list_all_skills(project_name: str | None = None) -> list[SkillRecord]:
-    """列举全部作用域的技能。
-
-    顺序为全局 → 项目集合 → 本地，即实际加载时的覆盖顺序（靠后的优先）。
-
-    Args:
-        project_name: 当前项目名，用于决定是否包含项目集合与本地层。
-
-    Returns:
-        技能记录列表。
-    """
-    records = list_skills(GLOBAL_SCOPE)
-    if project_name and project_name.strip():
-        records.extend(list_skills(PROJECT_SET_SCOPE, project_name))
-        if resolve_project_folder(project_name) is not None:
-            records.extend(list_skills(LOCAL_SCOPE, project_name))
-    else:
-        for set_name in list_project_sets():
-            records.extend(list_skills(PROJECT_SET_SCOPE, set_name))
-        try:
-            from agent.graph.graph import get_store
-
-            for binding in get_store().list_project_folders():
-                bound_project = binding.get("project_name")
-                if bound_project:
-                    records.extend(list_skills(LOCAL_SCOPE, bound_project))
-        except Exception:
-            pass
-    return records
 
 
 # ── 来源标记 ────────────────────────────────────────────────────────────────

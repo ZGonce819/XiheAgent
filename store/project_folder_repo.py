@@ -85,20 +85,6 @@ class ProjectFolderRepo(ConnectionManager):
             "SELECT * FROM project_local_folders ORDER BY updated_at DESC"
         )
 
-    def delete(self, project_name: str) -> int:
-        """解除某个项目的本地文件夹绑定。
-
-        Args:
-            project_name: 项目名称。
-
-        Returns:
-            被删除的行数。
-        """
-        return self.execute(
-            "DELETE FROM project_local_folders WHERE project_name = %s",
-            (project_name,),
-        )
-
     def rename(self, old_name: str, new_name: str) -> int:
         """项目改名时同步更新绑定记录的项目名。
 
@@ -113,29 +99,4 @@ class ProjectFolderRepo(ConnectionManager):
             "UPDATE project_local_folders SET project_name = %s, updated_at = %s "
             "WHERE project_name = %s",
             (new_name, utc_now(), old_name),
-        )
-
-    def update_display_name(self, project_name: str, display_name: str) -> int:
-        """更新项目的显示名称。
-
-        如果项目不存在于表中，则插入一条新记录（local_folder 为空字符串）。
-
-        Args:
-            project_name: 项目名称。
-            display_name: 新的显示名称。
-
-        Returns:
-            受影响的行数。
-        """
-        now = utc_now()
-        return self.execute(
-            """
-            INSERT INTO project_local_folders
-                (project_name, display_name, local_folder, created_at, updated_at)
-            VALUES (%s, %s, '', %s, %s)
-            ON DUPLICATE KEY UPDATE
-                display_name = VALUES(display_name),
-                updated_at = VALUES(updated_at)
-            """,
-            (project_name, display_name, now, now),
         )

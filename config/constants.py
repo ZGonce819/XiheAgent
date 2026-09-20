@@ -32,8 +32,6 @@ PROJECT_ROOT: Final[Path] = Path(__file__).resolve().parents[1]
 
 WORKSPACE_ROOT: Final[Path] = Path(get_env("AI_WORKSPACE_ROOT", r"E:\ai_workspace")).resolve()
 
-PROJECTS_DIR: Final[Path] = WORKSPACE_ROOT / "projects"
-
 # ── 任务类型 ────────────────────────────────────────────────────────────────
 
 TaskKind = Literal["coding", "analysis", "planning", "qa", "sync", "inspect", "review"]

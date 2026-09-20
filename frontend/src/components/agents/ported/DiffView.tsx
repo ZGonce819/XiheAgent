@@ -222,8 +222,7 @@ export function DiffView({ diffData }: DiffViewProps) {
       }
       setTokenCache(cache);
       highlightingRef.current = false;
-    }).catch((err: unknown) => {
-      console.warn('[diff-view] Syntax highlighting failed:', err);
+    }).catch(() => {
       highlightingRef.current = false;
     });
   }, [hunkLines, language, isBinary]);

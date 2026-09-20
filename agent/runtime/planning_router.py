@@ -23,8 +23,8 @@ from agent.runtime._helpers import (
     build_agent_for_runtime,
     build_plan_user_content,
     plan_source_prompt,
-    revision_source_prompt,
 )
+from agent.runtime.cancellation import AgentRunCancelledError, mark_run_cancelled
 from agent.runtime.events import record_event
 from agent.runtime.streaming_runtime import run_agent_with_event_stream
 from config.approval_runtime import save_pending_approval
@@ -91,21 +91,23 @@ def run_plan_response_task(
         from config.app_config import get_settings as _get_settings
         _effective_backend = "sandbox" if _get_settings().use_sandbox else "local"
 
-    plan_source = prompt
     previous_plan_text: str | None = None
     if previous_plan_message is not None:
-        # 方案修订场景：保留上一版方案正文，同时合并用户本轮补充要求。
+        # 方案修订场景：保留上一版方案正文，同时把用户本轮补充要求一并交给模型。
         # 这样模型能输出"完整新版方案"，而不是只输出增量描述。
         previous_plan_text = str(previous_plan_message.get("content") or "").strip()
-        plan_source = revision_source_prompt(
-            previous_source_prompt=plan_source_prompt(previous_plan_message, prompt),
-            revision_prompt=revision_prompt or prompt,
-        )
+    # 方案被多轮修订时，需求要沿用的始终是最早那一版，不能退化成"再改一下"这类
+    # 局部要求。首次生成方案时 prompt 本身就是完整需求。
+    plan_source = (
+        plan_source_prompt(previous_plan_message, prompt)
+        if previous_plan_message is not None
+        else prompt
+    )
     store.upsert_thread(
         thread_id=thread_id,
         title=(revision_prompt or prompt)[:80] or f"{repo.owner}/{repo.repo}",
         # user_prompt 只保存本轮用户真实输入，用于 Dashboard user_message 展示。
-        # plan_source 是方案生成/后续实施的完整需求，不能混用为前端展示文本。
+        # plan_source_prompt 是方案生成/后续实施的完整需求，不能混用为前端展示文本。
         user_prompt=revision_prompt or prompt,
         repo_url=repo.clone_url,
         repo_owner=repo.owner,
@@ -113,6 +115,7 @@ def run_plan_response_task(
         latest_run_status="running",
         backend_type=backend_type,
         project_name=project_name,
+        plan_source_prompt=plan_source,
     )
     run_id = run_id or str(uuid.uuid4())
     store.record_run(run_id=run_id, thread_id=thread_id, status="running")
@@ -148,9 +151,7 @@ def run_plan_response_task(
             run_id=run_id,
             content=build_plan_user_content(
                 repo_url=repo.clone_url,
-                prompt=plan_source_prompt(previous_plan_message, prompt)
-                if previous_plan_message is not None
-                else prompt,
+                prompt=plan_source,
                 previous_plan=previous_plan_text,
                 revision_prompt=revision_prompt,
                 repository_available=repository_available,
@@ -195,6 +196,15 @@ def run_plan_response_task(
             "thread_id": thread_id,
             "run_id": run_id,
             "status": "completed",
+        }
+    except AgentRunCancelledError:
+        # 用户主动停止不是失败，单独接住，别落进下面的 failed 分支。
+        mark_run_cancelled(thread_id=thread_id, run_id=run_id)
+        logger.info("技术方案生成被用户停止：thread_id=%s run_id=%s", thread_id, run_id)
+        return {
+            "thread_id": thread_id,
+            "run_id": run_id,
+            "status": "cancelled",
         }
     except Exception as exc:
         store.finish_open_run_events(thread_id, status="error")

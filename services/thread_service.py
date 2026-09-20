@@ -298,7 +298,7 @@ def thread_payload(
             platform = detect_platform(repo_url)
             platform_display = get_platform_display_name(platform)
         except Exception:
-            pass
+            logger.debug("检测平台失败：repo_url=%s", repo_url, exc_info=True)
 
     run_events = thread.get("run_events") or []
     work_dirs = _local_work_dirs(thread)

@@ -32,6 +32,7 @@ from agent.runtime._helpers import (
     message_metadata,
     plan_source_prompt,
 )
+from agent.runtime.cancellation import AgentRunCancelledError, mark_run_cancelled
 from agent.runtime.events import mark_tool_events_rejected, record_event
 from agent.runtime.planning_router import run_plan_response_task
 from agent.runtime.streaming_runtime import run_agent_with_event_stream
@@ -518,6 +519,12 @@ def run_agent_task(
             )
         logger.info("任务完成：thread_id=%s run_id=%s messages=%s", thread_id, run_id, len(messages))
         return {"thread_id": thread_id, "run_id": run_id, "status": "completed", "messages": messages}
+    except AgentRunCancelledError:
+        # 用户主动停止不是失败。这里必须单独接住：落到下面的 ``except Exception``
+        # 会把这一轮记成 failed，自动化任务的连续失败计数也会把它算进去。
+        mark_run_cancelled(thread_id=thread_id, run_id=run_id)
+        logger.info("任务被用户停止：thread_id=%s run_id=%s", thread_id, run_id)
+        return {"thread_id": thread_id, "run_id": run_id, "status": "cancelled", "messages": []}
     except Exception as exc:
         store.finish_open_run_events(thread_id, status="error")
         store.update_thread_status(thread_id, "failed")
@@ -683,6 +690,12 @@ def resume_agent_task(
             "status": "completed",
             "messages": result.get("messages", []),
         }
+    except AgentRunCancelledError:
+        # 停止只能由 run_agent_with_event_stream 抛出，那时 run_id 已经赋值。
+        release_approval_claim(thread_id)
+        mark_run_cancelled(thread_id=thread_id, run_id=run_id)
+        logger.info("审批恢复被用户停止：thread_id=%s run_id=%s", thread_id, run_id)
+        return {"thread_id": thread_id, "run_id": run_id, "status": "cancelled", "messages": []}
     except Exception as exc:
         release_approval_claim(thread_id)
         store.finish_open_run_events(thread_id, status="error")

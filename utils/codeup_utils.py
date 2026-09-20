@@ -104,27 +104,6 @@ def get_codeup_token() -> str:
     return token
 
 
-def mask_codeup_token(text: str) -> str:
-    """对文本中的 Codeup 令牌做脱敏。
-
-    API 错误、Git 输出和异常信息可能包含访问令牌。
-    所有写日志或返回给模型的外部错误文本都应经过该函数处理。
-
-    Args:
-        text: 待脱敏的原始文本。
-
-    Returns:
-        脱敏后的文本。
-    """
-
-    masked = text
-    for token_name in ("CODEUP_TOKEN", "SCM_CODEUP_TOKEN"):
-        token = get_env(token_name).strip()
-        if token:
-            masked = masked.replace(token, "***")
-    return masked
-
-
 def _codeup_api_base() -> str:
     """读取 Codeup API 基础地址。
 

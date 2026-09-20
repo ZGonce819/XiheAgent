@@ -28,6 +28,7 @@ from typing import Any
 from langchain_core.messages import BaseMessage
 
 from agent.middleware.run_limits import AgentRunLimitExceeded, AgentRunLimitTracker
+from agent.runtime.cancellation import begin_run, end_run, raise_if_cancelled
 from agent.runtime.events import record_event
 from config.constants import MAX_STREAM_TEXT_LENGTH, STREAM_FLUSH_THRESHOLD
 from utils.gitee_utils import mask_token
@@ -747,6 +748,10 @@ def _consume_raw_event_stream(
     limit_tracker = AgentRunLimitTracker(task_kind=task_kind)
 
     for event in stream:
+        # 每两个协议事件之间检查一次停止请求。放在这里而不是只在 event_sink 里，
+        # 是因为工具事件、子 Agent 事件不一定都走 event_sink；这个循环是所有
+        # 协议事件的必经之处。
+        raise_if_cancelled(thread_id)
         limit_tracker.observe_event(event)
         marker = _text_block_marker_from_event(event)
         if marker is not None:
@@ -930,6 +935,56 @@ def run_agent_with_event_stream(
 ) -> dict[str, Any]:
     """使用官方 v3 event streaming 驱动 DeepAgent。
 
+    这里只负责「运行期间可被停止」这一件事：进入前登记运行态，退出时（正常、
+    报错、被停止都算）注销。真正的消费逻辑在 :func:`_run_agent_with_event_stream`。
+
+    Args:
+        agent: DeepAgent runnable 实例。
+        thread_id: 当前线程 ID。
+        run_id: 当前运行 ID。
+        content: 发送给 Agent 的用户内容。
+        task_kind: 任务类型，用于运行保护阈值。
+        event_sink: 可选的 SSE 事件推送回调。
+        checkpoint_id: 可选的回退基点。
+        resume_decisions: 审批恢复时的表决结果。
+
+    Returns:
+        包含 messages 和 raw_output 的结果字典。
+
+    Raises:
+        AgentRunLimitExceeded: 运行保护阈值被突破时。
+        AgentRunCancelledError: 用户在这一轮中途点了「停止」。
+    """
+
+    begin_run(thread_id)
+    try:
+        return _run_agent_with_event_stream(
+            agent=agent,
+            thread_id=thread_id,
+            run_id=run_id,
+            content=content,
+            task_kind=task_kind,
+            event_sink=event_sink,
+            checkpoint_id=checkpoint_id,
+            resume_decisions=resume_decisions,
+        )
+    finally:
+        end_run(thread_id)
+
+
+def _run_agent_with_event_stream(
+    *,
+    agent: Any,
+    thread_id: str,
+    run_id: str,
+    content: str,
+    task_kind: str | None = None,
+    event_sink: StreamEventSink | None = None,
+    checkpoint_id: str | None = None,
+    resume_decisions: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """实际消费逻辑，由 :func:`run_agent_with_event_stream` 负责运行态登记后调用。
+
     这个函数是 FastAPI 版本替代 `langgraph dev` 的核心桥接层：
     - DeepAgent 继续按官方 `stream_events(version="v3")` 运行。
     - 后端把 message、tool_calls、subagents 转成课程项目的 `run_events`。
@@ -950,6 +1005,7 @@ def run_agent_with_event_stream(
 
     Raises:
         AgentRunLimitExceeded: 运行保护阈值被突破时。
+        AgentRunCancelledError: 用户在这一轮中途点了「停止」。
     """
 
     configurable = {"thread_id": thread_id}

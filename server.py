@@ -193,7 +193,7 @@ def _apply_pending_skill_refresh(thread_id: str, backend: BaseSandbox) -> None:
             try:
                 backend.destroy()
             except Exception:
-                pass
+                logger.debug("销毁失效 backend 时出错：thread_id=%s", thread_id, exc_info=True)
             logger.info("补同步时发现沙箱已失效，清除缓存：thread_id=%s", thread_id)
         else:
             logger.warning("补同步技能到沙箱失败：thread_id=%s", thread_id, exc_info=True)

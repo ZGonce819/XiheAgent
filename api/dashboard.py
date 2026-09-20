@@ -11,7 +11,6 @@ import logging
 import re
 import threading
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -22,6 +21,7 @@ from pydantic import BaseModel
 
 from agent.graph.graph import get_store
 from agent.runtime import delete_task, get_task, list_tasks
+from agent.runtime.cancellation import request_cancel
 from agent.runtime.task_router import initialize_task_record
 from config.app_config import get_settings
 from config.approval_config import (
@@ -66,7 +66,6 @@ from schemas.request_schema import (
     DashboardEditPreviewRequest,
     DashboardProjectBindFolderRequest,
     DashboardProjectRenameRequest,
-    DashboardProjectUpdateDisplayNameRequest,
     DashboardSkillCreateRequest,
     DashboardSkillUpdateRequest,
     DashboardThreadMessageRequest,
@@ -134,37 +133,6 @@ def _normalize_schedule_repo(body: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def _skill_summary(skill_file: Path) -> dict[str, Any]:
-    """读取单个 ``SKILL.md`` 并生成前端摘要。
-
-    保留此兼容入口（历史调用方按文件路径传入），内部委托给
-    :func:`services.skill_registry.read_skill`，确保摘要口径与技能加载器一致。
-
-    Args:
-        skill_file: ``SKILL.md`` 的路径。
-
-    Returns:
-        技能摘要字典；文件不可读时退回基础信息。
-    """
-    from services.skill_registry import GLOBAL_SCOPE, read_skill, scope_virtual_path
-
-    record = read_skill(skill_file.parent, scope=GLOBAL_SCOPE)
-    if record is not None:
-        return record.to_payload()
-
-    text = skill_file.read_text(encoding="utf-8", errors="replace")
-    return {
-        "id": skill_file.parent.name,
-        "name": skill_file.parent.name,
-        "description": "可由智能体按需加载的本地技能。",
-        "virtualPath": f"{scope_virtual_path(GLOBAL_SCOPE)}{skill_file.parent.name}/SKILL.md",
-        "updatedAt": datetime.fromtimestamp(
-            skill_file.stat().st_mtime, tz=timezone.utc
-        ).isoformat(),
-        "text": text[:0],
-    }
-
-
 def _is_latest_user_message(message_id: str, thread_id: str, messages: list[dict[str, Any]], original_content: str | None = None) -> bool:
     """校验消息确实是当前线程最后一条用户消息。
 
@@ -195,7 +163,6 @@ def dashboard_me() -> dict[str, Any]:
         "email": None,
         "avatar_url": None,
         "is_admin": True,
-        "slack_oauth_enabled": False,
     }
 
 
@@ -342,12 +309,6 @@ def dashboard_update_skill_retrieval_settings(body: dict[str, Any]) -> dict[str,
 def dashboard_repos() -> dict[str, Any]:
     """返回可用代码仓库列表。"""
     return {"installations": [], "repositories": []}
-
-
-@dashboard_router.get("/my-mapping")
-def dashboard_my_mapping() -> dict[str, Any]:
-    """返回当前用户的外部账号映射；未配置时返回空对象。"""
-    return {}
 
 
 @dashboard_router.get("/schedules")
@@ -893,7 +854,7 @@ def dashboard_skills(
                     for record in list_skills(LOCAL_SCOPE, bound_project):
                         skill_items.append(record.to_payload())
         except Exception:
-            pass
+            logger.debug("列出本地作用域技能失败", exc_info=True)
 
     scopes = [
         {
@@ -919,7 +880,7 @@ def dashboard_skills(
 
             any_local_bound = len(get_store().list_project_folders()) > 0
         except Exception:
-            pass
+            logger.debug("查询项目绑定列表失败", exc_info=True)
     scopes.append(
         {
             "scope": PROJECT_SET_SCOPE,
@@ -1723,6 +1684,31 @@ def dashboard_update_thread_title(thread_id: str, body: DashboardThreadTitleUpda
     return thread_payload(get_task(thread_id))
 
 
+@dashboard_router.post("/threads/{thread_id}/cancel")
+def dashboard_cancel_thread(thread_id: str) -> dict[str, Any]:
+    """停止该会话当前正在运行的一轮。
+
+    停止是协作式的：这里只记下请求，运行循环在下一个协议事件之间退出，
+    已生成的内容保留、不再继续下一步。所以接口返回时这一轮通常还没结束，
+    前端要等 ``thread_done`` 事件拿到终态。
+
+    Args:
+        thread_id: 目标会话唯一标识。
+
+    Returns:
+        受理停止后的会话摘要。
+
+    Raises:
+        HTTPException: 会话不存在返回 404；当前没有运行中的轮次返回 409。
+    """
+
+    if get_task(thread_id) is None:
+        raise HTTPException(status_code=404, detail="thread not found")
+    if not request_cancel(thread_id):
+        raise HTTPException(status_code=409, detail="当前没有正在运行的任务")
+    return thread_payload(get_task(thread_id))
+
+
 @dashboard_router.delete("/threads/{thread_id}", status_code=204)
 def dashboard_delete_thread(thread_id: str) -> None:
     """删除指定会话及其关联数据。
@@ -2040,43 +2026,3 @@ def dashboard_bind_project_folder(body: DashboardProjectBindFolderRequest) -> di
         raise HTTPException(status_code=400, detail=f"本地文件夹不存在或不是目录：{folder}")
     get_store().upsert_project_folder(project_name, str(folder) if folder else "")
     return {"project_name": project_name}
-
-
-@dashboard_router.delete("/workspace/projects/{project_name}/unbind-folder")
-def dashboard_unbind_project_folder(project_name: str) -> dict[str, Any]:
-    """解除项目的本地文件夹绑定，恢复使用全局工作区。
-
-    Args:
-        project_name: 项目名称。
-
-    Returns:
-        dict: ``project_name`` 与 ``unbound``（是否确实删除了一条绑定）。
-    """
-    name = project_name.strip()
-    if not name:
-        raise HTTPException(status_code=400, detail="项目名称不能为空")
-    removed = get_store().delete_project_folder(name)
-    return {"project_name": name, "unbound": removed > 0}
-
-
-@dashboard_router.patch("/workspace/projects/update-display-name")
-def dashboard_update_project_display_name(body: DashboardProjectUpdateDisplayNameRequest) -> dict[str, Any]:
-    """更新项目的显示名称。
-
-    Args:
-        body: 包含 ``project_name`` 和 ``display_name`` 的请求体。
-
-    Returns:
-        dict: ``project_name`` 与 ``display_name``。
-
-    Raises:
-        HTTPException: 项目名称或显示名称为空时返回 400。
-    """
-    project_name = body.project_name.strip()
-    display_name = body.display_name.strip()
-    if not project_name:
-        raise HTTPException(status_code=400, detail="项目名称不能为空")
-    if not display_name:
-        raise HTTPException(status_code=400, detail="显示名称不能为空")
-    affected = get_store().update_project_display_name(project_name, display_name)
-    return {"project_name": project_name, "display_name": display_name, "updated": affected > 0}

@@ -1,4 +1,4 @@
-import { Navigate, createFileRoute, Link } from "@tanstack/react-router"
+import { createFileRoute, Link } from "@tanstack/react-router"
 import {
   CalendarBlankIcon,
   CaretDownIcon,
@@ -73,7 +73,13 @@ const EMPTY_FORM: FormState = {
 function AutomationsPage() {
   const session = useSession()
   if (session.isLoading) return <PageSkeleton />
-  if (!session.data) return <Navigate to="/login" />
+  if (!session.data) {
+    return (
+      <main className="p-6">
+        <p className="text-sm text-muted-foreground">读取会话信息失败，请刷新页面重试。</p>
+      </main>
+    )
+  }
   return (
     <AppShell
       user={session.data}

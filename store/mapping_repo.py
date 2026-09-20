@@ -87,16 +87,3 @@ class MappingRepo(ConnectionManager):
         return self.fetch_all(
             "SELECT * FROM repo_workspace_mappings ORDER BY updated_at DESC"
         )
-
-    def delete_mapping(self, mapping_id: str) -> int:
-        """按 ID 删除映射记录。
-
-        Args:
-            mapping_id: 映射记录 ID。
-
-        Returns:
-            被删除的行数。
-        """
-        return self.execute(
-            "DELETE FROM repo_workspace_mappings WHERE id = %s", (mapping_id,)
-        )

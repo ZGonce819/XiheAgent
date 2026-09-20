@@ -6,7 +6,7 @@
 
 ## 核心特性
 
-- 🤖 **智能 Agent 编排** - 基于 LangGraph + DeepAgents v3，支持复杂任务的自动分解与执行
+- 🤖 **智能 Agent 编排** - 基于 LangGraph + DeepAgents，支持复杂任务的自动分解与执行
 - 🔄 **SSE 实时流式输出** - 支持 asyncio.Queue（单进程）或 Redis Stream（多进程部署）事件分发
 - 💾 **三层存储架构** - Redis（Checkpoint）+ MySQL（业务数据）+ PostgreSQL（长期记忆）
 - 🔐 **企业级安全** - 虚拟路径隔离、命令白名单、Git 分支保护、RBAC 权限控制（规划中）
@@ -18,7 +18,7 @@
 - 📁 **本地文件夹绑定** - 项目可绑定本地文件夹作为工作根目录，Agent 直接在用户项目中工作
 - ⏰ **自动化任务编排** - 自动化任务按「一轮一轮」跑：每轮读上一轮状态、跑完独立验证、把结论写回状态，连续没通过就停下交给人；支持按 cron 自动触发，也可以手动跑一轮；只读任务直接跑，写入任务配好验证检查项后也能跑
 - 🧩 **四层技能系统** - 内置 / 全局 / 项目集合 / 本地四层作用域，同名逐层覆盖；支持网页上传与 Agent 自动沉淀
-- 🖥️ **现代化前端** - React + Vite + TanStack Router，响应式设计，支持深色模式
+- 🖥️ **现代化前端** - React + Vite + Tailwind CSS + TanStack Router，响应式设计，支持深色模式
 
 ## 技术栈
 
@@ -27,7 +27,7 @@
 | 组件 | 技术选型 |
 |------|----------|
 | Web 框架 | FastAPI + Uvicorn |
-| Agent 框架 | LangGraph + DeepAgents v3 |
+| Agent 框架 | LangGraph + DeepAgents |
 | 语言模型 | OpenAI 兼容接口（支持自定义模型配置） |
 | 业务数据存储 | MySQL (pymysql) - Thread/Run/Finding 等 |
 | 长期记忆存储 | PostgreSQL (psycopg) - LangGraph Store |
@@ -40,13 +40,16 @@
 
 | 组件 | 技术选型 |
 |------|----------|
-| 框架 | React 19 + Vite |
-| 状态管理 | TanStack Query + React Context |
-| 路由 | TanStack Router |
+| 框架 | React 19 + TanStack Start（SPA 模式）+ Vite 8 |
+| 状态管理 | TanStack Query（服务端状态）+ 组件内 `useState` |
+| 路由 | TanStack Router（文件式路由，路由树由插件生成） |
 | HTTP 客户端 | Fetch API |
-| Markdown 渲染 | markdown-it + DOMPurify |
-| 构建工具 | Vite 8 |
-| 组件与测试 | base-ui + Phosphor Icons + Vitest / Testing Library |
+| CSS 框架 | Tailwind CSS v4 |
+| Markdown 渲染 | react-markdown + remark-gfm |
+| 语法高亮 | Shiki |
+| 代码 Diff | `diff` + `@pierre/diffs` |
+| 构建与离线壳 | Vite 8 + Nitro；`vite-plugin-pwa` 生成 PWA 清单 |
+| 组件与测试 | base-ui + Phosphor Icons + Lucide + Vitest / Testing Library |
 
 ## 快速开始
 
@@ -231,8 +234,9 @@ SANDBOX_MAX_PER_THREAD=3             # 每个线程最多保留的沙箱数量
 
 ### 安装 Python 依赖
 
+在项目根目录（即本 README 所在目录）执行：
+
 ```bash
-cd D:\Bemyself\Python\xihe
 pip install -e ".[dev]"
 ```
 
@@ -247,6 +251,7 @@ copy .env.example .env
 ```ini
 # DeepSeek API（使用自定义模型时可选）
 DEEPSEEK_API_KEY=your-api-key-here
+DEEPSEEK_BASE_URL=https://api.deepseek.com  # API 基础地址（必填）
 
 # SCM 平台 Token（按需配置使用的平台）
 GITEE_TOKEN=your-gitee-token-here
@@ -287,12 +292,17 @@ SANDBOX_MAX_PER_THREAD=3                 # 每个线程最多保留的沙箱数�
 ### 启动后端服务
 
 ```bash
-# 方式一：使用脚本（推荐）
+# 方式一：使用脚本（推荐，会一并拉起前端）
 xihe-agent-start
 
 # 方式二：直接启动
 uvicorn app:app --reload --host 127.0.0.1 --port 2024
+
+# 停止（配合方式一的脚本启动时使用）
+xihe-agent-stop
 ```
+
+> 后端启动时会自动拉起自动化任务的常驻调度（可用 `XIHE_AUTOMATION_SCHEDULER=false` 关掉）。调度起不来不会拦住整个服务 —— 手动触发和其它功能都不依赖它。
 
 ### 启动前端服务
 
@@ -302,7 +312,7 @@ npm install  # 首次需要安装依赖
 npm run dev  # 启动 Vite 开发服务器，端口 3000
 ```
 
-访问 http://127.0.0.1:3000 即可使用完整应用。
+访问 http://127.0.0.1:3000 即可使用完整应用。开发服务器会把 `/dashboard/api` 代理到后端（默认 `http://127.0.0.1:2024`）；后端换地址时用 `VITE_DASHBOARD_API_BASE_URL` 指定。注意这是**前端构建期**变量，写在仓库根的 `.env` 里不生效 —— Vite 的工作目录是 `frontend/`，要放在 `frontend/.env` 或直接作为命令的环境变量传进去。
 
 ### 健康检查
 
@@ -314,6 +324,8 @@ curl http://127.0.0.1:2024/health
 
 ```
 xihe-agent/
+├── .env.example           # 环境变量模板
+├── pyproject.toml         # Python 项目配置与依赖声明
 ├── app.py                 # FastAPI 应用入口
 ├── server.py              # DeepAgent 工厂（组装模型/工具/中间件）
 ├── prompt.py              # 系统提示词构建
@@ -332,6 +344,9 @@ xihe-agent/
 │   ├── automation_state.py  # 自动化任务跨轮状态（data/automation_state/<id>.json）
 │   ├── approval_config.py # 命令审批策略配置
 │   ├── approval_runtime.py # 审批运行时状态管理
+│   ├── skill_retrieval_config.py # 技能检索开关配置
+│   ├── workspace_config.py # 工作区配置管理
+│   ├── constants.py       # 全局常量
 │   └── logging_config.py  # 日志配置
 │
 ├── agent/                 # Agent 核心模块
@@ -340,11 +355,11 @@ xihe-agent/
 │   │   ├── model.py       # 语言模型管理
 │   │   ├── persistence.py # Checkpoint 持久化（Redis/PostgreSQL）
 │   │   ├── redis_checkpointer.py # Redis Checkpointer 实现
-│   │   ├── state.py       # Agent 状态定义
 │   │   └── checkpoint_history.py  # 历史消息查询
 │   │
 │   ├── memory/            # 长期记忆
 │   │   ├── workspace.py   # 工作区级记忆
+│   │   ├── workspace.md   # 工作区记忆模板（随仓库分发）
 │   │   ├── repo.py        # 仓库级记忆
 │   │   └── repo_update.py # 记忆更新策略
 │   │
@@ -354,9 +369,13 @@ xihe-agent/
 │   │   ├── message_sanitize.py   # 消息清洗
 │   │   ├── tool_error.py         # 工具异常处理
 │   │   ├── tool_sanitize.py      # 工具调用清洗
-│   │   └── run_limits.py         # 运行限制
+│   │   ├── tool_tracking.py      # 工具调用追踪
+│   │   ├── run_limits.py         # 运行限制
+│   │   ├── final_response.py     # 最终响应处理
+│   │   └── skill_retrieval.py    # 技能检索中间件
 │   │
 │   └── runtime/           # 任务编排与运行时
+│       ├── cancellation.py     # 运行中任务的协作式停止登记表（api/services/agent 三层共用）
 │       ├── task_router.py      # 主任务路由
 │       ├── planning_router.py  # 方案生成路由
 │       ├── sync_router.py      # 同步操作路由（git pull 等）
@@ -393,7 +412,7 @@ xihe-agent/
 │   └── skill_tools.py     # 技能工具（create_skill / list_skills）
 │
 ├── utils/                 # 通用工具函数
-│   ├── platform_router.py # SCM 平台检测与工具路由
+│   ├── platform_utils.py  # SCM 平台检测与工具路由
 │   ├── gitee_utils.py     # Gitee URL 解析与 API
 │   ├── github_utils.py    # GitHub URL 解析与 API
 │   ├── codeup_utils.py    # Codeup URL 解析与 API
@@ -403,31 +422,29 @@ xihe-agent/
 │   ├── id_utils.py        # UUID 生成工具 (thread/run/message/finding ID)
 │   ├── time_utils.py      # ISO 时间戳转毫秒工具
 │   ├── intent_utils.py    # 用户意图识别 (方案确认/修订判断)
-│   └── message_utils.py   # LangChain 消息内容处理 (文本提取/方案抽取)
+│   ├── message_utils.py   # LangChain 消息内容处理 (文本提取/方案抽取)
+│   ├── recycle_bin.py     # 代码回退回收站
+│   ├── redis_utils.py     # Redis 通用工具
+│   └── thread_utils.py    # 会话工具函数
 │
 ├── store/                 # 数据持久化（per-table Repo 拆分）
 │   ├── thread_repo.py     # threads 表 CRUD + 级联删除
 │   ├── run_repo.py        # runs 表
 │   ├── event_repo.py      # run_events 表
-│   ├── message_repo.py    # thread_messages 表
-│   ├── plan_repo.py       # thread_plans 表
 │   ├── finding_repo.py    # review_findings 表
-│   ├── setting_repo.py    # settings 表（键值存储）
 │   ├── sandbox_repo.py    # sandbox_registry 表（线程-沙盒映射）
 │   ├── project_folder_repo.py # project_local_folders 表（项目-本地文件夹绑定）
 │   ├── mapping_repo.py    # repo_workspace_mappings 表
+│   ├── conversation_version_repo.py # 会话版本快照
 │   ├── mysql_store.py     # LocalMySQLStore Facade（组合所有 Repo）
 │   └── __init__.py        # Store 导出
 │
 ├── models/                # 业务实体模型 (dataclass, per-table)
-│   ├── _helpers.py        # 共享解析函数 (_to_iso, _parse_json, _parse_bool)
+│   ├── _helpers.py        # 共享解析函数 (_to_iso)
 │   ├── thread.py          # Thread 实体
 │   ├── run.py             # Run 实体
 │   ├── event.py           # RunEvent 实体
-│   ├── message.py         # ThreadMessage 实体
-│   ├── plan.py            # ThreadPlan 实体
 │   ├── finding.py         # ReviewFinding 实体
-│   ├── setting.py         # Setting 实体
 │   ├── mapping.py         # RepoWorkspaceMapping 实体
 │   └── __init__.py        # 模型导出
 │
@@ -439,12 +456,11 @@ xihe-agent/
 │   └── __init__.py        # Schema 导出
 │
 ├── services/              # 业务逻辑层
-│   ├── repo_service.py    # 仓库 URL 规范化
 │   ├── thread_service.py  # Thread DTO 组装 + 状态映射
 │   ├── streaming_service.py # SSE 流式编排（asyncio.Queue / Redis Stream 双模式）
-│   ├── redis_stream.py      # Redis Stream 事件总线（USE_REDIS_STREAM=true 启用）
 │   ├── skill_registry.py    # 技能注册表（四层作用域的唯一事实来源）
 │   ├── skill_installer.py   # 技能安装器（薄封装 skill_registry）
+│   ├── skill_retrieval.py   # 技能检索（BM25-lite 打分）
 │   ├── sandbox_skill_sync.py # 技能变更后同步进沙箱（运行中的会话延迟同步）
 │   ├── cron_schedule.py     # cron 表达式解析与命中判断
 │   ├── automation_guard.py  # 「这个任务正在跑」的运行登记（调度与手动触发共用一份）
@@ -452,47 +468,84 @@ xihe-agent/
 │   ├── automation_verification.py # 循环的独立验证门（跑检查项，不靠模型自评；含容器内执行器）
 │   ├── automation_runner.py # 循环接真实运行时的一侧（只读任务 + 配了检查项的写入任务）
 │   ├── automation_scheduler.py # 按分钟扫描并启动到点的任务（进程内常驻，跨进程用 Redis 租约收敛）
+│   ├── approval_vote.py     # 审批表决（三评审多数决）
+│   ├── approval_explanation.py # 审批解释（调用模型生成命令说明）
+│   ├── repo_rollback.py     # 代码回退与版本恢复
 │   └── __init__.py        # 服务导出
 │
 ├── scripts/               # CLI 脚本
 │   ├── start_all.py       # 启动脚本
 │   ├── stop_all.py        # 停止脚本
+│   ├── start_backend.cmd  # Windows 后端启动脚本
+│   ├── start_ui.cmd       # Windows 前端启动脚本
 │   └── prune_orphan_automation_states.py # 收走没有对应定义的循环状态文件（默认归档，`--delete` 才删）
-│├── frontend/              # 前端项目（React + Vite）
+│
+├── frontend/              # 前端项目（React + Vite）
 │   ├── src/
-│   │   ├── components/    # React 组件
+│   │   ├── client.tsx     # 客户端入口
+│   │   ├── router.tsx     # TanStack Router 实例
+│   │   ├── routeTree.gen.ts # 路由树（由 Vite 插件生成，勿手改）
+│   │   ├── components/
+│   │   │   ├── AppShell.tsx        # 应用外壳（顶栏 + 侧边栏 + 用户菜单）
+│   │   │   ├── SidebarUserMenu.tsx # 侧边栏用户菜单
+│   │   │   ├── sidebar-layout.tsx  # 侧边栏布局
 │   │   │   ├── agents/    # Agent 相关组件
-│   │   │   │   ├── AgentThreadView.tsx    # 会话线程视图（含顶部技能入口）
+│   │   │   │   ├── AgentThreadView.tsx    # 会话线程视图（含顶部技能入口与停止接线）
+│   │   │   │   ├── AgentPromptBar.tsx     # 会话输入区
 │   │   │   │   ├── AgentsHome.tsx         # Agent 首页
 │   │   │   │   ├── AgentsSidebar.tsx      # Agent 侧边栏（项目分组可折叠）
 │   │   │   │   ├── RepoSelector.tsx       # 仓库选择器
 │   │   │   │   ├── ProjectSelector.tsx    # 项目选择器
 │   │   │   │   ├── CommandApprovalDialog.tsx # 命令审批面板
+│   │   │   │   ├── utils/diffUtils.ts     # Diff 解析工具
 │   │   │   │   └── ported/              # 移植组件
-│   │   │   │       ├── CloudPromptBar.tsx # 输入框组件
-│   │   │   │       └── MessageView.tsx    # 消息渲染组件
+│   │   │   │       ├── CloudPromptBar.tsx # 输入框组件（含「停止任务」按钮）
+│   │   │   │       ├── MessageView.tsx    # 消息渲染组件
+│   │   │   │       ├── Markdown.tsx / MarkdownTable.tsx # Markdown 渲染
+│   │   │   │       ├── CodeBlock.tsx / DiffView.tsx     # 代码块与 Diff 视图
+│   │   │   │       ├── ShellCommand.tsx / ToolExecution.tsx # 命令与工具执行展示
+│   │   │   │       ├── TodoList.tsx / ReplyCard.tsx / Logo.tsx
+│   │   │   │       └── index.ts
 │   │   │   ├── skills/    # 技能相关组件
 │   │   │   │   ├── SkillPanel.tsx         # 对话内技能面板（查看 + 上传）
 │   │   │   │   ├── SkillPanel.test.tsx    # 面板行为矩阵回归测试
-│   │   │   │   └── SkillRow.tsx           # 技能行
+│   │   │   │   ├── SkillRow.tsx           # 技能行
+│   │   │   │   └── SkillRow.test.tsx
 │   │   │   └── ui/        # 通用 UI 组件
-│   │   │       └── select.tsx             # 下拉选择组件
+│   │   │       ├── select.tsx / select.test.tsx # 下拉选择组件
+│   │   │       ├── button.tsx / input.tsx / textarea.tsx / label.tsx
+│   │   │       ├── card.tsx / avatar.tsx / skeleton.tsx / switch.tsx
+│   │   │       └── confirm-dialog.tsx     # 确认弹窗
 │   │   ├── lib/           # API 客户端与数据层
 │   │   │   ├── agents/    # Agent 相关 API
 │   │   │   │   ├── api.ts               # API 调用
-│   │   │   │   ├── queries.ts           # TanStack Query
+│   │   │   │   ├── queries.ts           # TanStack Query（含取消会话的 mutation）
 │   │   │   │   ├── types.ts             # 类型定义
 │   │   │   │   ├── threadReveal.ts      # 发送消息后的即时出现动画信号
-│   │   │   │   └── useThreadStream.ts   # SSE 流钩子
+│   │   │   │   ├── useThreadStream.ts   # SSE 流钩子
+│   │   │   │   ├── cron.ts              # cron 表达式的可读描述
+│   │   │   │   ├── messageGroups.ts     # 消息分组
+│   │   │   │   ├── pendingPrompts.ts    # 待处理输入
+│   │   │   │   └── useModelOptions.ts   # 模型选项钩子
 │   │   │   ├── api.ts     # 通用 API 客户端
+│   │   │   ├── profile.ts / session.ts / theme.ts / query.ts
+│   │   │   ├── repo.ts    # 仓库 URL 规范化（与后端同口径）
 │   │   │   └── utils.ts   # 前端工具函数
 │   │   ├── routes/        # TanStack Router 路由
-│   │   │   ├── automations.tsx          # 自动化任务页面
-│   │   │   ├── skills.tsx               # 技能管理页面（作用域概览 + 创建/上传）
-│   │   │   └── my-settings.tsx          # 个人设置页面
-│   │   └── styles/        # 样式文件
-│   │       └── agents.css               # Agent 相关样式与统一动画类
-│   ├── package.json       # 前端依赖
+│   │   │   ├── __root.tsx            # 根路由（挂载 AppShell）
+│   │   │   ├── index.tsx             # 首页
+│   │   │   ├── agents.tsx            # Agent 布局路由
+│   │   │   ├── agents/index.tsx      # Agent 首页路由
+│   │   │   ├── agents/$threadId.tsx  # 会话详情路由
+│   │   │   ├── automations.tsx       # 自动化任务页面
+│   │   │   ├── skills.tsx            # 技能管理页面（作用域概览 + 创建/上传）
+│   │   │   └── my-settings.tsx       # 个人设置页面
+│   │   ├── styles.css     # 全局样式
+│   │   └── styles/agents.css        # Agent 相关样式与统一动画类
+│   ├── public/            # 静态资源（favicon / logo / robots.txt）
+│   ├── assets/            # 应用图标与品牌图
+│   ├── scripts/           # 走查与验证脚本（不参与构建）
+│   ├── package.json       # 前端依赖与脚本
 │   └── vite.config.ts     # Vite 配置（代理到后端）
 │
 ├── tests/                 # 后端 pytest 测试
@@ -507,11 +560,50 @@ xihe-agent/
 │   ├── test_automation_runner.py   # 任务范围的放行与拒绝边界（写入任务要配检查项）
 │   ├── test_automation_scheduler.py # 常驻调度（先写触发标记再启动、不重复触发、不重入、扫描租约与运行登记）
 │   ├── test_task_router_routing.py # 任务类型判定只看用户写的那一句
+│   ├── test_plan_source_accumulation.py # 方案修订时原始需求的保留与回退（存在会话上）
+│   ├── test_run_cancellation.py    # 协作式停止（没在跑就拒、嵌套登记、cancelled 不算失败、接口接线）
 │   ├── test_app_lifespan.py        # 调度有没有被正确地拉起与停掉
-│   └── test_automation_api.py      # 循环状态接口与手动触发接口（含「已经有一轮在跑」的 409）
+│   ├── test_automation_api.py      # 循环状态接口与手动触发接口（含「已经有一轮在跑」的 409）
+│   ├── test_approval_vote.py       # 审批表决（三评审多数决、硬拒绝拦截、报错回退人工）
+│   ├── test_command_policy.py      # 命令审批策略引擎
+│   ├── test_skill_retrieval_switch.py # 技能检索开关（off/auto/on 模式切换与 fail-open）
+│   ├── test_skill_source_routing.py   # 技能作用域路由（四层加载顺序与覆盖）
+│   ├── test_skill_tools.py            # 技能工具（create_skill / list_skills）
+│   ├── test_recycle_bin.py            # 代码回退回收站
+│   ├── test_tool_tracking.py          # 工具调用追踪
+│   ├── test_final_response.py         # 最终响应处理
+│   ├── test_tool_error.py             # 工具异常处理
+│   ├── test_local_skill_virtual_paths.py # 本地技能虚拟路径映射
+│   ├── test_dashboard_projects.py     # Dashboard 项目接口
+│   ├── test_dashboard_skill_context.py # Dashboard 技能上下文
+│   ├── test_streaming_messages.py     # 流式消息处理
+│   ├── test_mysql_event_visibility.py # 事件跨连接可见性（轮询能看到别处已提交的事件）
+│   ├── test_runtime_events.py         # 运行时事件
+│   ├── test_runtime_workspace.py      # 运行时工作区
+│   └── test_task_router_repository.py # 任务路由仓储层
 │
 ├── docs/                  # 补充文档
-│   └── COMMAND_APPROVAL.md # 命令审批机制说明
+│   └── DEAD_CODE_AUDIT.md # 死代码排查记录
+│
+├── eval/                  # 端到端评估（`python -m eval.<名字>` 运行，不进 pytest）
+│   ├── skill_retrieval/   # 技能检索开关评估（驱动器与报告都在）
+│   └── history_recall/    # 历史消息召回评估（**只剩历史报告**，驱动器已丢失，数字不可复现）
+│
+├── data/                  # 运行时数据（JSON 配置与状态，已 gitignore）
+│   ├── automations.json   # 自动化任务定义
+│   ├── automation_state/  # 自动化任务跨轮状态
+│   ├── custom_models.json # 自定义模型配置
+│   ├── builtin_model.json # 内置模型覆盖配置
+│   ├── command_approval.json          # 命令审批类别设置
+│   ├── pending_command_approvals.json # 待审批命令
+│   ├── skill_retrieval.json           # 技能检索开关
+│   └── workspace_config.json          # 工作区路径配置
+│
+├── logs/                  # 日志文件（按天轮转）
+│
+├── DESIGN.md              # 设计文档
+├── PRODUCT.md             # 产品文档
+├── LICENSE                # Apache 2.0 许可证
 │
 └── reviewer_rules/        # 代码审查规则
     └── default_review_rules.md
@@ -530,6 +622,22 @@ xihe-agent/
 - **直达分支**：git pull / workspace listing 等不需要 LLM 的操作
 - **方案生成**：`planning_router.py` 生成技术方案，等待用户确认
 - **编码执行**：`task_router.py` 执行实际的编码任务
+
+方案确认与「再改一下」都要还原**用户最早提出的完整需求**，而这个需求不能指望方案消息自带（方案正文是模型直接产出的，身上没有 metadata）。所以它存在**会话**上（`threads.plan_source_prompt`）：写入端一次算好、同时用于写库与拼给模型的内容，读取端从会话补回 `metadata.source_prompt`。回退链（「最近一条非确认用户消息」）保留给没有这一列的老会话 —— 第一轮修订看不出差别，从第二轮起才会退化成「再改一下」。
+
+### 停止运行中的一轮 (`agent/runtime/cancellation.py`)
+
+输入框在运行中会变成「停止任务」按钮，对应 `POST /dashboard/api/threads/{id}/cancel`。这是**协作式**停止，不是强杀：
+
+- Agent 跑在 SSE worker 线程里，Python 线程无法安全强杀，LangGraph 的流式迭代也必须在一致的位置退出，否则 checkpoint 与 `runs` 表会留下一条永远 `running` 的记录。
+- 做法是按会话记一个停止请求，运行循环在**每两个协议事件之间**检查它，检查到就退出。所以接口返回时这一轮通常还没结束，前端要等 `thread_done` 事件拿终态。
+- 语义是**不再继续下一步，不回滚**：当前正在生成的这一段模型输出会丢，已经写进 checkpoint 的内容保留。停止后消息卡片显示「任务已停止」。
+
+几条边界：
+
+- **没在跑就拒绝（409）**，不留悬空标志 —— 留了下次开跑会在第一个事件被停，看起来像「自己莫名停了」。
+- **登记可重入**（`thread_id → 嵌套深度`），只有最外层才清残留标志。SSE worker 一进线程就登记（覆盖准备仓库那段，clone 可能要几十秒），Agent 运行层再登记一次；内层若也清，用户在准备阶段点的停止会被抹掉。
+- **`cancelled` 不算失败**：它映射成 `blocked`，自动化任务的连续失败计数不会把一次主动停止算进去；对前端则映射成 `idle`，按钮自动消失。
 
 ### 长期记忆 (`agent/memory/`)
 
@@ -871,19 +979,27 @@ GET  /health                    # 健康检查
 
 ### Dashboard 接口
 
+> 目前没有登录入口，也没有鉴权：`/me` 返回写死的单用户，前端仅用它显示登录名并做数据守卫。部署到公网前需要自己补上认证层。
+
 ```
-GET  /dashboard/api/me          # 当前用户信息
+GET  /dashboard/api/me          # 当前用户信息（写死的单用户，恒返回 200，无登录入口）
 GET  /dashboard/api/options     # 页面选项（模型列表等）
+GET  /dashboard/api/profile     # 工作台默认配置
+GET  /dashboard/api/repos       # 可用仓库列表（占位实现，恒返回空列表）
 GET  /dashboard/api/threads     # 会话列表
 GET  /dashboard/api/threads/{id} # 会话详情
 POST /dashboard/api/threads/stream-message         # 创建新会话
 POST /dashboard/api/threads/{id}/stream-message    # 追加对话轮次
+POST /dashboard/api/threads/{id}/cancel            # 停止这一轮正在跑的任务（没在跑返回 409）
 DELETE /dashboard/api/threads/{id}                 # 删除会话
 PATCH /dashboard/api/threads/{id}/title            # 修改会话标题
+POST /dashboard/api/threads/{id}/edit-preview      # 编辑消息前预览影响
+PUT  /dashboard/api/threads/{id}/view-snapshot     # 保存会话视图快照
 GET  /dashboard/api/command-approval-settings      # 获取命令审批设置
 PUT  /dashboard/api/command-approval-settings      # 保存普通命令类别设置
 GET  /dashboard/api/threads/{id}/approval          # 获取待审批操作
 POST /dashboard/api/threads/{id}/approval          # 审批并恢复运行（SSE）
+POST /dashboard/api/threads/{id}/approval/explanation # 生成审批命令解释
 ```
 
 ### 自定义模型管理
@@ -907,6 +1023,8 @@ DELETE /dashboard/api/schedules/{id}             # 删除自动化任务（连�
 GET    /dashboard/api/schedules/{id}/state       # 读这个任务的循环状态（只读，不会建出状态文件）
 POST   /dashboard/api/schedules/{id}/run         # 手动跑一轮（202 受理；不能跑时返回 404/409/400 与原因）
 POST   /dashboard/api/schedules/{id}/reset       # 清空循环历史（保留任务；返回与 /state 同构的状态）
+POST   /dashboard/api/schedules/{id}/resume      # 恢复已停止的自动化任务（清除显式停止/等人工确认标记）
+PATCH  /dashboard/api/schedules/{id}/budget      # 调整自动化任务的额度上限（轮数/token/连续失败次数）
 ```
 
 `POST /schedules/{id}/run` 的失败状态码：
@@ -959,20 +1077,37 @@ PUT    /dashboard/api/workspace                  # 更新工作目录配置（wo
 GET    /dashboard/api/workspace/projects         # 获取项目列表（含 local_folder 绑定信息）
 GET    /dashboard/api/workspace/pick-folder      # 打开系统文件夹选择对话框
 POST   /dashboard/api/workspace/projects/bind-folder    # 绑定项目到本地文件夹
-DELETE /dashboard/api/workspace/projects/{project_name}/unbind-folder  # 解除项目本地文件夹绑定
+PATCH  /dashboard/api/workspace/projects/rename  # 重命名项目（级联更新所有关联会话）
 ```
+
+> 项目解绑与改显示名两个入口已移除；`project_local_folders.display_name` 这一列仍然保留，由重命名链路写入。
 
 ## 环境变量
 
+以仓库根的 `.env.example` 为准（下表是同一份清单）。前端构建期变量不在其中，见「启动前端服务」。
+
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
+| `MAIN_MODEL` | 默认使用的语言模型标识 | `deepseek-v4-pro` |
 | `DEEPSEEK_API_KEY` | DeepSeek API 密钥（使用自定义模型时可选） | *可选* |
-| `GITEE_TOKEN` | Gitee 访问令牌 | *按需* |
-| `GITHUB_TOKEN` | GitHub 访问令牌 | *按需* |
-| `CODEUP_TOKEN` | Codeup 访问令牌 | *按需* |
+| `DEEPSEEK_BASE_URL` | DeepSeek API 基础地址 | *必填* |
+| `INTENT_MODEL` | 意图分类专用模型（不设则使用 MAIN_MODEL） | *同 MAIN_MODEL* |
+| `ZHIPU_API_KEY` | `web_search` 工具使用；不配则该工具调用会报错 | *可选* |
+| `GITEE_TOKEN` | Gitee 访问令牌（可回退到 `SCM_GITEE_TOKEN`） | *按需* |
+| `GITHUB_TOKEN` | GitHub 访问令牌（可回退到 `SCM_GITHUB_TOKEN`） | *按需* |
+| `CODEUP_TOKEN` | Codeup 访问令牌（可回退到 `SCM_CODEUP_TOKEN`） | *按需* |
+| `CODEUP_ORG_ID` | Codeup 组织 ID（用 Codeup 时必填，缺失会直接报错） | *按需* |
+| `CODEUP_API_DOMAIN` | Codeup API 域名 | `https://devops.aliyuncs.com` |
+| `GITEE_API_BASE_URL` | Gitee API 地址（自建 / 企业版时改这里） | `https://gitee.com/api/v5` |
+| `GITHUB_API_BASE_URL` | GitHub API 地址（GitHub Enterprise 时改这里） | `https://api.github.com` |
+| `AGENT_MAX_TOOL_CALLS` | 单轮 Agent 的工具调用上限 | 按任务类型取值 |
+| `AGENT_MAX_SECONDS` | 单轮 Agent 的时长上限（秒） | 按任务类型取值 |
 | `XIHE_AGENT_DATA_DIR` | 数据文件目录 | `{project_root}/data` |
 | `XIHE_AGENT_LOG_DIR` | 日志文件目录 | `{project_root}/logs` |
 | `XIHE_AGENT_LOG_LEVEL` | 日志级别 | `INFO` |
+| `XIHE_AGENT_LOG_WHEN` | 日志轮转触发时机 | `midnight` |
+| `XIHE_AGENT_LOG_INTERVAL` | 日志轮转间隔 | `1` |
+| `XIHE_AGENT_LOG_RETENTION_DAYS` | 日志保留天数 | `14` |
 | `XIHE_AUTOMATION_SCHEDULER` | 是否启用自动化任务的常驻调度 | `true` |
 | `XIHE_AUTOMATION_TICK_SECONDS` | 常驻调度多久扫一次（秒，最小 1） | `30` |
 | `AI_WORKSPACE_ROOT` | 代码工作区根目录 | `E:/ai_workspace` |
@@ -980,6 +1115,8 @@ DELETE /dashboard/api/workspace/projects/{project_name}/unbind-folder  # 解除�
 | `REDIS_PORT` | Redis 端口 | `6379` |
 | `REDIS_PASSWORD` | Redis 密码（实例开了认证就必须填，否则建不出 checkpoint，任何一轮都跑不完） | *无* |
 | `REDIS_CHECKPOINT_DB` | Checkpoint 使用的 Redis DB | `0` |
+| `USE_REDIS_STREAM` | 启用 Redis Stream SSE 多进程模式（默认使用 asyncio.Queue） | `false` |
+| `REDIS_STREAM_DB` | Redis Stream SSE 使用的 Redis DB | `1` |
 | `MYSQL_HOST` | MySQL 主机地址（业务数据） | `localhost` |
 | `MYSQL_PORT` | MySQL 端口 | `3306` |
 | `MYSQL_USER` | MySQL 用户名 | `root` |
@@ -992,9 +1129,12 @@ DELETE /dashboard/api/workspace/projects/{project_name}/unbind-folder  # 解除�
 | `PG_DATABASE` | PostgreSQL 数据库名（LangGraph Store） | `xihe-agent` |
 | `USE_SANDBOX` | 是否启用 OpenSandbox 沙盒模式 | `false` |
 | `SANDBOX_HOST` | OpenSandbox Server 完整地址（含协议和端口，如 `http://127.0.0.1:8080`） | *无* |
+| `SANDBOX_PORT` | OpenSandbox Server 端口（独立于 SANDBOX_HOST） | `8080` |
 | `SANDBOX_API_KEY` | OpenSandbox Server API Key（与 server 端 `api_key` 配置一致） | *无* |
 | `SANDBOX_IDLE_TIMEOUT_DAYS` | 沙箱空闲超过此天数自动清理 | `3` |
 | `SANDBOX_MAX_PER_THREAD` | 每个线程最多保留的沙箱数量 | `3` |
+
+`AGENT_MAX_TOOL_CALLS` / `AGENT_MAX_SECONDS` 只是兜底值，可以按任务类型分别覆盖：把 `AGENT_` 与 `MAX_` 之间换成任务类型的大写名，例如 `AGENT_CODING_MAX_TOOL_CALLS`、`AGENT_QA_MAX_SECONDS`（任务类型见 `config/constants.py` 的 `VALID_TASK_KINDS`）。
 
 ## 开发命令
 
@@ -1017,17 +1157,24 @@ lint-imports
 # 单元测试
 pytest                 # 收集 tests/ 下的全部用例
 pytest tests/test_sandbox_skill_sync.py -q
+
+# 跑全量时把 basetemp 放到仓库外
+pytest --basetemp=D:/tmp/xihe-tmp/run1
 ```
+
+> ⚠️ `--basetemp` 落在仓库目录内时，`save_state` 的「写临时文件 + `os.replace`」会**间歇**报 `PermissionError: WinError 5`。这跟目录位置有关、跟代码无关，所以跑全量请显式指到仓库外。
 
 ### 前端
 
 ```bash
 cd frontend
 
-npm run dev            # 启动开发服务器（端口 3000）
+npm install            # 首次需要安装依赖
+npm run dev            # 启动开发服务器（127.0.0.1:3000）
 npm run build          # 生产构建
-npx tsc --noEmit       # 类型检查
-npx vitest run         # 运行全部单元测试（watch 模式用 npx vitest）
+npm run preview        # 预览构建产物（127.0.0.1:3000）
+npm run typecheck      # 类型检查（tsc --noEmit）
+npm test               # 运行全部单元测试（vitest run；watch 模式直接跑 npx vitest）
 ```
 
 ### 测试约定
@@ -1038,16 +1185,26 @@ npx vitest run         # 运行全部单元测试（watch 模式用 npx vitest�
 - 涉及自动化任务的测试要复用 `data_root` 夹具（把 `Settings.data_dir` 指向临时目录），否则会读写开发机上真实的 `data/automations.json`。
 - 沙箱相关测试不需要真实容器：`OpenSandboxBackend` 只用到底层沙箱的 `id` 与 `files` 两个接口，用记录调用的假对象即可覆盖同步行为（见 `tests/test_sandbox_skill_sync.py`）。
 - **需要模型的判断一律打桩**。任务类型识别（`classify_task_kind`）会真的调模型，一次几秒且结果随模型变，把它写进断言会让用例既慢又不稳。要测的是「拿到某个判断结果之后怎么处置」。
+- **导入 `app` 的测试必须先换掉副作用，且在 `import app` 之前**（`configure_logging`、`ensure_default_skills` 会在模块导入时就执行），参考 `tests/test_app_lifespan.py`。
+- `pytest.raises(match=...)` 绑的是**用户可见文案**。改了文案之后记得 grep 一遍对应的测试，否则会变成一条看不出原因的失败。
+
+### 离线评估
+
+评估**不进 pytest**，每个子目录一套独立流程，用模块方式运行、报告落在自己的 `reports/<标签>/` 下：
+
+```bash
+.venv/Scripts/python.exe -m eval.skill_retrieval --label baseline
+```
 
 前端测试使用 Vitest + Testing Library，测试文件与被测组件同目录（`*.test.tsx`）。
 
-> ⚠️ **`src/routes/` 下不要放测试文件**：TanStack Router 会把该目录下每个文件当作路由，测试文件会触发 `does not export a Route` 警告。组件应抽到 `src/components/` 后再测试。
+> `src/routes/` 下**可以**放测试文件：`vite.config.ts` 给 TanStack Router 配了 `routeFileIgnorePattern`（匹配 `*.test.*` / `*.spec.*`），生成路由树时会跳过它们（例如 `routes/automations.test.tsx`）。不配这个的话，每个测试文件都会刷一条 `does not export a Route`。
 >
 > `Dialog.Portal` 会把内容渲染到 `document.body`，不在 `render()` 返回的 `container` 里 —— 断言门户内容需用 `document.querySelector`。
 
 ## 日志
 
-日志文件位于 `{log_dir}` 目录下：
+日志文件位于 `logs/` 目录下：
 
 - `backend.log` — 后端服务日志
 - `agent-runs.log` — Agent 运行日志

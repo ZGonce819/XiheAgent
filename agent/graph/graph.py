@@ -81,19 +81,3 @@ def get_store() -> Any:
         _store = LocalMySQLStore()
         logger.info("MySQL 业务 Store 已初始化")
     return _store
-
-
-def build_agent(config: dict[str, Any]) -> Any:
-    """构建 DeepAgent 实例。
-
-    委托给 ``agent.server.get_agent()`` 完成实际的 Agent 组装，
-    包括模型、工具、子 Agent、中间件、记忆等组件的注入。
-
-    Args:
-        config: Agent 运行配置，包含 thread_id、repo_url、task_kind 等。
-
-    Returns:
-        配置好的 DeepAgent 实例。
-    """
-    from server import get_agent
-    return get_agent(config)

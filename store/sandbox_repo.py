@@ -176,24 +176,6 @@ class SandboxRepo(ConnectionManager):
             tuple(ids_to_delete),
         )
 
-    def list_active_by_thread(self, thread_id: str) -> list[dict[str, Any]]:
-        """列出某个 thread 的所有 active 沙箱记录。
-
-        Args:
-            thread_id: 会话唯一标识。
-
-        Returns:
-            active 沙箱记录字典列表。
-        """
-        return self.fetch_all(
-            """
-            SELECT * FROM sandbox_registry
-            WHERE thread_id = %s AND status = 'active'
-            ORDER BY last_used_at DESC
-            """,
-            (thread_id,),
-        )
-
     def delete_by_thread(self, thread_id: str) -> int:
         """删除某个 thread 的所有沙箱注册记录。
 

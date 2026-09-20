@@ -23,56 +23,11 @@ import base64
 import hashlib
 import json
 import logging
-import re
 from typing import Any
 
-from config.constants import MIN_MESSAGE_LENGTH
 from utils.message_utils import message_content_to_text
 
 logger = logging.getLogger(__name__)
-
-
-def _extract_user_prompt(messages: list[Any]) -> str:
-    """从消息列表中提取用户原始提问。
-
-    LangGraph 在执行过程中可能会把用户消息包装成 HumanMessage，
-    甚至拆分成多条。这里取第一条有意义的用户消息作为任务标题。
-
-    Args:
-        messages: checkpoint 中提取的消息列表。
-
-    Returns:
-        用户提问文本，找不到时返回空字符串。
-    """
-    for message in messages:
-        msg_type = str(getattr(message, "type", "") or type(message).__name__).lower()
-        if msg_type not in {"human", "user"}:
-            continue
-        text = message_content_to_text(getattr(message, "content", ""))
-        text = _extract_visible_user_input(text)
-        if len(text) >= MIN_MESSAGE_LENGTH:
-            return text
-    return ""
-
-
-def _has_visible_markdown_value(message: Any) -> bool:
-    """判断消息是否包含值得展示的 Markdown 内容。
-
-    不是所有 AI 消息都适合展示给用户：有些只是过程确认或空响应。
-    这里检查消息内容是否包含有意义的文本（代码块、列表、标题等）。
-
-    Args:
-        message: LangChain message 对象。
-
-    Returns:
-        消息内容足够丰富时返回 True。
-    """
-    text = message_content_to_text(getattr(message, "content", ""))
-    if len(text) < MIN_MESSAGE_LENGTH:
-        return False
-    # 包含 Markdown 结构特征的消息优先展示。
-    markdown_markers = ["#", "```", "- ", "* ", "|", "```"]
-    return any(marker in text for marker in markdown_markers) or len(text) > 50
 
 
 def stable_history_message_id(content: str, index: int) -> str:
@@ -90,29 +45,6 @@ def stable_history_message_id(content: str, index: int) -> str:
     """
     digest = hashlib.sha256(f"{index}:{content}".encode()).hexdigest()[:12]
     return f"hist-{digest}"
-
-
-def _is_short_process_message(text: str) -> bool:
-    """判断消息是否属于过短的过程消息。
-
-    Agent 执行过程中会产生大量短消息（如"好的"、"确认"、"开始执行"），
-    这些消息对用户没有信息价值，应该从展示历史中过滤掉。
-
-    Args:
-        text: 消息文本。
-
-    Returns:
-        是过程消息时返回 True。
-    """
-    stripped = text.strip()
-    if len(stripped) < MIN_MESSAGE_LENGTH:
-        return True
-    # 常见的无意义过程消息模式。
-    process_patterns = [
-        r"^(好的|确认|收到|开始|继续|下一步|ok|yes|sure)$",
-        r"^(正在|让我|我来|好的，)",
-    ]
-    return any(re.match(pattern, stripped, re.IGNORECASE) for pattern in process_patterns)
 
 
 def visible_checkpoint_messages(checkpoint: dict[str, Any] | None) -> list[dict[str, str]]:

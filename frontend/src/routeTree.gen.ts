@@ -12,7 +12,6 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as AutomationsRouteImport } from './routes/automations'
-import { Route as LoginRouteImport } from './routes/login'
 import { Route as MySettingsRouteImport } from './routes/my-settings'
 import { Route as SkillsRouteImport } from './routes/skills'
 import { Route as AgentsIndexRouteImport } from './routes/agents/index'
@@ -31,11 +30,6 @@ const AgentsRoute = AgentsRouteImport.update({
 const AutomationsRoute = AutomationsRouteImport.update({
   id: '/automations',
   path: '/automations',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LoginRoute = LoginRouteImport.update({
-  id: '/login',
-  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const MySettingsRoute = MySettingsRouteImport.update({
@@ -63,7 +57,6 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/agents': typeof AgentsRouteWithChildren
   '/automations': typeof AutomationsRoute
-  '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
   '/skills': typeof SkillsRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
@@ -72,7 +65,6 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/automations': typeof AutomationsRoute
-  '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
   '/skills': typeof SkillsRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
@@ -83,7 +75,6 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/agents': typeof AgentsRouteWithChildren
   '/automations': typeof AutomationsRoute
-  '/login': typeof LoginRoute
   '/my-settings': typeof MySettingsRoute
   '/skills': typeof SkillsRoute
   '/agents/$threadId': typeof AgentsThreadIdRoute
@@ -95,7 +86,6 @@ export interface FileRouteTypes {
     | '/'
     | '/agents'
     | '/automations'
-    | '/login'
     | '/my-settings'
     | '/skills'
     | '/agents/$threadId'
@@ -104,7 +94,6 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/automations'
-    | '/login'
     | '/my-settings'
     | '/skills'
     | '/agents/$threadId'
@@ -114,7 +103,6 @@ export interface FileRouteTypes {
     | '/'
     | '/agents'
     | '/automations'
-    | '/login'
     | '/my-settings'
     | '/skills'
     | '/agents/$threadId'
@@ -125,7 +113,6 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AgentsRoute: typeof AgentsRouteWithChildren
   AutomationsRoute: typeof AutomationsRoute
-  LoginRoute: typeof LoginRoute
   MySettingsRoute: typeof MySettingsRoute
   SkillsRoute: typeof SkillsRoute
 }
@@ -151,13 +138,6 @@ declare module '@tanstack/react-router' {
       path: '/automations'
       fullPath: '/automations'
       preLoaderRoute: typeof AutomationsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/login': {
-      id: '/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/my-settings': {
@@ -208,7 +188,6 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentsRoute: AgentsRouteWithChildren,
   AutomationsRoute: AutomationsRoute,
-  LoginRoute: LoginRoute,
   MySettingsRoute: MySettingsRoute,
   SkillsRoute: SkillsRoute,
 }

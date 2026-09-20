@@ -48,9 +48,17 @@ UNKNOWN_COMMAND = "frobnicate --now"
 """未识别命令，策略一律判需要审批。"""
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """把 ``Settings.data_dir`` 指向临时目录，隔离审批设置。
+
+    **故意设成 autouse**：模块开头就写了「用例里的审批结论依赖
+    ``LOCAL_DEFAULTS`` / ``SANDBOX_DEFAULTS``，所以必须把 ``Settings.data_dir``
+    指向临时目录」，但夹具只定义、没人请求，于是开发机上真实的
+    ``data/command_approval.json`` 会漏进来 —— 它把 ``local.run_build`` 改成
+    ``allow`` 之后，``ruff check .`` 就从「需要审批」变成「直接执行」，
+    ``test_backend_type_actually_changes_the_decision`` 因此一直失败。
+    改成 autouse 是为了让以后新增的用例也不会漏掉这一步。
 
     Returns:
         临时的 data 目录。

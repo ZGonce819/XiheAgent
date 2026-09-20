@@ -24,6 +24,7 @@ from fastapi.responses import StreamingResponse
 
 from agent.graph.checkpoint_history import checkpoint_before_latest_user
 from agent.graph.graph import get_checkpointer, get_store
+from agent.runtime.cancellation import begin_run, end_run
 from agent.runtime.events import clear_sse_callback, register_sse_callback
 from agent.runtime.task_router import (
     get_task,
@@ -234,6 +235,10 @@ def build_streaming_response(
         register_sse_callback(thread_id, sse_callback)
 
         def worker() -> None:
+            # 运行态从 worker 一起步就登记，而不是等 Agent 真正开跑：准备仓库、
+            # 连 checkpoint 这些步骤也可能很久，期间用户点「停止」不能收到
+            # 「没有正在运行的任务」。
+            begin_run(thread_id)
             try:
                 if approval_decision is None:
                     result = run_agent_task(
@@ -297,6 +302,7 @@ def build_streaming_response(
                 send_event("done", {})
             finally:
                 clear_sse_callback(thread_id)
+                end_run(thread_id)
 
         if approval_decision is None:
             yield sse_part("thread_snapshot", thread_meta_payload(initial_task))

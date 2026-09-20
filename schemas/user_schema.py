@@ -16,11 +16,9 @@ class UserInfoResponse(BaseModel):
         email: 用户邮箱。
         avatar_url: 头像地址。
         is_admin: 是否为管理员。
-        slack_oauth_enabled: 是否已启用 Slack OAuth。
     """
 
     login: str
     email: str | None = None
     avatar_url: str | None = None
     is_admin: bool = False
-    slack_oauth_enabled: bool = False

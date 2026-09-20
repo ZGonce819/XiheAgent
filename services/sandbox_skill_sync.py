@@ -175,7 +175,7 @@ def refresh_sandbox_skills(
                 try:
                     backend.destroy()
                 except Exception:
-                    pass
+                    logger.debug("销毁失效 backend 时出错：thread_id=%s", thread_id, exc_info=True)
                 logger.info(
                     "沙箱已失效，清除缓存：thread_id=%s", thread_id
                 )

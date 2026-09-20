@@ -46,6 +46,13 @@ def quiet(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr("agent.runtime.task_router.is_pull_only_task", lambda text: False)
     monkeypatch.setattr("agent.runtime.task_router.get_store", lambda: FakeStore())
+    # 这条用例测的是「路由判定看哪份文本」，不是「简单任务要不要跳过方案确认」。
+    # 不钉住的话 INSTRUCTION 会被判成简单任务，于是绕过被替换掉的
+    # run_plan_response_task 继续往下走，一直走到准备仓库那一步 —— 那里要真连
+    # 数据库，用例会以 AttributeError 收场，而不是测出它想测的东西。
+    monkeypatch.setattr(
+        "agent.runtime.task_router.is_simple_coding_task", lambda text: False
+    )
 
 
 def test_without_a_given_kind_it_classifies_the_routing_text(

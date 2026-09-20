@@ -512,11 +512,37 @@ def latest_confirmable_plan_from_checkpoint(thread_id: str) -> dict[str, Any] | 
     return None
 
 
+def _thread_plan_source_prompt(thread_id: str) -> str:
+    """读取会话上记录的方案原始需求。
+
+    方案正文由模型生成，生成时没法往消息上挂 metadata，所以原始需求写在
+    threads 表的 ``plan_source_prompt`` 列里，读取时再补进方案消息的 metadata。
+
+    Args:
+        thread_id: LangGraph 线程 ID。
+
+    Returns:
+        原始需求文本；未记录或读取失败时返回空字符串。
+    """
+
+    try:
+        thread = get_store().get_thread(thread_id)
+    except Exception:
+        logger.warning("读取会话方案原始需求失败：thread_id=%s", thread_id, exc_info=True)
+        return ""
+    value = thread.get("plan_source_prompt") if thread else None
+    return value.strip() if isinstance(value, str) else ""
+
+
 def latest_confirmable_plan_message(thread_id: str) -> dict[str, Any] | None:
     """读取当前线程最近一条等待确认的技术方案消息。
 
     页面历史和确认实施都以 checkpoint 为准。这个封装函数保留了"读取来源"的抽象，
     如果以后要增加归档查询或迁移兼容，可以在这里扩展。
+
+    读到的方案消息会补上 ``metadata.source_prompt``：checkpoint 里的方案正文是
+    模型直接产出的，身上没有这个字段，而"确认实施"和"再改一下"两条路径都要靠它
+    还原用户最早提出的完整需求。
 
     Args:
         thread_id: LangGraph 线程 ID。
@@ -525,24 +551,33 @@ def latest_confirmable_plan_message(thread_id: str) -> dict[str, Any] | None:
         方案消息字典；未找到时返回 ``None``。
     """
 
-    return latest_confirmable_plan_from_checkpoint(thread_id)
+    message = latest_confirmable_plan_from_checkpoint(thread_id)
+    if message is None:
+        return None
+    source_prompt = _thread_plan_source_prompt(thread_id)
+    if source_prompt:
+        metadata = dict(message.get("metadata") or {})
+        metadata["source_prompt"] = source_prompt
+        message["metadata"] = metadata
+    return message
 
 
-def plan_source_prompt(message: dict[str, Any], fallback: str) -> str:
+def plan_source_prompt(message: dict[str, Any] | None, fallback: str) -> str:
     """读取方案消息里保存的原始需求。
 
-    首次生成方案时，metadata.source_prompt 保存用户原始需求；方案被多次修订时，
-    这里继续沿用上一版 source_prompt，避免只把"再改一下"当成完整开发目标。
+    这个值不来自模型，而是由 :func:`latest_confirmable_plan_message` 从 threads 表
+    补进 metadata 的。方案被多轮修订时它始终是最早那一版需求，避免把"再改一下"
+    当成完整开发目标。
 
     Args:
-        message: 方案消息字典。
+        message: 方案消息字典；为 ``None`` 时直接回退。
         fallback: metadata 中没有 source_prompt 时使用的回退文本。
 
     Returns:
         原始需求文本；不存在时返回 ``fallback``。
     """
 
-    metadata = message_metadata(message)
+    metadata = message_metadata(message) if message else {}
     source_prompt = str(metadata.get("source_prompt") or "").strip()
     return source_prompt or fallback
 
@@ -568,25 +603,3 @@ def latest_non_approval_user_prompt(thread_id: str, fallback: str) -> str:
         if content and not is_approval_prompt(content):
             return content
     return fallback
-
-
-def revision_source_prompt(*, previous_source_prompt: str, revision_prompt: str) -> str:
-    """把原始需求和本次修订要求合并成新版方案的 source_prompt。
-
-    多次修改方案时，会把补充要求追加到原始需求后面，
-    避免后续实施阶段丢失用户逐轮补充的信息。
-
-    Args:
-        previous_source_prompt: 上一版方案对应的原始需求文本。
-        revision_prompt: 本次用户补充或修改的要求。
-
-    Returns:
-        合并后的 source_prompt 文本。
-    """
-
-    revision_prompt = revision_prompt.strip()
-    if not revision_prompt:
-        return previous_source_prompt
-    if "补充/修改要求：" in previous_source_prompt:
-        return f"{previous_source_prompt.rstrip()}\n- {revision_prompt}"
-    return f"{previous_source_prompt.rstrip()}\n\n补充/修改要求：\n- {revision_prompt}"

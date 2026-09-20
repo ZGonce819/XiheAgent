@@ -21,7 +21,13 @@ function AgentThreadPage() {
   }, [threadQuery.data?.status]);
 
   if (session.isLoading) return null;
-  if (!session.data) return <Navigate to="/login" />;
+  if (!session.data) {
+    return (
+      <main className="agents-ui flex h-svh items-center justify-center p-6">
+        <p className="text-sm text-muted-foreground">读取会话信息失败，请刷新页面重试。</p>
+      </main>
+    );
+  }
 
   if (threadQuery.isLoading) {
     return (

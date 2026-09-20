@@ -216,5 +216,5 @@ class ConnectionManager:
                 try:
                     self._conn.close()
                 except Exception:
-                    pass
+                    logger.debug("关闭 MySQL 连接时出错", exc_info=True)
                 self._conn = None

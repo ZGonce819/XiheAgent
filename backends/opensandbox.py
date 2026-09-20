@@ -454,13 +454,13 @@ def get_or_create_sandbox(
     """
     # 直接指定 sandbox_id 时跳过注册表查找
     if sandbox_id:
-        print(f"[INFO] 正在连接到现有沙箱: {sandbox_id}")
+        logger.info("正在连接到现有沙箱: %s", sandbox_id)
         try:
             sandbox = SandboxSync.connect(sandbox_id, connection_config=config)
-            print(f"[INFO] 成功连接到沙箱: {sandbox_id}")
+            logger.info("成功连接到沙箱: %s", sandbox_id)
             return sandbox
         except Exception as e:
-            print(f"[WARNING] 连接沙箱失败: {e}，将创建新沙箱")
+            logger.warning("连接沙箱失败: %s，将创建新沙箱", e)
 
     # 通过注册表尝试复用 thread 的存活沙箱
     if thread_id:
@@ -471,7 +471,7 @@ def get_or_create_sandbox(
     if not image:
         image = DEFAULT_SANDBOX_IMAGE
 
-    print(f"[INFO] 正在创建新沙箱，使用镜像: {image}")
+    logger.info("正在创建新沙箱，使用镜像: %s", image)
     sandbox = SandboxSync.create(
         image,
         entrypoint=["/opt/opensandbox/code-interpreter.sh"],
@@ -480,7 +480,7 @@ def get_or_create_sandbox(
         timeout=timedelta(minutes=30),
         connection_config=config,
     )
-    print(f"[INFO] 成功创建新沙箱，ID: {sandbox.id}")
+    logger.info("成功创建新沙箱，ID: %s", sandbox.id)
 
     # 注册新沙箱到数据库
     if thread_id:
@@ -529,7 +529,7 @@ def _try_reuse_sandbox(
         try:
             repo.mark_killed(old_sandbox_id)
         except Exception:
-            pass
+            logger.debug("标记沙箱 killed 失败：sandbox_id=%s", old_sandbox_id, exc_info=True)
 
     return None
 
@@ -600,45 +600,6 @@ def sync_sandbox_skills(
         roots,
     )
     return written
-
-
-def list_running_sandboxes(config: ConnectionConfigSync) -> list:
-    """列出所有正在运行的沙箱。
-
-    Args:
-        config: ConnectionConfigSync 配置。
-
-    Returns:
-        正在运行的沙箱列表。
-    """
-    try:
-        print("[INFO] 正在列出运行中的沙箱...")
-
-        try:
-            sandboxes = SandboxSync.list(connection_config=config)
-            running_sandboxes = []
-
-            paginator = sandboxes
-            while True:
-                items = paginator.next_items()
-                if not items:
-                    break
-                for sandbox in items:
-                    if hasattr(sandbox, "state") and sandbox.state == "running":
-                        running_sandboxes.append(sandbox)
-                    elif not hasattr(sandbox, "state"):
-                        running_sandboxes.append(sandbox)
-
-            print(f"[INFO] 找到 {len(running_sandboxes)} 个运行中的沙箱")
-            return running_sandboxes
-
-        except AttributeError:
-            print("[WARNING] SandboxSync.list() 方法不存在，无法列出沙箱")
-            return []
-
-    except Exception as e:
-        print(f"[ERROR] 列出沙箱时出错: {e}")
-        return []
 
 
 def create_opensandbox_backend(

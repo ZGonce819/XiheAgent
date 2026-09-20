@@ -24,14 +24,6 @@ export class ApiError extends Error {
   }
 }
 
-export function isGithubReauthError(error: unknown): boolean {
-  if (!(error instanceof ApiError)) return false
-  if (error.status === 401) return true
-  return /github token|gitee token|source-control token|re-login required/i.test(
-    error.message
-  )
-}
-
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE}/dashboard/api${path}`, {
     ...init,
@@ -64,7 +56,6 @@ export interface SessionUser {
   email: string | null
   avatar_url: string | null
   is_admin: boolean
-  slack_oauth_enabled?: boolean
 }
 
 export interface ModelOption {
@@ -191,95 +182,6 @@ export interface ProfileUpdate {
   review_draft_prs?: boolean | null
 }
 
-export type TriggerMode = "every_push" | "once_per_pr" | "manual"
-export type AutofixMode = "off" | "low" | "medium" | "high"
-
-export interface TeamSettings {
-  trigger_mode: TriggerMode
-  review_draft_prs: boolean
-  pr_summaries: boolean
-  review_trace_links: boolean
-  autofix_mode: AutofixMode
-  autofix_severity_threshold: AutofixMode
-  org_guidelines?: string | null
-  default_agent_model?: string | null
-  default_agent_reasoning_effort?: string | null
-  default_agent_subagent_model?: string | null
-  default_agent_subagent_reasoning_effort?: string | null
-  default_repo?: string | null
-  default_reviewer_model?: string | null
-  default_reviewer_reasoning_effort?: string | null
-  default_reviewer_subagent_model?: string | null
-  default_reviewer_subagent_reasoning_effort?: string | null
-  updated_at?: string | null
-}
-
-export interface UserMapping {
-  github_login: string
-  work_email: string
-  slack_user_id?: string | null
-  source?: string
-  status?: string
-  created_at?: string
-  updated_at?: string
-}
-
-export interface UserMappingsPage {
-  items: Array<UserMapping>
-  total: number
-  page: number
-  page_size: number
-}
-
-export type UsageLeaderboardPeriod = "7d" | "30d" | "all"
-
-export interface UsageLeaderboardRow {
-  rank: number
-  user: {
-    name: string
-    github_login: string | null
-    email: string | null
-  }
-  favorite_model: string
-  agent_runs: number
-  prs_opened: number
-  merged_prs: number
-  agent_loc: number
-  additions: number
-  deletions: number
-}
-
-export interface ReviewerStatsCounterRow {
-  name: string
-  count: number
-}
-
-export interface ReviewerStatsPayload {
-  period: UsageLeaderboardPeriod
-  reviewed_prs: number
-  prs_with_findings: number
-  findings_recorded: number
-  surfaced_findings: number
-  addressed_findings: number
-  resolved_after_update: number
-  dismissed_findings: number
-  unresolved_surfaced_findings: number
-  resolution_rate: number
-  human_replies: number
-  severity_counts: Record<string, number>
-  top_categories: Array<ReviewerStatsCounterRow>
-  generated_at_ms: number | null
-}
-
-export interface UsageLeaderboardPayload {
-  period: UsageLeaderboardPeriod
-  rows: Array<UsageLeaderboardRow>
-  total_members: number
-  current_user_rank: number | null
-  generated_at_ms: number | null
-  reviewer_stats: ReviewerStatsPayload
-}
-
 export interface Repository {
   full_name: string
   private: boolean
@@ -348,26 +250,6 @@ export interface Installation {
 export interface ReposPayload {
   installations: Array<Installation>
   repositories: Array<Repository>
-}
-
-export type ReviewStyleStatus = "idle" | "running" | "completed" | "failed"
-
-export interface ReviewStyle {
-  full_name: string
-  owner?: string
-  name?: string
-  status: ReviewStyleStatus
-  custom_prompt: string | null
-  analysis_summary: string | null
-  top_reviewers: Array<string>
-  prs_sampled: number
-  reviews_sampled: number
-  analysis_thread_id: string | null
-  analysis_run_id: string | null
-  error: string | null
-  created_by?: string
-  created_at?: string
-  updated_at?: string
 }
 
 export const api = {
@@ -465,55 +347,6 @@ export const api = {
     }
     return (await res.json()) as SkillUploadResult
   },
-  listReviewStyles: () => request<Array<ReviewStyle>>("/review-styles"),
-  createReviewStyle: (full_name: string) =>
-    request<ReviewStyle>("/review-styles", {
-      method: "POST",
-      body: JSON.stringify({ full_name }),
-    }),
-  getReviewStyle: (full_name: string) =>
-    request<ReviewStyle>(`/review-styles/${encodeURIComponent(full_name)}`),
-  saveReviewStylePrompt: (full_name: string, custom_prompt: string) =>
-    request<ReviewStyle>(`/review-styles/${encodeURIComponent(full_name)}`, {
-      method: "PUT",
-      body: JSON.stringify({ custom_prompt }),
-    }),
-  analyzeReviewStyle: (full_name: string) =>
-    request<ReviewStyle>(
-      `/review-styles/${encodeURIComponent(full_name)}/analyze`,
-      {
-        method: "POST",
-      }
-    ),
-  cancelReviewStyle: (full_name: string) =>
-    request<ReviewStyle>(
-      `/review-styles/${encodeURIComponent(full_name)}/cancel`,
-      {
-        method: "POST",
-      }
-    ),
-  deleteReviewStyle: (full_name: string) =>
-    request<void>(`/review-styles/${encodeURIComponent(full_name)}`, {
-      method: "DELETE",
-    }),
-  getTeamSettings: () => request<TeamSettings>("/team-settings"),
-  saveTeamSettings: (body: TeamSettings) =>
-    request<TeamSettings>("/team-settings", {
-      method: "PUT",
-      body: JSON.stringify(body),
-    }),
-  listEnabledReviewRepos: () =>
-    request<{ repos: Array<string> }>("/enabled-review-repos"),
-  setEnabledReviewRepo: (full_name: string, enabled: boolean) =>
-    request<{ repos: Array<string> }>("/enabled-review-repos", {
-      method: "PUT",
-      body: JSON.stringify({ full_name, enabled }),
-    }),
-  usageLeaderboard: (period: UsageLeaderboardPeriod = "30d", limit = 10) =>
-    request<UsageLeaderboardPayload>(
-      `/agent-usage-leaderboard?period=${encodeURIComponent(period)}&limit=${limit}`
-    ),
-  myMapping: () => request<Partial<UserMapping>>("/my-mapping"),
   listCustomModels: () => request<Array<CustomModel>>("/custom-models"),
   createCustomModel: (body: CustomModelInput) =>
     request<CustomModel>("/custom-models", {
@@ -553,16 +386,6 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
-  adminListUserMappings: (page = 1, pageSize = 20) =>
-    request<UserMappingsPage>(
-      `/admin/user-mappings?page=${page}&page_size=${pageSize}`
-    ),
-  adminDeleteUserMapping: (github_login: string) =>
-    request<{ deleted: boolean }>(
-      `/admin/user-mappings/${encodeURIComponent(github_login)}`,
-      { method: "DELETE" }
-    ),
-  logout: () => request<void>("/auth/logout", { method: "POST" }),
   getWorkspace: () => request<WorkspaceInfo>("/workspace"),
   updateWorkspace: (body: {
     workspace_root?: string
@@ -588,25 +411,4 @@ export const api = {
         body: JSON.stringify({ old_name: oldName, new_name: newName }),
       }
     ),
-  unbindProjectFolder: (projectName: string) =>
-    request<{ project_name: string; unbound: boolean }>(
-      `/workspace/projects/${encodeURIComponent(projectName)}/unbind-folder`,
-      { method: "DELETE" }
-    ),
-  updateProjectDisplayName: (body: { project_name: string; display_name: string }) =>
-    request<{ project_name: string; display_name: string; updated: boolean }>(
-      "/workspace/projects/update-display-name",
-      { method: "PATCH", body: JSON.stringify(body) }
-    ),
-}
-
-export function loginUrl(redirectTo?: string): string {
-  const target =
-    redirectTo ?? (typeof window !== "undefined" ? window.location.origin : "")
-  const qs = target ? `?redirect_to=${encodeURIComponent(target)}` : ""
-  return `${API_BASE}/dashboard/api/auth/dev-login${qs}`
-}
-
-export function slackConnectUrl(): string {
-  return `${API_BASE}/dashboard/api/slack/login`
 }

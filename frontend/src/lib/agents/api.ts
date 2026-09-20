@@ -331,31 +331,3 @@ export function formatRelativeTime(ts: number): string {
   const weeks = Math.floor(days / 7)
   return `${weeks}w`
 }
-
-export type ThreadGroup = "today" | "last30" | "older"
-
-export function groupThreads(
-  threads: Array<AgentThread>
-): Record<ThreadGroup, Array<AgentThread>> {
-  const todayStart = new Date()
-  todayStart.setHours(0, 0, 0, 0)
-  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000
-
-  const groups: Record<ThreadGroup, Array<AgentThread>> = {
-    today: [],
-    last30: [],
-    older: [],
-  }
-
-  for (const thread of [...threads].sort((a, b) => b.updatedAt - a.updatedAt)) {
-    if (thread.updatedAt >= todayStart.getTime()) {
-      groups.today.push(thread)
-    } else if (thread.updatedAt >= thirtyDaysAgo) {
-      groups.last30.push(thread)
-    } else {
-      groups.older.push(thread)
-    }
-  }
-
-  return groups
-}

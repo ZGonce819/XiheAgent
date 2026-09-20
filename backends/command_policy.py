@@ -162,7 +162,3 @@ def evaluate_command(command: str, backend_type: str) -> CommandPolicyResult:
     # as ``read_only``.
     chosen = next((item for item in reversed(decisions) if item.category != "read_only"), decisions[0])
     return CommandPolicyResult("allow", chosen.category, chosen.reason)
-
-
-def command_requires_approval(command: str, backend_type: str) -> bool:
-    return evaluate_command(command, backend_type).action == "approval"

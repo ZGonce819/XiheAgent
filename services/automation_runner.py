@@ -617,6 +617,30 @@ def make_agent_round_runner(
     """
 
     def run(request: RoundRequest) -> RoundResult:
+        """登记这一轮，再交给 :func:`_run_round` 跑。
+
+        「准备仓库」发生在一轮真正开始之前 —— 那时还没进 Agent 事件循环，也就没有
+        登记。不在这里补上的话，用户在这段时间点「停止」会拿到 409：明明在跑，
+        接口却说没有在跑的任务。而准备仓库恰恰是最该能停的一段（clone 一个仓库
+        可能要几十秒）。
+
+        登记是可重入的（``thread_id → 嵌套深度``），所以内层 Agent 运行层再登记
+        一次不会互相踩，收尾也只由最外层做 —— 内层若也清残留标志，用户在这一层
+        刚点的停止会被抹掉。
+
+        Returns:
+            这一轮的结论。
+        """
+        from agent.runtime.cancellation import begin_run, end_run
+
+        current_thread = thread_id or str(uuid.uuid4())
+        begin_run(current_thread)
+        try:
+            return _run_round(request, current_thread)
+        finally:
+            end_run(current_thread)
+
+    def _run_round(request: RoundRequest, current_thread: str) -> RoundResult:
         # 判定只看用户写的原始指令。**判完之后要把结论一起传下去** —— 否则
         # run_agent_task 会拿拼上循环状态与验证反馈的那份文本重判一次，结论可能
         # 不一样（反馈里出现「提交」「push」就会从只读翻成开发实现），于是走进
@@ -640,7 +664,6 @@ def make_agent_round_runner(
         from utils.message_utils import extract_final_assistant_text
 
         environment = resolve_backend_type(backend_type)
-        current_thread = thread_id or str(uuid.uuid4())
         model_id = (
             None if request.model_id == BUILTIN_MODEL_SENTINEL else request.model_id
         )

@@ -89,8 +89,7 @@ export function CodeBlock({ text, language }: CodeBlockProps) {
         TOKEN_CACHE.set(cacheKey, result.tokens);
         setTokens(result.tokens);
       })
-      .catch((err: unknown) => {
-        console.warn('[code-block] Tokenization failed:', err);
+      .catch(() => {
         if (!cancelled) {
           setTokens(null);
         }

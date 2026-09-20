@@ -184,10 +184,14 @@ def test_run_refuses_planning_tasks(
 def test_a_finished_round_records_its_run_id(
     dashboard: TestClient, dispatched: list[dict[str, Any]]
 ) -> None:
-    """跑完一轮要把运行 id 写回定义，界面才能从任务跳到这一轮。"""
+    """跑完一轮要把运行 id 写回定义，界面才能从任务跳到这一轮。
+
+    **必须等**：整轮跑在独立守护线程里，接口在会话建档完成后就返回 202 了，
+    ``lastRunId`` 要等那一轮跑完才写回去。直接断言读到的是还没写回的 ``None``。
+    """
     automation = make_automation()
     dashboard.post(f"/dashboard/api/schedules/{automation['id']}/run")
-    assert get_automation(automation["id"])["lastRunId"] == "run-stub"
+    wait_until(lambda: get_automation(automation["id"])["lastRunId"] == "run-stub")
 
 
 def test_run_refuses_while_another_round_is_running(

@@ -1125,3 +1125,89 @@ def test_a_broken_backend_lookup_does_not_break_the_round(
         )
         is None
     )
+
+
+def _stub_a_round_that_reaches_the_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, Any]:
+    """把一轮里除「登记」之外的东西全换成替身，返回记录器。
+
+    ``fake_run_agent_task`` 里那几行就是「准备仓库还没结束、Agent 事件循环还没进」
+    的时刻 —— 也正是本组用例要观测的那一点。
+
+    Returns:
+        记录器，含 ``cancel_accepted``（那一刻停止请求受不受理）。
+    """
+    seen: dict[str, Any] = {}
+
+    def fake_run_agent_task(**kwargs: Any) -> dict[str, Any]:
+        from agent.runtime.cancellation import request_cancel
+
+        seen["cancel_accepted"] = request_cancel(kwargs["thread_id"])
+        return {"messages": [], "status": "completed"}
+
+    class FakeStore:
+        def get_thread(self, thread_id: str) -> dict[str, str]:
+            return {"latest_run_status": "completed"}
+
+        def get_latest_run(self, thread_id: str) -> dict[str, str]:
+            return {"run_id": "run-1"}
+
+    monkeypatch.setattr("agent.runtime.task_router.run_agent_task", fake_run_agent_task)
+    monkeypatch.setattr("agent.graph.graph.get_store", lambda: FakeStore())
+    monkeypatch.setattr(
+        "utils.message_utils.extract_final_assistant_text", lambda messages: ""
+    )
+    monkeypatch.setattr(
+        "services.automation_runner.resolve_workspace", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        "services.automation_runner.resolve_container_exec", lambda *a, **k: None
+    )
+    _stub_kind(monkeypatch, "analysis")
+    return seen
+
+
+def _run_one_round(thread_id: str) -> Any:
+    """按既有用例的写法跑一轮最小可用的自动化任务。"""
+    return make_agent_round_runner(thread_id=thread_id)(
+        RoundRequest(
+            automation_id="a1",
+            name="每日分诊",
+            prompt="读一遍仓库概况",
+            instruction="读一遍仓库概况",
+            repo="https://github.com/owner/repo.git",
+        )
+    )
+
+
+def test_the_round_is_registered_before_the_agent_starts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """准备仓库那段也要能停。
+
+    ``run_agent_task`` 前面的准备步骤（连 Store、clone 仓库、建 Agent 图）发生在
+    Agent 事件循环之前。那时没有登记的话，用户点「停止」会拿到 409 —— 明明在跑，
+    接口却说没有正在运行的任务。而准备仓库恰恰是最该能停的一段。
+    """
+    seen = _stub_a_round_that_reaches_the_agent(monkeypatch)
+
+    _run_one_round("t1")
+
+    assert seen["cancel_accepted"] is True
+
+
+def test_a_finished_round_leaves_no_pending_stop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """收尾要把停止标志清干净。
+
+    留着的话下一轮一开跑就会在第一个事件被停 —— 用户看到的是「任务自己莫名停了」。
+    """
+    from agent.runtime.cancellation import is_cancel_requested
+
+    _stub_a_round_that_reaches_the_agent(monkeypatch)
+
+    _run_one_round("t2")
+
+    assert is_cancel_requested("t2") is False
