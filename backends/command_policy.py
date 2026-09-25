@@ -7,8 +7,25 @@ from dataclasses import dataclass
 from typing import Literal
 
 from config.approval_config import preference_for
+from config.env_config import get_env
 
 PolicyAction = Literal["allow", "approval", "deny"]
+
+
+def _auto_approve_enabled() -> bool:
+    """无人批处理（评测、定时任务）是否自动放行审批类命令。
+
+    读取 ``XIHE_AUTO_APPROVE`` 环境变量：非空且不是 ``0`` / ``false`` / ``no`` /
+    ``off`` 时启用。只影响 ``approval`` 类命令的降级，**硬拒绝（deny）永远生效**，
+    避免无人值守场景因命令审批而永久卡住（如 GAIA 评测大量任务停在
+    ``awaiting_approval``）。
+
+    Returns:
+        是否启用自动批准。
+    """
+
+    value = get_env("XIHE_AUTO_APPROVE").strip().lower()
+    return bool(value) and value not in {"0", "false", "no", "off"}
 
 
 @dataclass(frozen=True)
@@ -37,7 +54,7 @@ _EXTERNAL_WRITE = re.compile(
 
 _CATEGORY_PATTERNS: tuple[tuple[str, str], ...] = (
     ("delete_workspace_files", r"^(?:rm|del|erase|rmdir|remove-item)\b"),
-    ("modify_workspace_files", r"^(?:cp|copy|xcopy|robocopy|mv|move|ren|rename|mkdir|md|touch|new-item)\b"),
+    ("modify_workspace_files", r"^(?:cp|copy|xcopy|robocopy|mv|move|ren|rename|mkdir|md|touch|new-item|sed|awk|unzip|7z|tar|gzip|gunzip|bzip2|bunzip2|xz|unxz|zip)\b"),
     ("install_dependencies", r"^(?:(?:python(?:3)?\s+-m\s+)?pip(?:3)?\s+(?:install|uninstall)|npm\s+(?:install|i|uninstall|ci)|pnpm\s+(?:install|add|remove)|yarn\s+(?:install|add|remove))\b"),
     ("run_tests", r"^(?:pytest\b|python(?:3)?\s+-m\s+pytest\b|npm\s+(?:test|run\s+test)\b|pnpm\s+test\b|yarn\s+test\b)"),
     # Maven/Gradle 命令同时覆盖依赖检查和项目构建。
@@ -45,7 +62,7 @@ _CATEGORY_PATTERNS: tuple[tuple[str, str], ...] = (
     ("run_build", r"^(?:mvn|mvnw|gradle|gradlew)\b|^(?:ruff|mypy|flake8|black|isort|tsc|vite|webpack|rollup)\b|^(?:npm|pnpm|yarn)\s+(?:run\s+)?(?:build|lint|format|typecheck)\b"),
     ("run_project_script", r"^(?:python(?:3)?\s+(?!-m\s+(?:pip|pytest)\b).+|node\s+.+|(?:npm|pnpm|yarn)\s+run\s+.+)$"),
     ("git_commit", r"^git\s+(?:add|commit|merge|rebase|cherry-pick|revert|stash)\b"),
-    ("git_branch_change", r"^git\s+(?:checkout|switch|pull|fetch|branch|tag)\b"),
+    ("git_branch_change", r"^git\s+(?:checkout|switch|pull|fetch|branch|tag|clone)\b"),
     ("network_read", r"^(?:curl|wget|http|invoke-webrequest|ping|tracert|nslookup|dig)\b"),
     ("process_management", r"^(?:ps|tasklist|get-process|start-process|kill|taskkill|stop-process)\b"),
 )
@@ -54,7 +71,10 @@ _ALWAYS_ALLOW = re.compile(
     r"^(?:git\s+(?:status|log|diff|show|ls-files|rev-parse|describe|remote\s+-v)\b|"
     r"dir\b|ls\b|tree\b|type\b|cat\b|more\b|less\b|head\b|tail\b|"
     r"echo\b|pwd\b|cd\b|whoami\b|hostname\b|date\b|time\b|"
-    r"find\b|grep\b|rg\b|where\b|which\b|"
+    r"find\b|grep\b|rg\b|where\b|which\b|command\s+-[vV]\b|"
+    r"tr\b|wc\b|sort\b|uniq\b|nl\b|cut\b|fold\b|expand\b|"
+    r"comm\b|paste\b|join\b|jq\b|base64\b|od\b|hexdump\b|printf\b|"
+    r"xargs\b|env\b|printenv\b|stat\b|file\b|du\b|df\b|"
     r"(?:python(?:3)?\s+-m\s+)?pip(?:3)?\s+(?:list|show|freeze|check)\b)",
     re.IGNORECASE,
 )
@@ -87,13 +107,62 @@ git 允许把全局选项写在子命令前面（``git -C <路径> status``、``
 def _parts(command: str) -> list[str]:
     """拆分复合 Shell 命令，使每一段都能独立分类。
 
+    与朴素 ``re.split`` 的区别：**引号感知**。单引号/双引号内的 ``;``、``|``、
+    ``&&`` 是字面量，不是分隔符。否则 ``python -c "import a; print(b)"`` 会被
+    从分号处误切成两段，第二段 ``print(b)`` 因不在任何类别而被判成
+    "未识别的命令需要人工确认"，导致无人批处理任务永久卡在审批。
+
     Args:
         command: 原始命令字符串，可包含 ``&&``、``||``、``;``、``|`` 等连接符。
 
     Returns:
         拆分后的非空命令片段列表。
     """
-    return [part.strip() for part in re.split(r"\s*(?:&&|\|\||;|\|)\s*", command) if part.strip()]
+
+    parts: list[str] = []
+    current: list[str] = []
+    quote: str | None = None  # None / "'" / '"'
+    i = 0
+    n = len(command)
+    while i < n:
+        ch = command[i]
+        if quote is not None:
+            current.append(ch)
+            if quote == '"' and ch == "\\" and i + 1 < n:
+                current.append(command[i + 1])
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in {"'", '"'}:
+            quote = ch
+            current.append(ch)
+            i += 1
+            continue
+        # 双字符操作符 && 与 ||；单 | 与 ; 也是分隔符。
+        # 单独的 &（如 2>&1 的 &、后台执行符）不是分隔符。
+        if ch == "&" and i + 1 < n and command[i + 1] == "&":
+            part = "".join(current).strip()
+            if part:
+                parts.append(part)
+            current = []
+            i += 2
+            continue
+        if ch == "|" or ch == ";":
+            part = "".join(current).strip()
+            if part:
+                parts.append(part)
+            current = []
+            i += 1
+            continue
+        current.append(ch)
+        i += 1
+    part = "".join(current).strip()
+    if part:
+        parts.append(part)
+    return parts
 
 
 def _strip_git_global_options(part: str) -> str:
@@ -171,6 +240,12 @@ def evaluate_command(command: str, backend_type: str) -> CommandPolicyResult:
         return next(item for item in decisions if item.action == "deny")
     if any(item.action == "approval" for item in decisions):
         item = next(item for item in decisions if item.action == "approval")
+        if _auto_approve_enabled():
+            # 无人批处理（XIHE_AUTO_APPROVE=1）：审批类命令自动放行，
+            # 但保留原分类与原因，事件展示仍可追溯。硬拒绝不受影响。
+            return CommandPolicyResult(
+                "allow", item.category, f"{item.reason}（XIHE_AUTO_APPROVE 自动放行）"
+            )
         return CommandPolicyResult("approval", item.category, item.reason)
     # 复合命令通常以 ``cd`` 开头。保留实际操作的有意义分类，
     # 而不是把导航步骤报告为 ``read_only``。

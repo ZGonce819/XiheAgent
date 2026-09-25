@@ -3,14 +3,18 @@
 该工具用于在本地仓库上下文不足时，补充公开网络资料，例如框架文档、第三方库变更说明、
 错误信息背景和公开技术资料。工具本身只返回搜索摘要，不替代本地代码分析。
 
-外部搜索依赖智谱 Web Search API。SDK 采用懒加载方式初始化，避免后端启动阶段因为可选依赖
-或 API Key 缺失而直接失败。
+外部搜索优先依赖智谱 Web Search API。SDK 采用懒加载方式初始化，避免后端启动阶段因为可选依赖
+或 API Key 缺失而直接失败。**智谱不可用（缺 Key、SDK 未装、接口报错）时自动降级到
+Bing 搜索的 RSS 接口**，保证搜索能力不因单一供应商失效而整体不可用。
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
 from functools import lru_cache
 from typing import Any
 
@@ -18,11 +22,61 @@ from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
 from agent.runtime.events import record_event
-from config.env_config import require_env
+from config.env_config import get_env, require_env
 from utils.context_utils import get_runtime_thread_id
 from utils.gitee_utils import mask_token
 
 logger = logging.getLogger("agent.run.web_search")
+
+_BING_RSS_URL = "https://www.bing.com/search"
+
+# 智谱 search_pro 单条结果可能极长，逐条截断，防止撑爆模型上下文。
+MAX_RESULT_CHARS = 1500
+
+
+def _fallback_search(query: str) -> str:
+    """智谱搜索不可用时，用 Bing 搜索的 RSS 接口兜底。
+
+    Bing ``format=rss`` 返回标准 RSS 2.0 XML，只依赖标准库
+    （urllib + xml.etree），不引入新依赖；结果格式与智谱一致的摘要文本。
+    网络或解析失败时抛异常，由调用方统一降级。
+
+    Args:
+        query: 搜索关键词。
+
+    Returns:
+        搜索结果摘要文本，格式为「标题\nURL\n摘要」条目序列。
+
+    Raises:
+        OSError: 网络请求失败。
+    """
+
+    url = f"{_BING_RSS_URL}?q={urllib.parse.quote(query)}&format=rss&count=5"
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            ),
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=15) as response:
+        raw = response.read().decode("utf-8", "ignore")
+
+    root = ET.fromstring(raw)
+    items = list(root.iter("item"))[:5]
+    if not items:
+        raise RuntimeError("Bing RSS 没有返回搜索结果")
+
+    entries = []
+    for item in items:
+        title = "".join(item.findtext("title") or "").strip()
+        link = (item.findtext("link") or "").strip()
+        snippet = " ".join((item.findtext("description") or "").split()).strip()
+        entries.append(f"{title}\n{link}\n{snippet}")
+    return "\n\n".join(entries) if entries else "没有搜索到任何内容。"
 
 
 @lru_cache(maxsize=1)
@@ -111,12 +165,18 @@ def web_search(query: str) -> str:
         if not results:
             output = "没有搜索到任何内容。"
         else:
-            # 只抽取 content 字段，避免把 SDK 的复杂对象直接暴露给模型。
-            output = "\n\n".join(
-                str(getattr(item, "content", "") or "").strip()
-                for item in results
-                if str(getattr(item, "content", "") or "").strip()
-            )
+            # 智谱 search_pro 的单条 content 可能非常长（实测可达 100KB+），
+            # 直接塞给模型会撑爆上下文。逐条截断到 MAX_RESULT_CHARS，
+            # 只保留摘要级别信息。
+            snippets = []
+            for item in results:
+                text = str(getattr(item, "content", "") or "").strip()
+                if not text:
+                    continue
+                if len(text) > MAX_RESULT_CHARS:
+                    text = text[:MAX_RESULT_CHARS] + "…"
+                snippets.append(text)
+            output = "\n\n".join(snippets)
             if not output:
                 output = "搜索结果为空。"
         if thread_id:
@@ -134,16 +194,39 @@ def web_search(query: str) -> str:
             )
         return output
     except Exception as exc:
-        # 外部 API 错误、网络异常、SDK 异常都返回可读文本，让模型可以继续降级处理。
-        error = mask_token(str(exc))
-        logger.warning("联网搜索失败：query=%s error=%s", normalized_query, error)
+        # 外部 API 错误、网络异常、SDK 异常都先尝试 DDG 兜底；
+        # 兜底也失败时返回可读文本，让模型可以继续降级处理。
+        primary_error = mask_token(str(exc))
+        logger.warning(
+            "联网搜索主通道失败，尝试 DuckDuckGo 兜底：query=%s error=%s",
+            normalized_query,
+            primary_error,
+        )
+        try:
+            output = _fallback_search(normalized_query)
+        except Exception as fallback_exc:
+            error = f"{primary_error}；DDG 兜底失败：{mask_token(str(fallback_exc))}"
+            logger.warning("联网搜索失败：query=%s error=%s", normalized_query, error)
+            if thread_id:
+                record_event(
+                    thread_id,
+                    f"web_search:{normalized_query[:80]}",
+                    "联网搜索资料",
+                    kind="fetch",
+                    status="error",
+                    detail=json.dumps({"query": normalized_query, "error": error}, ensure_ascii=False),
+                )
+            return f"搜索失败: {error}"
         if thread_id:
             record_event(
                 thread_id,
                 f"web_search:{normalized_query[:80]}",
                 "联网搜索资料",
                 kind="fetch",
-                status="error",
-                detail=json.dumps({"query": normalized_query, "error": error}, ensure_ascii=False),
+                status="completed",
+                detail=json.dumps(
+                    {"query": normalized_query, "source": "duckduckgo", "result_preview": output[:1200]},
+                    ensure_ascii=False,
+                ),
             )
-        return f"搜索失败: {error}"
+        return output

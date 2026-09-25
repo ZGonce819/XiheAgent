@@ -349,10 +349,17 @@ def build_streaming_response(
                             return
             else:
                 while True:
-                    event, data = await queue.get()
-                    yield sse_part(event, data)
-                    if event == "done":
-                        break
+                    try:
+                        event, data = await asyncio.wait_for(queue.get(), timeout=10)
+                        yield sse_part(event, data)
+                        if event == "done":
+                            break
+                    except asyncio.TimeoutError:
+                        # SSE 心跳：Agent 长时间推理/工具执行期间没有事件可发，
+                        # 空转 60 秒后部分客户端、网关或网络层会切断空闲连接
+                        # （实测 GAIA 评测 61 秒断连）。定时发注释行保活，客户端
+                        # 按 SSE 协议忽略注释行，不影响事件解析。
+                        yield ": keep-alive\n\n"
         finally:
             if use_redis:
                 cleanup_stream(thread_id)

@@ -69,7 +69,7 @@ DEFAULT_MAX_TOOL_CALLS: Final[int] = 240
 DEFAULT_MAX_SECONDS: Final[int] = 1800
 
 TASK_KIND_DEFAULT_LIMITS: Final[dict[str, tuple[int, int]]] = {
-    "qa": (60, 600),
+    "qa": (180, 2400),
     "inspect": (30, 300),
     "sync": (40, 300),
     "analysis": (120, 900),

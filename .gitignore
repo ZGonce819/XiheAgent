@@ -25,6 +25,7 @@ htmlcov/
 
 # Virtual environments
 .venv/
+.eval-venv/
 venv/
 ENV/
 env/
