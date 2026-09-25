@@ -126,3 +126,61 @@ def make_intent_model(model_id: str | None = None) -> BaseChatModel:
         base_url=require_env("DEEPSEEK_BASE_URL"),
         max_tokens=INTENT_MODEL_MAX_TOKENS
     )
+
+
+def make_subagent_model(model_id: str | None = None) -> BaseChatModel:
+    """创建子 Agent 模型（多模型编排）。
+
+    子 Agent 用于阅读、分析、总结、建议等辅助任务，与主 Agent 采用
+    不同的模型实例，实现异构多模型协同：
+
+    1. 优先使用指定的自定义模型（``model_id``）。
+    2. 显式配置了 ``SUBAGENT_MODEL`` 时，使用独立于主模型的子模型
+       （如智谱 GLM 等其它厂商模型），缺 Key/BaseURL 时回退 DeepSeek。
+    3. 都没有时使用标记为默认的自定义模型 / 内置模型覆盖。
+    4. 全部缺失时回退主模型，保证向后兼容。
+
+    优先级说明：``SUBAGENT_MODEL`` 高于默认自定义模型，因为默认自定义
+    模型通常指向主模型（与 ``MAIN_MODEL`` 同源），先命中它会退化成
+    「主/子同模型」，失去多模型编排的意义。
+
+    Args:
+        model_id: 子 Agent 自定义模型 ID，为 ``None`` 时按上述顺序解析。
+
+    Returns:
+        配置好的 ChatModel 实例。
+
+    Raises:
+        RuntimeError: 当必要的 API Key 或 Base URL 未配置时。
+    """
+    if model_id:
+        custom = get_custom_model(model_id)
+        if custom:
+            return _build_model_from_custom(
+                custom, streaming=True,
+                max_tokens=custom.get("max_tokens", 4096),
+                temperature=custom.get("temperature", 0.7),
+            )
+    sub_model = get_env("SUBAGENT_MODEL")
+    if sub_model:
+        sub_key = get_env("SUBAGENT_API_KEY")
+        sub_base = get_env("SUBAGENT_BASE_URL")
+        return init_chat_model(
+            model=sub_model,
+            model_provider="openai",
+            temperature=0.5,
+            api_key=sub_key or require_env("DEEPSEEK_API_KEY"),
+            base_url=sub_base or require_env("DEEPSEEK_BASE_URL"),
+            max_tokens=DEEPSEEK_V4_MAX_TOKENS,
+            streaming=True,
+        )
+    custom = get_default_custom_model()
+    if custom is None:
+        custom = get_builtin_override()
+    if custom:
+        return _build_model_from_custom(
+            custom, streaming=True,
+            max_tokens=custom.get("max_tokens", 4096),
+            temperature=custom.get("temperature", 0.7),
+        )
+    return make_main_model(model_id)

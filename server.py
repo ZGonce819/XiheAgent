@@ -20,7 +20,7 @@ from langgraph.graph.state import RunnableConfig
 from langgraph.store.base import BaseStore
 
 from agent.graph.graph import get_checkpointer, get_langgraph_store
-from agent.graph.model import make_main_model
+from agent.graph.model import make_main_model, make_subagent_model
 from agent.middleware.final_response import FinalResponseMiddleware
 from agent.memory.repo import (
     build_repo_memory_namespace,
@@ -479,7 +479,7 @@ def get_agent(config: RunnableConfig):
         configurable["_repo_memory_content"] = repo_memory_content
 
     main_model = make_main_model(configurable.get("model_id"))
-    subagent_model = make_main_model(configurable.get("model_id"))
+    subagent_model = make_subagent_model(configurable.get("subagent_model_id"))
 
     skill_sources = _resolve_skill_sources(thread_id, backend_type)
     # 技能检索中间件：类名与 DeepAgents 内置实现相同，靠「按名称原位替换」顶替它。
