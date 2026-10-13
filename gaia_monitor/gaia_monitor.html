@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GAIA 2023 Validation 监控台</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b1020'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%2338bdf8' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='3.5' fill='%2334d399'/%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#0b1020; --panel:#111a30; --panel2:#0f1526; --line:#1e2a45;
+    --txt:#dbe4f5; --dim:#8494b8; --faint:#5b6b8f;
+    --cyan:#38bdf8; --green:#34d399; --red:#f87171; --amber:#fbbf24;
+    --mono:"Consolas","Cascadia Mono","SF Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{background:var(--bg); color:var(--txt);
+    font:14px/1.55 -apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;}
+  body{padding:20px 22px 40px;}
+  .wrap{max-width:1200px; margin:0 auto;}
+
+  /* 头部 */
+  header{display:flex; align-items:baseline; justify-content:space-between;
+    gap:12px; flex-wrap:wrap; margin-bottom:16px;}
+  h1{font-size:20px; font-weight:700; letter-spacing:.3px;}
+  h1 .dot{display:inline-block; width:9px; height:9px; border-radius:50%;
+    background:var(--green); margin-right:9px; vertical-align:2px;
+    animation:pulse 2.2s infinite;}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .meta{color:var(--dim); font-size:12px; font-family:var(--mono);}
+  .meta b{color:var(--cyan); font-weight:600;}
+  .live{margin-left:10px; padding:3px 9px; border:1px solid var(--line);
+    border-radius:20px; font-size:11px; color:var(--green);}
+
+  /* 大数字卡 */
+  .cards{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:18px;}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:16px 18px 14px; position:relative; overflow:hidden;}
+  .card .label{font-size:12px; color:var(--dim); margin-bottom:6px; display:flex; align-items:center; gap:6px;}
+  .card .num{font-family:var(--mono); font-size:34px; font-weight:700; line-height:1.1;
+    font-variant-numeric:tabular-nums;}
+  .card .sub{font-size:11px; color:var(--faint); margin-top:6px; font-family:var(--mono);}
+  .c-fin .num{color:var(--cyan);}  .c-hit .num{color:var(--green);}
+  .c-miss .num{color:var(--red);}  .c-left .num{color:var(--amber);}
+  .bar{position:absolute; left:0; bottom:0; height:3px; width:100%;}
+  .c-fin .bar{background:linear-gradient(90deg,var(--cyan),transparent);}
+  .c-hit .bar{background:linear-gradient(90deg,var(--green),transparent);}
+  .c-miss .bar{background:linear-gradient(90deg,var(--red),transparent);}
+  .c-left .bar{background:linear-gradient(90deg,var(--amber),transparent);}
+
+  /* 区块 */
+  section{background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:16px 18px; margin-bottom:16px;}
+  .sec-head{display:flex; align-items:center; justify-content:space-between;
+    margin-bottom:12px; flex-wrap:wrap; gap:8px;}
+  .sec-title{font-size:14px; font-weight:600; color:var(--txt);}
+  .sec-title .tag{margin-left:8px; font-size:11px; color:var(--dim); font-weight:400;}
+  .tag-amber{display:inline-block; padding:0 5px; margin-left:4px; font-size:10px; line-height:16px; border-radius:3px; color:#f5c97b; background:rgba(245,201,123,.12); border:1px solid rgba(245,201,123,.35);}
+  .tag-gray{display:inline-block; padding:0 5px; margin-left:4px; font-size:10px; line-height:16px; border-radius:3px; color:#9aa7bd; background:rgba(154,167,189,.12); border:1px solid rgba(154,167,189,.35);}
+
+  /* 命中分布 */
+  .dist-grid{display:grid; grid-template-columns:1fr 320px; gap:18px; align-items:stretch;}
+  .dist-chart{height:250px;}
+  .dist-side{display:flex; flex-direction:column; gap:10px; justify-content:center;}
+  .lvl{display:flex; align-items:center; gap:10px; padding:9px 12px;
+    background:var(--panel2); border:1px solid var(--line); border-radius:8px;}
+  .lvl .name{width:34px; font-family:var(--mono); font-weight:700; color:var(--cyan);}
+  .lvl .pbar{flex:1; height:7px; background:#1b2740; border-radius:4px; overflow:hidden;}
+  .lvl .pbar i{display:block; height:100%; background:var(--green); border-radius:4px;}
+  .lvl .val{font-family:var(--mono); font-size:12px; color:var(--dim); white-space:nowrap;}
+
+  /* 正在运行 */
+  .run-card{border:1px solid #2b3d63; border-radius:10px; padding:14px 16px; margin-bottom:12px;
+    background:var(--panel2);}
+  .run-head{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;}
+  .run-head .spin{width:10px; height:10px; border-radius:50%; background:var(--cyan);
+    box-shadow:0 0 0 0 rgba(56,189,248,.5); animation:ripple 1.6s infinite;}
+  @keyframes ripple{0%{box-shadow:0 0 0 0 rgba(56,189,248,.45)}
+    70%{box-shadow:0 0 0 9px rgba(56,189,248,0)}100%{box-shadow:0 0 0 0 rgba(56,189,248,0)}}
+  .badge{font-family:var(--mono); font-size:11px; padding:2px 8px; border-radius:6px;
+    background:#1e2a45; color:var(--cyan); border:1px solid var(--line);}
+  .badge.lv1{color:#7dd3fc;} .badge.lv2{color:#a5b4fc;} .badge.lv3{color:#f0abfc;}
+  .run-q{font-size:13.5px; color:var(--txt); line-height:1.65; margin-bottom:10px;}
+  .run-q .q-label{color:var(--dim); font-size:11px; display:block; margin-bottom:3px;}
+  .run-meta{display:flex; gap:16px; flex-wrap:wrap; font-family:var(--mono); font-size:11.5px; color:var(--dim);}
+  .run-msgs{margin-top:10px; padding:8px 10px; background:rgba(148,163,184,.07); border-radius:8px; display:flex; flex-direction:column; gap:5px;}
+  .msg{font-size:12px; line-height:1.55; color:var(--txt); word-break:break-word;}
+  .msg-a{color:#5eead4; font-weight:600; margin-right:4px;}
+  .msg-u{color:#93c5fd; font-weight:600; margin-right:4px;}
+  .run-meta b{color:var(--txt); font-weight:600;}
+
+  /* 活动流 */
+  .flow{font-family:var(--mono); font-size:12px; line-height:1.6; max-height:340px;
+    overflow-y:auto; background:#0a0f1d; border:1px solid var(--line); border-radius:8px; padding:10px 12px;}
+  .flow .row{white-space:pre-wrap; word-break:break-all; color:#9fb3d9; border-left:3px solid transparent;
+    padding:1px 0 1px 8px; margin-left:-8px;}
+  .flow .row.new{animation:flash 1.4s ease;}
+  @keyframes flash{0%{background:rgba(56,189,248,.16); border-left-color:var(--cyan);}100%{background:transparent;}}
+  .flow .row .ts{color:#55648a;}
+  .flow .row .src-r{color:#fbbf24;} .flow .row .src-a{color:#38bdf8;}
+  .flow .row .evt{color:#7dd3fc;} .flow .row .err{color:#f87171;}
+  .flow .row .ok{color:#34d399;}
+  .flow-empty{color:var(--faint); font-style:italic;}
+  .apiflow{max-height:300px; overflow-y:auto;}
+
+  /* 最近完成 */
+  table{width:100%; border-collapse:collapse; table-layout:fixed;}
+  th,td{text-align:left; padding:7px 8px; border-bottom:1px solid var(--line);
+    font-size:12.5px; vertical-align:top; overflow:hidden;}
+  th{color:var(--dim); font-weight:500; font-size:11.5px;}
+  td{color:var(--txt);}
+  .mono{font-family:var(--mono); font-size:11.5px;}
+  .st-ok{color:var(--green);} .st-bad{color:var(--red);} .st-run{color:var(--cyan);}
+  td.q{color:#aebada; white-space:nowrap; text-overflow:ellipsis;}
+
+  footer{margin-top:18px; color:var(--faint); font-size:11.5px; font-family:var(--mono);}
+  footer .err{color:var(--red);}
+
+  /* 完整内容弹窗 */
+  .modal-mask{position:fixed; inset:0; background:rgba(4,8,20,.78);
+    display:none; align-items:center; justify-content:center; z-index:100;
+    padding:26px;}
+  .modal-mask.open{display:flex;}
+  .modal-box{background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    max-width:900px; width:100%; max-height:86vh; display:flex; flex-direction:column;
+    box-shadow:0 18px 60px rgba(0,0,0,.55);}
+  .modal-head{display:flex; align-items:center; justify-content:space-between;
+    padding:12px 16px; border-bottom:1px solid var(--line);}
+  .modal-head b{font-size:14px; color:var(--cyan);}
+  .modal-close{background:transparent; border:1px solid var(--line); color:var(--dim);
+    border-radius:8px; padding:4px 12px; cursor:pointer; font-size:12px;}
+  .modal-close:hover{color:var(--txt); border-color:var(--cyan);}
+  .modal-body{overflow:auto; padding:16px; font-size:13px; line-height:1.6;
+    color:var(--txt); white-space:pre-wrap; word-break:break-word;
+    font-family:var(--mono);}
+  .msg-more{display:inline-block; margin-left:6px; color:var(--cyan); font-size:11px;
+    cursor:pointer; text-decoration:underline;}
+  .msg-more:hover{color:#7dd3fc;}
+  .q-full{margin-left:8px; color:var(--cyan); font-size:11px; cursor:pointer;
+    text-decoration:underline;}
+  .q-full:hover{color:#7dd3fc;}
+
+  @media (max-width:900px){
+    .cards{grid-template-columns:repeat(2,1fr);}
+    .dist-grid{grid-template-columns:1fr;}
+    .dist-side{flex-direction:row; flex-wrap:wrap;}
+  }
+  @media (max-width:560px){
+    .cards{grid-template-columns:1fr 1fr; gap:10px;}
+    .card .num{font-size:26px;}
+    body{padding:14px;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- 完整内容弹窗 -->
+  <div class="modal-mask" id="modalMask">
+    <div class="modal-box">
+      <div class="modal-head"><b id="modalTitle">完整内容</b>
+        <button class="modal-close" onclick="closeModal()">关闭</button></div>
+      <div class="modal-body" id="modalBody"></div>
+    </div>
+  </div>
+
+  <header>
+    <h1><span class="dot"></span>GAIA 2023 Validation · 重试队列监控</h1>
+    <div class="meta">数据源：<b id="srcFile">gaia_mimo_delegation_v4_retry_20261007.json</b>
+      <span class="live" id="liveTag">● LIVE</span>
+      <br>刷新 <span id="lastUpd">--</span> · 轮询 8s · 端口 8787</div>
+  </header>
+
+  <div class="cards">
+    <div class="card c-fin">
+      <div class="label">已完成 finished</div>
+      <div class="num" id="nFinished">–</div>
+      <div class="sub">/ <span id="nTotal">165</span> 总题数</div><div class="bar"></div>
+    </div>
+    <div class="card c-hit">
+      <div class="label">已命中 matched</div>
+      <div class="num" id="nMatched">–</div>
+      <div class="sub">命中率 <span id="hitRate">–</span></div><div class="bar"></div>
+    </div>
+    <div class="card c-miss">
+      <div class="label">未命中</div>
+      <div class="num" id="nMissed">–</div>
+      <div class="sub">技术失败 <span id="nMissedTech" class="tag-amber">–</span>（可重跑）+ 答错 <span id="nMissedCap" class="tag-gray">–</span>（能力）</div><div class="bar"></div>
+    </div>
+    <div class="card c-left">
+      <div class="label">剩余未完成</div>
+      <div class="num" id="nRemaining">–</div>
+      <div class="sub">error <span id="nError">–</span> + running <span id="nRunning">–</span> + interrupted</div><div class="bar"></div>
+    </div>
+  </div>
+
+  <section>
+    <div class="sec-head">
+      <div class="sec-title">按难度命中分布 <span class="tag">L1 / L2 / L3 · 命中 vs 未完成</span></div>
+    </div>
+    <div class="dist-grid">
+      <div class="dist-chart" id="distChart"></div>
+      <div class="dist-side" id="distSide"></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <div class="sec-title">正在运行 <span class="tag" id="runTag">0 题</span></div>
+    </div>
+    <div id="runList">
+      <div class="flow-empty">当前无进行中题目</div>
+    </div>
+    <div class="sec-head" style="margin-top:18px">
+      <div class="sec-title">实时活动流 <span class="tag">evaluate 事件 + API 模型/工具调用</span></div>
+    </div>
+    <div class="flow" id="flow"></div>
+    <div class="sec-head" style="margin-top:18px">
+      <div class="sec-title">API 实时流 <span class="tag">backend.log 尾部 40 条（模型调用/搜索/重试/错误）</span></div>
+    </div>
+    <div class="flow apiflow" id="apiflow"></div>
+  </section>
+
+  <section>
+    <div class="sec-head">
+      <div class="sec-title">最近结果 <span class="tag">尾部 8 条</span></div>
+    </div>
+    <table>
+      <colgroup><col style="width:13%"><col style="width:6%"><col style="width:9%"><col style="width:9%"><col style="width:63%"></colgroup>
+      <thead><tr><th>task_id</th><th>Lv</th><th>状态</th><th>耗时</th><th>问题</th></tr></thead>
+      <tbody id="recentBody"><tr><td colspan="5">–</td></tr></tbody>
+    </table>
+  </section>
+
+  <footer id="foot">monitor · 只读 · json 统计 + 日志尾部轮询</footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<script>
+/* ===== 状态渲染 ===== */
+var chart = null;
+var seen = {};            // 活动流去重
+var lastFlash = {};       // 上次渲染的行（用于新增闪烁）
+var elapsedTimer = null;  // 已运行时长每秒刷新
+
+function renderStatus(s){
+  var st = s.stats;
+  setText('nFinished', st.finished);
+  setText('nMatched', st.matched);
+  setText('nMissed', st.missed);
+  setText('nMissedTech', st.missed_technical);
+  setText('nMissedCap', st.missed_capability);
+  setText('nRemaining', st.remaining);
+  setText('nError', st.error);
+  setText('nRunning', st.running);
+  setText('nTotal', st.total);
+  var rate = st.finished ? (100*st.matched/st.finished).toFixed(1) : '0.0';
+  setText('hitRate', rate + '%');
+  document.getElementById('runTag').textContent = st.running + ' 题';
+  renderDist(s.by_level);
+  renderRunning(s.running);
+  renderRecent(s.recent);
+  var err = s.json_error;
+  document.getElementById('foot').innerHTML = err
+    ? 'monitor · <span class="err">json 读取失败: ' + esc(err) + '</span>'
+    : 'monitor · 只读 · json 统计 + 日志尾部轮询';
+}
+
+function renderDist(bl){
+  var ls = [1,2,3];
+  var chartLs = [3,2,1];  // 与 yAxis ['Level 3','Level 2','Level 1'] 同序，避免 L1/L3 数据错位
+  var hitData = chartLs.map(function(l){ var i=bl[l]||{n:0,matched:0}; return i.matched; });
+  var leftData = chartLs.map(function(l){
+    var i=bl[l]||{n:0,matched:0}; return Math.max(0, i.n - i.matched);
+  });
+  if (!chart && window.echarts){
+    chart = echarts.init(document.getElementById('distChart'));
+    window.addEventListener('resize', function(){ chart && chart.resize(); });
+  }
+  if (chart){
+    chart.setOption({
+      grid:{left:46,right:18,top:20,bottom:26,containLabel:true},
+      tooltip:{trigger:'axis',triggerOn:'click',renderMode:'richText',confine:true,axisPointer:{type:'shadow'}},
+      xAxis:{type:'value',axisLabel:{color:'#8494b8',fontSize:10},splitLine:{lineStyle:{color:'#1b2740'}}},
+      yAxis:{type:'category',data:['Level 3','Level 2','Level 1'],axisLabel:{color:'#dbe4f5',fontSize:12}},
+      series:[
+        {name:'命中',type:'bar',barWidth:13,data:hitData,itemStyle:{color:'#34d399',borderRadius:[0,3,3,0]},label:{show:true,position:'inside',color:'#0b1020',fontSize:11,fontWeight:700,formatter:function(p){return p.value||'';}}},
+        {name:'未完成/未命中',type:'bar',barWidth:13,data:leftData,itemStyle:{color:'#3b4a6b',borderRadius:[0,3,3,0]},label:{show:true,position:'inside',color:'#c7d4ec',fontSize:10,formatter:function(p){return p.value||'';}}}
+      ],
+      legend:{top:0,right:0,textStyle:{color:'#8494b8',fontSize:11},itemWidth:13,itemHeight:9}
+    }, true);
+  }
+  var side = document.getElementById('distSide');
+  side.innerHTML = ls.map(function(l){
+    var i=bl[l]||{n:0,matched:0};
+    var pct = i.n ? (100*i.matched/i.n).toFixed(0) : 0;
+    return '<div class="lvl"><span class="name">L'+l+'</span>'+
+      '<div class="pbar"><i style="width:'+pct+'%"></i></div>'+
+      '<span class="val">'+i.matched+'/'+i.n+' ('+pct+'%)</span></div>';
+  }).join('');
+}
+
+function renderRunning(list){
+  var el = document.getElementById('runList');
+  if (!list || !list.length){
+    el.innerHTML = '<div class="flow-empty">当前无进行中题目</div>';
+    return;
+  }
+  el.innerHTML = list.map(function(r){
+    var tm = r.timer || {};
+    var startTxt = '--';
+    if (tm.started_at_ms){
+      var d = new Date(tm.started_at_ms);
+      startTxt = d.toTimeString().slice(0,8) + ' (本地)';
+    }
+    var stateBadge = tm.active
+      ? (tm.suspicious
+          ? '<span class="badge" style="color:#fbbf24">● 运行中 · 15min 无消息</span>'
+          : '<span class="badge" style="color:#34d399">● 运行中</span>')
+      : (tm.queued
+          ? '<span class="badge" style="color:#60a5fa">⏳ 排队/待续跑</span>'
+          : '<span class="badge" style="color:#fbbf24">⏸ 中断/暂停</span>');
+    return '<div class="run-card" data-task="'+r.task_id+'">'+
+      '<div class="run-head"><span class="spin"></span>'+
+      '<span class="badge lv'+r.level+'">L'+r.level+'</span>'+
+      '<span class="badge">'+r.task_id.slice(0,8)+'</span>'+
+      '<span class="badge">thread '+r.thread_id+'</span>'+
+      (r.model ? '<span class="badge">'+r.model+'</span>' : '')+
+      stateBadge+
+      '</div>'+
+      '<div class="run-q"><span class="q-label">问题（输入）</span>'+esc(r.question)+
+        (r.question_full && r.question_full.length > r.question.length
+          ? '<span class="q-full" onclick="openFull(\'q\', \''+r.task_id+'\')">查看完整问题</span>'
+          : '')+'</div>'+
+      '<div class="run-meta">'+
+        '<span>输入开始 <b>'+startTxt+'</b></span>'+
+        '<span>已运行 <b class="elapsed" data-start="'+(tm.started_at_ms||'')+'" data-acc="'+(tm.accumulated_ms||0)+'" data-elapsed="'+(tm.elapsed_ms||'')+'" data-active="'+(tm.active?'1':'0')+'" data-last-seen="'+(tm.last_seen_ms||'')+'">'+fmtAcc(tm)+'</b></span>'+
+        (r.messages_count!=null ? '<span>API 消息 <b>'+r.messages_count+'</b></span>' : '')+
+        '<span>thread <b>'+r.thread_full+'</b></span>'+
+      '</div>'+
+      msgBlock(r)+
+      '</div>';
+  }).join('');
+  startElapsedTicker();
+}
+function msgBlock(r){
+  var msgs = (r.recent_messages || []).filter(function(m){ return m.author === 'agent'; });
+  if (!msgs.length) msgs = (r.recent_messages || []).slice(-1);
+  if (!msgs.length) return '';
+  var out = msgs.slice(-2).map(function(m, idx){
+    var role = m.author === 'agent' ? '<span class="msg-a">模型</span>' : '<span class="msg-u">用户</span>';
+    var txt = (m.text || '').slice(0, 180) + ((m.text || '').length > 180 ? '…' : '');
+    var key = r.task_id + '_' + m.ts + '_' + idx;
+    FULL_CACHE[key] = m.full || m.text || '';
+    var more = (m.full || '').length > (m.text || '').length
+      ? '<span class="msg-more" onclick="openFull(\'m\', \''+key+'\')">查看完整</span>' : '';
+    return '<div class="msg"><b>'+role+'</b> '+esc(txt)+more+'</div>';
+  }).join('');
+  return '<div class="run-msgs">'+out+'</div>';
+}
+var FULL_CACHE = {};
+function openFull(kind, key){
+  var txt = FULL_CACHE[key] || '';
+  var title = kind === 'q' ? '完整问题' : '完整模型输出';
+  if (!txt) { txt = '（暂无完整内容）'; }
+  showModal(title, txt);
+}
+function showModal(title, content){
+  document.getElementById('modalTitle').textContent = title;
+  document.getElementById('modalBody').textContent = content;
+  document.getElementById('modalMask').classList.add('open');
+}
+function closeModal(){
+  document.getElementById('modalMask').classList.remove('open');
+}
+document.addEventListener('keydown', function(e){
+  if (e.key === 'Escape') closeModal();
+});
+document.getElementById('modalMask').addEventListener('click', function(e){
+  if (e.target === this) closeModal();
+});
+function fmtHMS(ms){
+  var s = Math.max(0, Math.floor(ms / 1000));
+  var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  function p(n){ return n < 10 ? '0' + n : '' + n; }
+  return p(h) + ':' + p(m) + ':' + p(sec);
+}
+function fmtAcc(tm){
+  // 渲染初值：优先后端 elapsed_ms（活跃题=墙钟从输入开始，非活跃=累计活跃段）；
+  // 后端已累计到 last_seen，这里只补轮询间隔内的秒级增量。
+  var acc = (tm && tm.elapsed_ms) || (tm && tm.accumulated_ms) || 0;
+  if (tm && tm.active && tm.last_seen_ms) acc += Date.now() - tm.last_seen_ms;
+  return fmtHMS(acc);
+}
+function startElapsedTicker(){
+  clearInterval(elapsedTimer);
+  elapsedTimer = setInterval(function(){
+    document.querySelectorAll('.elapsed[data-start]').forEach(function(e){
+      var start = parseInt(e.getAttribute('data-start'), 10);
+      var acc = parseInt(e.getAttribute('data-acc'), 10) || 0;
+      var el = parseInt(e.getAttribute('data-elapsed'), 10) || 0;
+      var active = e.getAttribute('data-active') === '1';
+      var lastSeen = parseInt(e.getAttribute('data-last-seen'), 10);
+      // 优先后端 elapsed_ms（活跃题=墙钟从输入开始，面板重启不吞时间）；
+      // 否则回退 accumulated（非活跃题只累计活跃段）。补轮询间隔内增量。
+      var total = el || acc;
+      if (active && lastSeen) total += Date.now() - lastSeen;
+      e.textContent = fmtHMS(total);
+    });
+  }, 1000);
+}
+
+function renderRecent(list){
+  var el = document.getElementById('recentBody');
+  if (!list || !list.length){ el.innerHTML = '<tr><td colspan="5">–</td></tr>'; return; }
+  el.innerHTML = list.map(function(r){
+    var ok = r.match ? 'st-ok' : 'st-bad';
+    var stxt;
+    if (r.match){ stxt = '命中'; }
+    else if (r.status==='error'){ stxt = 'error'; }
+    else if (r.miss_type==='technical'){ stxt = '未命中<span class="tag-amber">技术·可重跑</span>'; }
+    else { stxt = '未命中<span class="tag-gray">答错·能力</span>'; }
+    return '<tr><td class="mono">'+r.task_id+'</td>'+
+      '<td class="mono">L'+r.level+'</td>'+
+      '<td class="'+ok+'">'+stxt+'</td>'+
+      '<td class="mono">'+(r.total_s!=null?fmtS(r.total_s):'–')+'</td>'+
+      '<td class="q" title="'+esc(r.question)+'">'+esc(r.question)+'</td></tr>';
+  }).join('');
+}
+
+/* ===== 活动流 ===== */
+function renderActivity(a){
+  // 行重要性：3=错误/警告(红) 2=事件/工具/审批/线程(青) 0=请求/清洗(灰)
+  function clsOf(i){ return i===3?'err':(i===2?'evt':''); }
+  var rows = (a.lines && a.lines.length) ? a.lines : [];
+  var el = document.getElementById('flow');
+  var html = rows.map(function(r){
+    var key = r.src + r.text;
+    var isNew = !(key in seen);
+    seen[key] = 1;
+    var t = r.text.match(/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/);
+    var body = r.text;
+    var ts = '';
+    if (t){ ts = t[0]; body = r.text.slice(t[0].length); }
+    var cls = 'row' + (isNew ? ' new' : '');
+    var src = r.src==='r' ? '<span class="src-r">[eval]</span>' : '<span class="src-a">[api ]</span>';
+    var pretty = body.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    var tag = clsOf(r.impt);
+    if (tag) pretty = '<span class="'+tag+'">'+pretty+'</span>';
+    return '<div class="'+cls+'"><span class="ts">'+ts+'</span> '+src+' '+pretty+'</div>';
+  }).join('');
+  if (!html) html = '<div class="flow-empty">暂无活动</div>';
+  var scrollBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  el.innerHTML = html;
+  if (scrollBottom) el.scrollTop = el.scrollHeight;
+  if (Object.keys(seen).length > 600) seen = {};
+}
+
+/* ===== API 实时流 ===== */
+function renderApiLog(a){
+  function clsOf(i){ return i===3?'err':(i===2?'evt':''); }
+  var rows = (a.lines && a.lines.length) ? a.lines : [];
+  var el = document.getElementById('apiflow');
+  var html = rows.map(function(r){
+    var key = 'api:' + r.text;
+    var isNew = !(key in seen);
+    seen[key] = 1;
+    var t = r.text.match(/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/);
+    var body = r.text, ts = '';
+    if (t){ ts = t[0]; body = r.text.slice(t[0].length); }
+    var cls = 'row' + (isNew ? ' new' : '');
+    var pretty = body.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    var tag = clsOf(r.impt);
+    if (tag) pretty = '<span class="'+tag+'">'+pretty+'</span>';
+    return '<div class="'+cls+'"><span class="ts">'+ts+'</span> '+pretty+'</div>';
+  }).join('');
+  if (!html) html = '<div class="flow-empty">暂无 API 活动</div>';
+  var scrollBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  el.innerHTML = html;
+  if (scrollBottom) el.scrollTop = el.scrollHeight;
+  if (Object.keys(seen).length > 900) seen = {};
+}
+
+/* ===== 工具 ===== */
+function setText(id, v){ document.getElementById(id).textContent = v; }
+function fmtS(s){ s = Math.round(s||0); return s+'s'; }
+function esc(x){ return String(x==null?'':x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+/* ===== 轮询 ===== */
+function tick(){
+  fetch('/api/status').then(function(r){ return r.json(); })
+    .then(function(s){
+      var now = new Date();
+      document.getElementById('lastUpd').textContent =
+        now.toTimeString().slice(0,8);
+      renderStatus(s);
+    }).catch(function(){ setText('lastUpd','连接失败'); });
+  fetch('/api/activity').then(function(r){ return r.json(); })
+    .then(renderActivity).catch(function(){});
+  fetch('/api/apilog').then(function(r){ return r.json(); })
+    .then(renderApiLog).catch(function(){});
+}
+tick();
+setInterval(tick, 8000);
+</script>
+</body>
+</html>

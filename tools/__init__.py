@@ -53,6 +53,10 @@ from .skill_tools import create_skill, list_skills
 
 # 联网搜索工具：用于在本地上下文不足时补充外部公开资料。
 from .web_search import web_search
+from .deep_search import deep_search
+
+# 收尾工具：把"输出最终答案"变成可调用工具，作为预算耗尽后的强制出口。
+from .submit_answer import submit_final_answer
 
 # 明确声明对外工具列表，避免调用方依赖模块内的临时变量或辅助函数。
 __all__ = [
@@ -74,4 +78,6 @@ __all__ = [
     "publish_github_pr_comment",
     "validate_review_finding_location",
     "web_search",
+    "deep_search",
+    "submit_final_answer",
 ]

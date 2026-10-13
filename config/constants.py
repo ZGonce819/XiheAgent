@@ -60,6 +60,25 @@ SENSITIVE_MARKERS: Final[tuple[str, ...]] = (
 DEEPSEEK_V4_MAX_TOKENS: Final[int] = 16_000
 INTENT_MODEL_MAX_TOKENS: Final[int] = 2_000
 
+# 模型与深度搜索可靠性
+def _env_int(name: str, default: int, minimum: int) -> int:
+    try:
+        return max(minimum, int(get_env(name, str(default))))
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_float(name: str, default: float, minimum: float) -> float:
+    try:
+        return max(minimum, float(get_env(name, str(default))))
+    except (TypeError, ValueError):
+        return default
+
+
+MODEL_RETRY_MAX_ATTEMPTS: Final[int] = _env_int("MODEL_RETRY_MAX_ATTEMPTS", 3, 1)
+MODEL_RETRY_BACKOFF_SECONDS: Final[float] = _env_float("MODEL_RETRY_BACKOFF_SECONDS", 0.5, 0.0)
+DEEP_SEARCH_DEFAULT_ROUNDS: Final[int] = min(5, _env_int("DEEP_SEARCH_DEFAULT_ROUNDS", 3, 2))
+
 # ── Agent 运行限制 ──────────────────────────────────────────────────────────
 
 DEFAULT_RECURSION_LIMIT: Final[int] = 9999

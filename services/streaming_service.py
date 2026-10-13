@@ -78,6 +78,8 @@ def build_streaming_response(
     approval_id: str | None = None,
     project_name: str | None = None,
     local_work_dir: str | None = None,
+    skip_plan_confirmation: bool = False,
+    task_kind: str | None = None,
 ) -> StreamingResponse:
     """构造 POST SSE 流式响应。
 
@@ -249,6 +251,8 @@ def build_streaming_response(
                         checkpoint_id=checkpoint_id,
                         model_id=model_id,
                         backend_type=backend_type,
+                        skip_plan_confirmation=skip_plan_confirmation,
+                        task_kind=task_kind,
                     )
                 else:
                     result = resume_agent_task(
@@ -293,10 +297,25 @@ def build_streaming_response(
                 send_event("thread_done", thread_meta_payload(latest))
                 send_event("done", {})
             except Exception as exc:
+                # Preparation/classification can fail before the runtime's own
+                # try block. Persist those failures too, instead of leaving running.
                 try:
+                    from utils.gitee_utils import mask_token
+
+                    store = get_store()
+                    task = store.get_thread(thread_id) or {}
+                    if task.get("latest_run_status") not in {"failed", "cancelled"}:
+                        store.update_thread_status(thread_id, "failed")
+                        store.finish_open_run_events(thread_id, status="error")
+                        store.record_run(
+                            run_id=run_id, thread_id=thread_id, status="failed",
+                            error=mask_token(str(exc)), finished=True,
+                        )
                     latest = get_task(thread_id) or initial_task
                 except Exception:
-                    latest = initial_task
+                    logger.exception("无法持久化任务失败状态：thread_id=%s", thread_id)
+                    latest = {**initial_task, "latest_run_status": "failed"}
+                logger.exception("流式任务失败：thread_id=%s", thread_id)
                 send_event("error", {"message": str(exc), "detail": str(exc)})
                 send_event("thread_done", thread_meta_payload(latest))
                 send_event("done", {})
@@ -340,9 +359,15 @@ def build_streaming_response(
         try:
             if use_redis:
                 while True:
-                    events = await asyncio.to_thread(
-                        read_events, thread_id, block_ms=5000
-                    )
+                    try:
+                        events = await asyncio.to_thread(
+                            read_events, thread_id, block_ms=5000
+                        )
+                    except Exception:
+                        # Redis 偶发超时/断连：发注释行保活并继续重试，
+                        # 绝不让 SSE 流因单次读失败而中断（evaluate 侧会判流断）。
+                        yield ": redis-read-retry\n\n"
+                        continue
                     for event, data in events:
                         yield sse_part(event, data)
                         if event == "done":
@@ -357,7 +382,7 @@ def build_streaming_response(
                     except asyncio.TimeoutError:
                         # SSE 心跳：Agent 长时间推理/工具执行期间没有事件可发，
                         # 空转 60 秒后部分客户端、网关或网络层会切断空闲连接
-                        # （实测 GAIA 评测 61 秒断连）。定时发注释行保活，客户端
+                        # （实测长任务约 61 秒断连）。定时发注释行保活，客户端
                         # 按 SSE 协议忽略注释行，不影响事件解析。
                         yield ": keep-alive\n\n"
         finally:

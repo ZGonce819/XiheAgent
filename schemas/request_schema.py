@@ -35,6 +35,8 @@ class DashboardThreadMessageRequest(BaseModel):
     edit_message_content: str | None = Field(default=None, description="待编辑消息的原始文本，用于校验实时消息 ID")
     edit_snapshot: list[dict[str, Any]] | None = Field(default=None, description="编辑前的页面消息快照")
     rollback_confirmed: bool = Field(default=False, description="是否确认回退后重新发送")
+    skip_plan_confirmation: bool = Field(default=False, description="跳过技术方案确认，直接进入实现（供无人值守评测/循环使用）")
+    task_kind: str | None = Field(default=None, description="可选：调用方已判好的任务类型（qa/coding/planning 等），传入后主流程不再重复分类")
 
 
 class DashboardEditPreviewRequest(BaseModel):

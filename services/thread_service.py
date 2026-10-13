@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from pathlib import Path
@@ -352,6 +353,21 @@ def thread_payload(
         "diffStats": None,
         "changedFiles": [],
     }
+    # The live graph's certified answer is authoritative. A checkpoint read
+    # can return a parent snapshot after approval resume; do not grade that draft.
+    payload["finalAnswer"] = None
+    if payload["status"] == "finished":
+        for event in reversed(run_events):
+            if not str(event.get("id", "")).split(":", 1)[-1].startswith("final-answer:"):
+                continue
+            try:
+                certified = json.loads(event.get("detail") or "{}")
+                text = certified.get("text")
+                if isinstance(text, str) and hashlib.sha256(text.encode()).hexdigest() == certified.get("sha256"):
+                    payload["finalAnswer"] = text
+                    break
+            except (ValueError, TypeError):
+                continue
     try:
         from config.approval_runtime import get_pending_approval, public_approval
 

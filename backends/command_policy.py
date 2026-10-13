@@ -13,12 +13,11 @@ PolicyAction = Literal["allow", "approval", "deny"]
 
 
 def _auto_approve_enabled() -> bool:
-    """无人批处理（评测、定时任务）是否自动放行审批类命令。
+    """无人批处理（定时任务、无人值守循环等）是否自动放行审批类命令。
 
     读取 ``XIHE_AUTO_APPROVE`` 环境变量：非空且不是 ``0`` / ``false`` / ``no`` /
     ``off`` 时启用。只影响 ``approval`` 类命令的降级，**硬拒绝（deny）永远生效**，
-    避免无人值守场景因命令审批而永久卡住（如 GAIA 评测大量任务停在
-    ``awaiting_approval``）。
+    避免无人值守场景因命令审批而永久卡住（停在 ``awaiting_approval``）。
 
     Returns:
         是否启用自动批准。

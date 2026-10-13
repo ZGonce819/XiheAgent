@@ -16,6 +16,16 @@ from config.env_config import get_env
 router = APIRouter()
 
 
+@router.get("/health/ready")
+def health_ready():
+    """Check task storage, separately from process liveness and model quotas."""
+    from fastapi.responses import JSONResponse
+    from services.health_service import readiness
+
+    result = readiness()
+    return JSONResponse(result, status_code=200 if result["ok"] else 503)
+
+
 @router.get("/health")
 def health() -> dict[str, Any]:
     """后端健康检查。
@@ -53,4 +63,3 @@ def health() -> dict[str, Any]:
         "main_model": get_env("MAIN_MODEL", "deepseek-v4-pro"),
         "has_gitee_token": bool(get_env("GITEE_TOKEN")),
     }
-

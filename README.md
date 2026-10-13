@@ -7,6 +7,7 @@
 ## 核心特性
 
 - 🤖 **智能 Agent 编排** - 基于 LangGraph + DeepAgents，支持复杂任务的自动分解与执行
+- 🧠 **主模型 / 子 Agent 协作** - 主模型负责规划、执行和证据汇总，子模型负责只读研究、分析及代码审查，独立校验模型检查最终答案；未配置独立子模型时可回退到主模型
 - 🔄 **SSE 实时流式输出** - 支持 asyncio.Queue（单进程）或 Redis Stream（多进程部署）事件分发
 - 💾 **三层存储架构** - Redis（Checkpoint）+ MySQL（业务数据）+ PostgreSQL（长期记忆）
 - 🔐 **企业级安全** - 虚拟路径隔离、命令白名单、Git 分支保护、RBAC 权限控制（规划中）
@@ -17,10 +18,26 @@
 - 🔒 **会话环境隔离** - 自动追踪会话创建环境（local/sandbox），防止跨环境继续对话
 - 📁 **本地文件夹绑定** - 项目可绑定本地文件夹作为工作根目录，Agent 直接在用户项目中工作
 - ⏰ **自动化任务编排** - 自动化任务按「一轮一轮」跑：每轮读上一轮状态、跑完独立验证、把结论写回状态，连续没通过就停下交给人；支持按 cron 自动触发，也可以手动跑一轮；只读任务直接跑，写入任务配好验证检查项后也能跑
+- 🔎 **递归深度搜索** - `deep_search` 根据上一轮摘要动态生成下一轮查询，去重来源并按共同主张检查独立来源支持情况
+- ✅ **证据链最终校验** - 最终回答交给独立校验模型抽取断言，标记 supported / unsupported / conflicting，必要时依据工具证据自动修正
+- 🔁 **模型调用可靠性** - 对超时、限流、连接异常和 5xx 使用指数退避重试；参数错误和工具错误不会盲目重复执行
 - 🧩 **四层技能系统** - 内置 / 全局 / 项目集合 / 本地四层作用域，同名逐层覆盖；支持网页上传与 Agent 自动沉淀
 - 🖥️ **现代化前端** - React + Vite + Tailwind CSS + TanStack Router，响应式设计，支持深色模式
+- 🏃 **GAIA 评测体系** - serve(2026) + evaluate(watchdog 守护) + monitor(8787) 三进程；判死跳过（累计 3 次技术失败出队）、四类卡死兜底（网络 60s / 模型 120s / 静默 15 分钟 / 审批流 120s）、作弊命令硬拦截、`--resume-from` 断点续跑
+- 📊 **评测监控面板** - `gaia_monitor/`（8787）实时展示已完成/已命中/难度分布、每线程活动流、模型请求实时流、线程详情（问题+输出过程）
+- 🧹 **纯答案通用模式** - 题目明示"只要答案/纯数字/不要解释"即自动严格校验（不依赖评测前缀）；图片证据转录检查对所有含图题目生效
+- 🌐 **抓取失败自动换源提示** - 网页抓取遇 DNS 解析失败 / 连接被拒 / 超时等网络不可达时，返回信息明确提示改用搜索摘要、镜像站或官方数据页等可访问来源，避免在不可达站点上反复重试空转；题目要求官方源但网络不可达时手动规定格式放行，防止校验死循环
+- 🔧 **软中断自修复** - 运行超限不再"报错=暂停等手动"，注入修复消息用同一 checkpoint 恢复，模型自己收敛给出答案
 
 ## 技术栈
+
+### 按任务委派
+
+通用主流程和 GAIA 问答共用委派策略：简单问答、单文件定位和单步计算直接处理；复杂任务可通过 `task` 把独立检索、多文件分析或计算复核交给 `general-purpose`，代码审查交给 `code_reviewer`。
+
+当主流程在当前用户轮次已执行至少 3 次搜索/页面获取，或读取至少 3 个不同文件，且尚未尝试任何子任务时，运行时会通过真实 `task` 工具自动发起一次只读核查。已尝试委派（含失败）、未完成的工具批次、同步/目录检查/代码审查流程不会再次触发此自动核查；下一条用户消息重新计算。简单任务不增加分类模型调用。
+
+通用研究子 Agent 仅提供搜索、页面获取和只读文件工具，不提供命令执行、文件编辑或发布工具。子 Agent 返回原始来源位置、关键原文、计算步骤和未解决问题；主模型仍需读取关键来源并通过最终证据校验。子模型故障时主模型接手，不反复自动委派。主动委派次数与拆分质量仍受模型决策影响，这套机制不保证每道复杂题都会提分。
 
 ### 后端
 
@@ -239,7 +256,7 @@ SANDBOX_MAX_PER_THREAD=3             # 每个线程最多保留的沙箱数量
 ```bash
 pip install -e ".[dev]"
 
-# 如需启用联网搜索工具（web_search），额外安装智谱 SDK：
+# 如需启用联网搜索工具（web_search / deep_search），额外安装智谱 SDK：
 pip install -e ".[search]"
 ```
 
@@ -414,7 +431,8 @@ xihe-agent/
 │   ├── gitee_tools.py     # Gitee 工作流工具
 │   ├── github_tools.py    # GitHub 工作流工具
 │   ├── codeup_tools.py    # Codeup 工作流工具
-│   ├── web_search.py      # 网络搜索
+│   ├── web_search.py      # 单轮网络搜索
+│   ├── deep_search.py     # 递归多轮搜索与来源交叉验证
 │   ├── fetch_url_tools.py # URL 内容抓取
 │   ├── reviewer_tools.py  # 代码审查工具
 │   └── skill_tools.py     # 技能工具（create_skill / list_skills）
@@ -570,6 +588,19 @@ xihe-agent/
 ├── DESIGN.md              # 设计文档
 ├── PRODUCT.md             # 产品文档
 ├── LICENSE                # Apache 2.0 许可证
+├── CHANGELOG.md           # 变更记录（自上次提交以来的所有改动）
+│
+├── resume_eval/           # GAIA 评测脚本
+│   ├── gaia_eval.py       # 评测主脚本（判死跳过/格式强化/静默看门狗/内建审批）
+│   ├── gaia_approval_monitor.py # 审批监控（作弊硬拦截/恢复超时 120s）
+│   ├── gaia_state.py / prepare_gaia_resume.py / prepare_gaia_misses.py
+│   ├── reconcile_gaia_results.py / diagnose_gaia_states.py
+│   └── results/           # 评测结果与中间产物
+├── resume_gaia.py         # GAIA watchdog（serve 健康检查 + evaluate 守护拉起）
+├── gaia_monitor/          # 评测监控面板（8787）
+│   ├── gaia_monitor.py    # 面板后端（status/activity/apilog/threads）
+│   └── gaia_monitor.html  # 面板前端
+├── .artifacts/gaia-key-rotation/ # 评测服务（serve 2026 / evaluate / keys.json）
 │
 └── reviewer_rules/        # 代码审查规则
     └── default_review_rules.md
@@ -580,6 +611,26 @@ xihe-agent/
 ### Agent 工厂 (`server.py`)
 
 `get_agent(config)` 根据配置创建完整的 DeepAgent 实例，将模型、工具、子 Agent、Backend、记忆、中间件和 Checkpoint 组装在一起。每次 API 调用都会获取一个新的 Agent runnable，真正的会话状态由 LangGraph checkpointer 保存。
+
+### 多模型编排
+
+系统按职责组织模型调用：
+
+- **主模型**：负责理解任务、调用工具、修改代码和组织最终答复。
+- **子模型**：负责通用分析、代码审查和最终答案证据复核。通过 `SUBAGENT_MODEL` 配置时可以使用与主模型不同的模型；未配置时回退到主模型。
+- **意图分类**：`INTENT_MODEL` 可单独配置；不配置时复用主模型。
+
+多模型编排不要求每个角色使用不同供应商。使用同一模型多次、但让每次调用承担不同职责，也属于多阶段 Agent 编排。
+
+### 深度搜索与证据校验
+
+`deep_search` 不是固定查询模板的批量搜索。它会先执行原始问题，再从上一轮摘要中提取关键词生成下一轮查询，最多执行 5 轮。工具会记录实际查询、去重后的来源和共同主张，并且只有在同一主张得到至少两个独立域名支持时才将 `cross_source_verified` 标记为 `true`。无法可靠归属来源时不会伪造交叉验证。
+
+工具执行结束后，最终回答校验器会读取本轮 `ToolMessage` 证据，抽取回答中的可验证断言并标记为 `supported`、`unsupported` 或 `conflicting`。发现未支持或冲突断言时，主模型会依据证据重写回答。校验模型不可用时保留主模型结果，并记录调试日志。
+
+### 模型重试
+
+`ModelRetryMiddleware` 只对可恢复的超时、限流、连接异常和 5xx 错误进行指数退避重试，默认最多 3 次。参数错误、权限错误和工具调用错误直接返回上层处理，避免重复执行非幂等操作。重试次数、退避时间和深度搜索默认轮数可通过环境变量调整。
 
 ### 任务路由 (`agent/runtime/`)
 
@@ -1055,10 +1106,22 @@ PATCH  /api/v1/workspace/projects/rename  # 重命名项目（级联更新所有
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `MAIN_MODEL` | 默认使用的语言模型标识 | `deepseek-v4-pro` |
+| `MAIN_API_KEY` | 主模型独立 API 密钥 | *回退 DEEPSEEK_API_KEY* |
+| `MAIN_BASE_URL` | 主模型独立 API 地址 | *回退 DEEPSEEK_BASE_URL* |
 | `DEEPSEEK_API_KEY` | DeepSeek API 密钥（使用自定义模型时可选） | *可选* |
 | `DEEPSEEK_BASE_URL` | DeepSeek API 基础地址 | *必填* |
 | `INTENT_MODEL` | 意图分类专用模型（不设则使用 MAIN_MODEL） | *同 MAIN_MODEL* |
+| `SUBAGENT_MODEL` | 子 Agent 与证据校验使用的模型 | *同 MAIN_MODEL* |
+| `SUBAGENT_API_KEY` | 子 Agent 模型 API 密钥 | *回退 DEEPSEEK_API_KEY* |
+| `SUBAGENT_BASE_URL` | 子 Agent 模型 API 地址 | *回退 DEEPSEEK_BASE_URL* |
+| `FINAL_VALIDATOR_MODEL` | 最终答案证据校验模型 | *回退 SUBAGENT_MODEL* |
+| `FINAL_VALIDATOR_API_KEY` | 校验模型 API 密钥 | *回退 DEEPSEEK_API_KEY* |
+| `FINAL_VALIDATOR_BASE_URL` | 校验模型 API 地址 | *回退 DEEPSEEK_BASE_URL* |
+| `FINAL_VALIDATOR_THINKING` | 校验模型推理模式 | `disabled` |
 | `ZHIPU_API_KEY` | `web_search` 工具使用；不配则该工具调用会报错 | *可选* |
+| `MODEL_RETRY_MAX_ATTEMPTS` | 模型瞬时错误最大尝试次数 | `3` |
+| `MODEL_RETRY_BACKOFF_SECONDS` | 模型重试初始退避时间（秒） | `0.5` |
+| `DEEP_SEARCH_DEFAULT_ROUNDS` | `deep_search` 默认搜索轮数（2-5） | `3` |
 | `GITEE_TOKEN` | Gitee 访问令牌（可回退到 `SCM_GITEE_TOKEN`） | *按需* |
 | `GITHUB_TOKEN` | GitHub 访问令牌（可回退到 `SCM_GITHUB_TOKEN`） | *按需* |
 | `CODEUP_TOKEN` | Codeup 访问令牌（可回退到 `SCM_CODEUP_TOKEN`） | *按需* |
@@ -1135,6 +1198,66 @@ npm test               # 运行全部单元测试（vitest run；watch 模式直
 ```
 
 ## 日志
+
+图片文件由本地后端完整读取为 base64，多模态消息保留原始像素并在工具结果批次之后发送给视觉模型。`inspect_image` 使用主模型读取并再次对照原图复核；小图会放大，红绿任务可附带确定性的颜色像素分离视图。复核不通过的转录不能充当图片题证据。该工具增加视觉调用成本，仍可能有识别误差。
+
+最终回复增加本地格式检查，避免校验模型误放行长篇说明；“最早/首次”等问题需核对主体、时间与原始来源。通过校验的最终正文具有与内容绑定的校验凭证，运行时拒绝未认证的中间回复。线程 API 的 `finalAnswer` 返回该权威正文，评测优先读取它，避免审批恢复后误读旧 checkpoint 草稿。历史结果保留原判分规则。
+
+最终回复会对正常答案和修复答案统一校验，检查原题条件、证据、计算精度及输出格式。证据摘录覆盖各轮工具结果，保留长结果首尾；证据不足或格式不符时回到原 Agent 工具循环，最多修复 2 次，沿用既有审批与运行限制。校验仍失败或校验器不可用会明确报错；网络瞬时错误有限重试。同步与异步路径行为一致。评分规则未改变。
+
+GAIA 评测使用 `resume_eval/gaia_eval.py`。评测与审批监控共享原子断点写入和跨进程锁，恢复答案会及时合并，不会等待其他审批全部结束。统计时查看 `n_finished`（有效完成数）与 `matched`；`n` / `n_recorded` 表示有记录的题数，不等于成功数。空答案、伪工具调用文本、已知上游拒答以及 SSE 错误不会计为成功。
+
+评测脚本默认在同一进程内自动处理每题的审批，无需另外启动 `gaia_approval_monitor.py`。仍使用三评审表决，表决后直接恢复执行，并继续处理后续审批；只审批当前评测题目的会话。失败后按同一审批 ID 退避重试，默认最多 3 次（`--approval-max-retries`），不会重复审批正在运行或已完成的会话。重试耗尽会输出 `needs_attention` 并保存该题失败原因，其他题目继续执行。结果包含 `approval_attempts` 和 `approval_errors` 便于排查。可用 `--no-auto-approve` 关闭内置自动审批；单题没有总运行时间上限。
+
+```powershell
+# 评测与自动审批只需一个评测进程（API 服务需已启动）
+.venv\Scripts\python.exe resume_eval/gaia_eval.py --metadata gaia_data/2023/validation/metadata.parquet.csv --workdir D:/gaia-attachments --output gaia_results.json
+# workdir 请替换为实际附件目录；不要放入含标准答案的 metadata 文件。
+
+# 仅合并已有恢复答案，无 API/模型调用
+.venv\Scripts\python.exe resume_eval/gaia_approval_monitor.py --results gaia_mimo_full_20261007.json --merge-only
+
+# 备份并核对历史结果；不会重跑题目
+.venv\Scripts\python.exe resume_eval/reconcile_gaia_results.py --results gaia_mimo_full_20261007.json
+```
+
+`GET /health` 检查 API 是否存活；`GET /health/ready` 检查 MySQL 查询和 Redis 连接，两者任一不可用返回 503。数据库恢复后再启动评测；这些检查不调用模型，也不检查套餐额度。
+
+### GAIA 评测运行架构（2026-10 加固后）
+
+评测由三个进程并行：
+
+| 进程 | 入口 | 端口/触发 | 职责 |
+|---|---|---|---|
+| serve | `.artifacts/gaia-key-rotation/serve.py` | 2026 | LangGraph/DeepAgents 服务，跑评测线程 |
+| evaluate | `resume_eval/gaia_eval.py` | watchdog 每分钟守护拉起 | 评测主循环：逐题提交、内建三评审表决审批、判死、静默看门狗 |
+| monitor | `gaia_monitor/gaia_monitor.py`（须系统 Python311） | 8787 | 实时状态 / 活动流 / 模型请求监控面板 |
+
+**可靠性护栏**（四类卡死全部有兜底）：
+
+| 卡死类型 | 兜底 | 落点 |
+|---|---|---|
+| 网络下载挂起（iwr/curl 下载作弊数据集） | 网络命令强制 60s 超时 + 作弊特征硬拦截（`_cheat_block`，单测 7/7） | 主流程 `backends/local_shell.py` + 评测侧 `gaia_approval_monitor.py` |
+| 模型 API 无响应 | `timeout=120`（OpenAI read 间隔超时） | 主流程 `agent/graph/model.py` |
+| 线程静默挂死（无事件、无消息） | `updatedAt` 静止 15 分钟 → `thread_silent_hang` 放弃 | 评测侧 `gaia_eval.py`（`SILENT_HANG_S=900`） |
+| 审批恢复流挂起 | SSE 无数据 120s 判定挂起（原 1800s） | 评测侧 `gaia_approval_monitor.py` |
+
+**判死机制**：无答案的技术失败（`error` / `interrupted` / `running` / `None`）累计 3 次（`MAX_DEAD_ATTEMPTS=3`）后不再进重试队列；`finished`（无论对错）计数重置。判死计数在 `<结果名>_attempts.json`，跳过时日志输出 `retry_dead ... skip=true`。
+
+**监控面板**（http://127.0.0.1:8787，三进程之一，端口 8787）：
+- `/api/status` — 已完成 / 已命中 / 按难度分布 / 运行中
+- `/api/activity` — 实时活动流（每线程只保留首条起始事件，按时间升序）
+- `/api/apilog` — 模型请求实时流（最近 40 条，前端 8s 轮询）
+- `/api/recent` — 最近完成结果（含判定 / 耗时 / 错误）
+- `/api/threads/<id>` — 线程详情（输入问题 + 输出过程，查询超时放宽到 6s）
+
+**评测守护**：计划任务 `GAIA_ResumeWatchdog` 每分钟运行 `resume_gaia.py`——serve（2026）健康才返回；evaluate 进程数为 0 时用 `--resume-from` 拉起新评测轮次（复用 checkpoint 续跑，不重跑已完成题）。杀掉 evaluate 后约 1 分钟内自动拉起，无需手动重复启动。
+
+**当前评测命令**（watchdog 自动拉起，也可手动）：
+
+```powershell
+.venv\Scripts\python.exe .artifacts\gaia-key-rotation\evaluate.py --metadata gaia_data\2023\validation\metadata.parquet.csv --workdir gaia_workspaces\delegation_v4_retry_20261007 --output gaia_mimo_delegation_v4_retry_20261007.json --resume-from gaia_mimo_delegation_v4_retry_20261007.json --url http://127.0.0.1:2026 --workers 1 --auto-approve
+```
 
 日志文件位于 `logs/` 目录下：
 

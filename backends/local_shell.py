@@ -13,7 +13,9 @@ Prompt 负责告诉模型应该怎么做，LocalShellBackend 负责决定模型�
 
 from __future__ import annotations
 
+import base64
 import fnmatch
+import mimetypes
 import json
 import logging
 import os
@@ -119,6 +121,22 @@ _DANGEROUS_PATTERNS = (
     r"\bbcdedit\b",
 )
 
+# 网络下载类命令短超时（秒）：这些命令（powershell Invoke-WebRequest / curl / wget 等）
+# 一旦目标网络无响应会长时间挂起，且 Windows 上超时后子进程可能残留继续持有管道，
+# 导致 serve worker 阻塞。对这类命令强制 60 秒上限，超时返回结果让模型换路径。
+NETWORK_CMD_TIMEOUT = 60
+_NETWORK_TOOLS = (
+    "invoke-webrequest", "iwr ", "curl", "wget", "bitsadmin",
+    "start-bitstransfer", "aria2",
+)
+
+
+def _is_network_command(command: str) -> bool:
+    """命令是否为网络下载类（易挂起）：只看顶层工具名，不影响 git/pip/npm 等常规命令。"""
+    low = command.lower()
+    return any(tool in low for tool in _NETWORK_TOOLS)
+
+
 def _mask_token(text: str) -> str:
     """把文本中的 Gitee Token 替换为 ***，防止泄露到日志和返回值里。
 
@@ -174,7 +192,7 @@ class LocalShellBackend(BaseSandbox):
         self,
         workspace: Workspace | str | os.PathLike[str] | None = None,
         *,
-        timeout: int = 3600,
+        timeout: int = 240,
         local_folder_mode: bool = False,
         global_workspace_root: Path | str | None = None,
     ) -> None:
@@ -183,7 +201,9 @@ class LocalShellBackend(BaseSandbox):
         Args:
             workspace: 工作区对象或根目录路径；为空时从 ``LOCAL_SHELL_WORKSPACE``
                 环境变量或默认值推导。
-            timeout: ``execute()`` 未显式指定超时时的默认值（秒），默认 3600。
+            timeout: ``execute()`` 未显式指定超时时的默认值（秒），默认 900
+                （防暴力脚本/死循环拖垮单任务；常规长编译/长搜索 15 分钟内
+                通常可完成，超时后模型收到错误反馈自行调整策略）。
             local_folder_mode: 是否启用「本地文件夹模式」。启用后 ``root`` 即用户
                 选定的项目文件夹（文件夹即项目根），只在其中维护
                 ``.xihe-agent/{skills,memories,reviews}`` 布局；后端基础设施
@@ -348,6 +368,8 @@ class LocalShellBackend(BaseSandbox):
 
         prepared_command = self._prepare_command(command, cwd_path=self.projects_dir)
         effective_timeout = timeout if timeout is not None else self.default_timeout
+        if _is_network_command(prepared_command):
+            effective_timeout = min(effective_timeout, NETWORK_CMD_TIMEOUT)
         try:
             completed = subprocess.run(
                 prepared_command,
@@ -440,6 +462,15 @@ class LocalShellBackend(BaseSandbox):
             if resolved.is_dir():
                 return ReadResult(error=f"当前路径是目录，不能读取为文件：{file_path}")
             raw = resolved.read_bytes()
+            # DeepAgents expects complete base64 for media. Never decode binary
+            # images/PDFs as Latin-1 or apply text line pagination to their bytes.
+            media_type = mimetypes.guess_type(resolved.name)[0] or ""
+            if media_type.startswith(("image/", "audio/", "video/")) or media_type == "application/pdf":
+                return ReadResult(file_data={
+                    "content": base64.b64encode(raw).decode("ascii"), "encoding": "base64",
+                    "created_at": datetime.fromtimestamp(resolved.stat().st_ctime, UTC).isoformat(),
+                    "modified_at": datetime.fromtimestamp(resolved.stat().st_mtime, UTC).isoformat(),
+                })
             try:
                 text = raw.decode("utf-8")
                 encoding = "utf-8"
@@ -777,6 +808,7 @@ class LocalShellBackend(BaseSandbox):
             _mask_token(command_text),
             timeout,
         )
+        effective_timeout = min(timeout, NETWORK_CMD_TIMEOUT) if _is_network_command(command_text) else timeout
         completed = subprocess.run(
             command_text,
             cwd=str(cwd_path),
@@ -784,7 +816,7 @@ class LocalShellBackend(BaseSandbox):
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            timeout=timeout,
+            timeout=effective_timeout,
             encoding="utf-8",
             errors="replace",
             env=self._execution_env(),

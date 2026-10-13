@@ -35,7 +35,7 @@ def run_task_safely(*, repo_url: str, prompt: str, thread_id: str) -> None:
     try:
         if is_workspace_listing_task(prompt):
             run_workspace_listing_task(repo_url=repo_url, prompt=prompt, thread_id=thread_id)
-        elif is_pull_only_task(prompt):
+        elif is_pull_only_task(prompt) and repo_url:
             run_pull_only_task(repo_url=repo_url, prompt=prompt, thread_id=thread_id)
         else:
             run_agent_task(repo_url=repo_url, prompt=prompt, thread_id=thread_id)

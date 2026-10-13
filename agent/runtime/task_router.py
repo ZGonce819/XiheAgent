@@ -327,7 +327,10 @@ def run_agent_task(
             backend_type=backend_type,
         )
 
-    if is_pull_only_task(routing_text):
+    # 仓库同步必须存在仓库地址：没有 repo_url 就谈不上 git pull。
+    # 英文问答里 "Pull out the sentence..." 这类含 pull 字样的措辞，
+    # 若无此约束会被 is_pull_only_task 误判为同步任务而走错分支。
+    if is_pull_only_task(routing_text) and repo_url:
         record_event(thread_id, "intent", "已识别任务类型：仓库同步", status="completed")
         return run_pull_only_task(repo_url=repo_url, prompt=prompt, thread_id=thread_id)
 

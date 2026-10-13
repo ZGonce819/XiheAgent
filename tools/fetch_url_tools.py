@@ -197,7 +197,20 @@ def fetch_url(url: str, timeout: int = 30) -> dict[str, Any]:
             }
     except requests.RequestException as exc:
         # requests 层网络异常通常是可恢复问题，直接返回给模型做降级解释。
-        result = {"ok": False, "url": normalized_url, "error": f"网页读取失败：{mask_token(str(exc))}"}
+        # 网络不可达（DNS 解析失败 / 连接被拒 / 超时 / 连接重置）时附换源提示，
+        # 避免模型在不可达站点上反复重试空转，引导改用可访问的替代来源。
+        err_text = mask_token(str(exc))
+        if re.search(
+            r"DNS|getaddrinfo|Name or service not known|timed?\s*out|timeout|"
+            r"Connection\s+(?:refused|reset|error)|unreachable|"
+            r"无法解析|连接失败|连接超时|名称解析|远程主机强迫关闭|"
+            r"ERR_NAME_NOT_RESOLVED|EHOSTUNREACH|ENETUNREACH|NameResolutionFailure",
+            err_text,
+            re.I,
+        ):
+            err_text += "；该站点当前网络不可达，请改用其他可访问的信息来源"
+            "（如搜索摘要、镜像站、官方数据页面）获取同等信息后再作答"
+        result = {"ok": False, "url": normalized_url, "error": f"网页读取失败：{err_text}"}
     except Exception as exc:  # noqa: BLE001 - 工具层返回可恢复错误，由 middleware 再做兜底
         # 其他异常写 warning 日志，并对错误文本做 token 脱敏。
         logger.warning("读取网页资料失败：url=%s error=%s", normalized_url, mask_token(str(exc)))

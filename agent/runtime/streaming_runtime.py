@@ -18,16 +18,19 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import queue
 import re
+import threading
 from uuid import uuid4
 from collections.abc import Callable, Iterable
 from typing import Any
 
 from langchain_core.messages import BaseMessage
 
-from agent.middleware.run_limits import AgentRunLimitExceeded, AgentRunLimitTracker
+from agent.middleware.run_limits import AgentRunLimits, AgentRunLimitExceeded, AgentRunLimitTracker
 from agent.runtime.cancellation import begin_run, end_run, raise_if_cancelled
 from agent.runtime.events import record_event
 from config.constants import MAX_STREAM_TEXT_LENGTH, STREAM_FLUSH_THRESHOLD
@@ -564,6 +567,8 @@ def _message_dict(message: Any) -> dict[str, Any]:
             "type": message.type,
             "content": message.content,
         }
+        if getattr(message, "tool_calls", None):
+            payload["tool_calls"] = message.tool_calls
         usage = getattr(message, "usage_metadata", None)
         if usage:
             payload["usage_metadata"] = usage
@@ -578,6 +583,8 @@ def _message_dict(message: Any) -> dict[str, Any]:
         }
         if message.get("usage_metadata"):
             payload["usage_metadata"] = message["usage_metadata"]
+        if message.get("tool_calls"):
+            payload["tool_calls"] = message["tool_calls"]
         return payload
     return {"type": type(message).__name__, "content": str(message)}
 
@@ -704,6 +711,74 @@ def _record_subagent(thread_id: str, run_id: str, subagent: Any, index: int) -> 
     )
 
 
+STREAM_STALL_SECONDS = 300  # 主流程事件流超过该秒数无任何事件即判定挂起（180s 对 Excel/代码类读文件题偏短，调回 300s）
+# 注意：必须小于调用方静默检测（1200s），让软中断收尾先于调用方放弃执行
+REPAIR_STALL_SECONDS = 600   # 修复轮看门狗（放宽，让工具层 timeout 自己处理）
+REPAIR_MAX_SECONDS = 120    # 修复轮总时长上限（原 240s）
+
+
+class _WatchdogStream:
+    """事件流挂起看门狗包装器：距上一个事件超过 ``idle_limit`` 秒即判定流式挂起。
+
+    底层同步迭代（langgraph ``stream_events`` / 模型流）阻塞在 socket 读时，
+    调用方无法感知"长时间无事件"（模型调用 200 但流不产 chunk，且无心跳时
+    read timeout 也不触发）。本包装器把迭代放进后台 daemon 线程，主线程按
+    事件间隔超时等待：超时抛 :class:`AgentRunLimitExceeded`，由上层走软中断
+    收尾（注入 repair 提示 + 一次修复轮），不再让线程/队列无限挂起。
+
+    用类而非生成器函数实现：下游仍需要 ``stream.output``（langgraph
+    stream_events 返回值上的最终结果属性），生成器没有该属性会直接
+    AttributeError。这里通过 ``output`` property 转发到底层原始 stream，
+    保持对调用方透明。
+
+    后台线程在超时中断后会留在原地（无法安全终止阻塞中的 socket 读），
+    以 daemon 方式运行随 serve 进程退出；该场景为罕见故障，不阻塞正常路径。
+    """
+
+    def __init__(self, stream: Iterable[Any], idle_limit: float = STREAM_STALL_SECONDS):
+        self._stream = stream
+        self._idle_limit = idle_limit
+
+    @property
+    def output(self) -> Any:
+        # 转发 langgraph stream_events 返回对象的最终结果属性。
+        return self._stream.output
+
+    def __iter__(self) -> Any:
+        q: "queue.Queue[Any]" = queue.Queue(maxsize=8)
+        done = threading.Event()
+
+        def _pump() -> None:
+            try:
+                for ev in self._stream:
+                    q.put(ev)
+            except BaseException as exc:  # noqa: BLE001 - 必须把底层流异常传给主线程
+                try:
+                    q.put(exc, timeout=5)
+                except Exception:  # noqa: BLE001
+                    pass
+            finally:
+                done.set()
+
+        threading.Thread(target=_pump, daemon=True, name="stream-watchdog-pump").start()
+        while True:
+            try:
+                item = q.get(timeout=self._idle_limit)
+            except queue.Empty as exc:
+                raise AgentRunLimitExceeded(
+                    f"事件流超过 {int(self._idle_limit)} 秒无任何事件（流式挂起），主动中断本轮"
+                ) from exc
+            if isinstance(item, BaseException):
+                raise item
+            yield item
+            if done.is_set() and q.empty():
+                return
+
+
+def _watchdog_stream(stream: Iterable[Any], idle_limit: float = STREAM_STALL_SECONDS) -> _WatchdogStream:
+    return _WatchdogStream(stream, idle_limit=idle_limit)
+
+
 def _consume_raw_event_stream(
     *,
     stream: Any,
@@ -711,6 +786,7 @@ def _consume_raw_event_stream(
     run_id: str,
     task_kind: str | None = None,
     event_sink: StreamEventSink | None = None,
+    repair_limits: AgentRunLimits | None = None,
 ) -> tuple[int, int, bool]:
     """按官网 raw protocol event 消费 DeepAgents 输出。
 
@@ -745,7 +821,10 @@ def _consume_raw_event_stream(
     write_todo_args_by_call: dict[str, str] = {}
     write_todo_last_payload_by_call: dict[str, str] = {}
     saw_write_todos = False
-    limit_tracker = AgentRunLimitTracker(task_kind=task_kind)
+    if repair_limits is not None:
+        limit_tracker = AgentRunLimitTracker(limits=repair_limits, task_kind=task_kind)
+    else:
+        limit_tracker = AgentRunLimitTracker(task_kind=task_kind)
 
     for event in stream:
         # 每两个协议事件之间检查一次停止请求。放在这里而不是只在 event_sink 里，
@@ -982,6 +1061,8 @@ def _run_agent_with_event_stream(
     event_sink: StreamEventSink | None = None,
     checkpoint_id: str | None = None,
     resume_decisions: list[dict[str, Any]] | None = None,
+    repair_used: int = 0,
+    max_repairs: int = 1,
 ) -> dict[str, Any]:
     """实际消费逻辑，由 :func:`run_agent_with_event_stream` 负责运行态登记后调用。
 
@@ -1023,6 +1104,9 @@ def _run_agent_with_event_stream(
         version="v3",
         config=run_config,
     )
+    # 流式挂起看门狗：langgraph/模型流同步迭代阻塞时调用方无法感知，
+    # 包装后事件间隔超过 STREAM_STALL_SECONDS 即主动中断，走软中断收尾。
+    stream = _watchdog_stream(stream)
     record_event(thread_id, "model", "调用大模型", kind="other", status="in_progress")
     # raw protocol events 是当前版本里唯一能拿到 token/chunk 的通道。
     # 这里同时解析 text-delta 和 write_todos 的 tool_call_chunk，保证正文和任务计划都能流式更新。
@@ -1043,8 +1127,97 @@ def _run_agent_with_event_stream(
             status="error",
             detail=str(exc),
         )
-        record_event(thread_id, "model", "调用大模型", kind="other", status="error", detail=str(exc))
-        raise
+        # 软中断自修复：不直接作废本轮，而是把"超时"作为一条用户指令注入，
+        # 用同一 checkpoint 恢复运行，让模型基于已有证据自行收尾给出最终答案。
+        # 只允许一次修复轮；修复轮仍挂起则从 checkpoint 抽最后一条 assistant 兜底。
+        if repair_used < max_repairs:
+            # F: 主动丢弃旧 stream 引用，帮助 GC 回收底层卡死的 HTTP/SSE 连接，
+            # 避免修复轮复用同一个半死的 TCP 连接继续挂起。
+            stream = None
+            repair_msg = (
+                "你上一轮运行已超过运行保护上限被强制中断。现在禁止调用任何工具，"
+                "不要发起任何搜索/文件读取/代码执行；直接基于当前已有消息和证据，"
+                "用一句话给出最终答案。如果证据不足，给出最可能的答案并标注不确定性。"
+            )
+            try:
+                repair_stream = agent.stream_events(
+                    {"messages": [{"role": "user", "content": repair_msg}]},
+                    version="v3",
+                    config=run_config,
+                )
+                # 修复轮看门狗与时间预算同步调短，避免在脏连接上干等。
+                repair_stream = _watchdog_stream(repair_stream, idle_limit=REPAIR_STALL_SECONDS)
+                repair_limits = AgentRunLimits(
+                    max_seconds=REPAIR_MAX_SECONDS,
+                    max_tool_calls=5,
+                    task_kind=task_kind or "default",
+                )
+                tool_call_index, subagent_index, saw_assistant_text = _consume_raw_event_stream(
+                    stream=repair_stream,
+                    thread_id=thread_id,
+                    run_id=run_id,
+                    task_kind=task_kind,
+                    event_sink=event_sink,
+                    repair_limits=repair_limits,
+                )
+                stream = repair_stream
+                repair_used += 1
+                record_event(
+                    thread_id,
+                    "agent:run-limit",
+                    "超限后注入收尾指令，模型已自行恢复并给出最终答案",
+                    kind="other",
+                    status="completed",
+                    detail=str(exc),
+                )
+            except AgentRunLimitExceeded as repair_exc:
+                # C: 修复轮也挂起。不再硬失败——从 checkpoint 抽最后一条 assistant
+                # 中间输出作为降级最终答案返回，整题至少有个结果，不会被判成 error。
+                record_event(
+                    thread_id,
+                    "agent:run-limit",
+                    "修复轮仍挂起，从 checkpoint 抽取最后一条 assistant 输出作为降级答案",
+                    kind="other",
+                    status="warning",
+                    detail=str(repair_exc),
+                )
+                fallback_msgs: list[Any] = []
+                try:
+                    snapshot = agent.get_state(run_config)
+                    snap_values = getattr(snapshot, "values", None) or {}
+                    hist = snap_values.get("messages", []) if isinstance(snap_values, dict) else []
+                    from utils.message_utils import extract_final_assistant_text
+                    fallback_text = ""
+                    for m in reversed(hist):
+                        mtype = getattr(m, "type", None) or (m.get("role") if isinstance(m, dict) else None)
+                        if mtype in ("ai", "assistant"):
+                            fallback_text = extract_final_assistant_text([m]) or ""
+                            if fallback_text:
+                                break
+                    if fallback_text:
+                        fallback_msgs = [{"role": "assistant", "type": "ai", "content": fallback_text}]
+                except Exception:
+                    fallback_msgs = []
+                if fallback_msgs:
+                    record_event(
+                        thread_id,
+                        f"final-answer:{run_id}",
+                        "已校验最终答案（降级：checkpoint 抽取）",
+                        kind="other",
+                        status="completed",
+                        detail=json.dumps({"fallback": True}, ensure_ascii=False),
+                    )
+                    return {
+                        "messages": fallback_msgs,
+                        "raw_output": {"messages": hist, "_fallback_from_checkpoint": True},
+                        "interrupted": False,
+                    }
+                # 连 checkpoint 都抽不出 assistant 文本，才硬失败
+                record_event(thread_id, "model", "调用大模型", kind="other", status="error", detail=str(repair_exc))
+                raise
+        else:
+            record_event(thread_id, "model", "调用大模型", kind="other", status="error", detail=str(exc))
+            raise
 
     # The exhausted stream describes this run, including approval interrupts.
     # A checkpoint read can omit pending writes or select the parent checkpoint
@@ -1068,6 +1241,14 @@ def _run_agent_with_event_stream(
             "approval": approval if isinstance(approval, dict) else {},
         }
     final_messages = _messages_from_output(output)
+    from utils.message_utils import require_final_answer
+
+    final_text = require_final_answer(final_messages)
+    verified_hash = output.get("final_response_verified_hash") if isinstance(output, dict) else None
+    if verified_hash != hashlib.sha256(final_text.encode()).hexdigest():
+        raise RuntimeError("最终答案缺少有效校验凭证，不能将中间回复记为完成")
+    record_event(thread_id, f"final-answer:{run_id}", "已校验最终答案", kind="other", status="completed",
+                 detail=json.dumps({"text": final_text, "sha256": verified_hash}, ensure_ascii=False))
     # 某些 DeepSeek/LangGraph 版本只在最终 output 中提供 assistant 文本，
     # 不发送 messages/content-block-delta 事件。把最终回复补写进统一事件流，
     # 这样刷新页面和 SSE 实时页面都能看到正文。

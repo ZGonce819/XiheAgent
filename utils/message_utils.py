@@ -7,7 +7,34 @@ content block 列表（包含文本、图片等）。本模块提供统一的文
 
 from __future__ import annotations
 
+import re
 from typing import Any
+
+
+def final_answer_error(text: str) -> str | None:
+    """Reject missing answers and protocol/refusal text masquerading as an answer."""
+    if not text or not text.strip():
+        return "模型没有返回最终答案"
+    if re.match(r"\s*(?:```(?:xml)?\s*)?<(?:tool_call|function_calls|invoke|function)[\s=>]", text, re.I):
+        return "模型把工具调用输出为正文，未生成最终答案"
+    if text.strip().rstrip(".").casefold() == (
+        "the request was rejected because it was considered high risk"
+    ):
+        return "模型或上游服务拒绝了请求，未生成最终答案"
+    return None
+
+
+def require_final_answer(messages: list[dict[str, Any]]) -> str:
+    """Validate the actual last message; never reuse earlier progress text."""
+    last = messages[-1] if messages else {}
+    role = last.get("type") or last.get("role")
+    if role not in {"ai", "assistant", "aimessage"} or last.get("tool_calls"):
+        raise RuntimeError("任务结束时仍有未完成的工具调用或缺少最终回复")
+    text = message_content_to_text(last.get("content"))
+    error = final_answer_error(text)
+    if error:
+        raise RuntimeError(error)
+    return text
 
 
 def message_content_to_text(content: Any) -> str:

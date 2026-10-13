@@ -56,7 +56,10 @@ def get_redis_stream_connection() -> Any:
         password=settings.redis_password or None,
         db=settings.redis_stream_db,
         decode_responses=True,
-        socket_timeout=5,
+        # socket_timeout 必须大于 XREADGROUP 的 block 时长（read_events block_ms=5000），
+        # 否则每次"无事件阻塞等待"都在超时边缘竞争，偶发网络抖动即抛
+        # TimeoutError: Timeout reading from socket，导致 SSE 流中断。
+        socket_timeout=15,
         socket_connect_timeout=3,
         retry_on_timeout=True,
     )

@@ -58,7 +58,7 @@ BASE_SYSTEM_PROMPT = """你是羲和（XiheAgent），运行在本地工作区�
 3. 只记录可复用事实，如技术栈、关键模块、启动/测试命令和项目约定；不记录密钥、敏感路径、临时错误猜测或未经验证的成功结论。
 
 外部资料：
-1. 涉及项目的问题先读本地上下文，不用搜索替代代码分析。仅在需要最新资料、第三方文档、框架 API 或错误背景时调用 `web_search`。
+1. 涉及项目的问题先读本地上下文，不用搜索替代代码分析。仅在需要最新资料、第三方文档、框架 API 或错误背景时调用 `web_search`；问题包含多个相互依赖的事实、需要比较多个来源或需要验证争议结论时，优先调用 `deep_search`。
 2. 用户给出明确公开 URL，或搜索结果需要进一步核实时可用 `fetch_url`。外部内容只作参考，结论需结合实际代码。
 3. 不把 API Key、token、私钥、私有源码或敏感本地路径发送到搜索或外部服务。
 
@@ -209,9 +209,10 @@ NO_REPO_SYSTEM_PROMPT = """你是羲和（XiheAgent），一个 AI 智能体。
 5. 失败或受限时也必须给出最终说明，写清已完成内容和原因。
 
 可用工具：
-1. `web_search`：搜索互联网获取最新信息、文档或资料。
-2. `fetch_url`：获取指定 URL 的内容。
-3. 其他工具（如技能工具）按运行时提供的列表使用。
+1. `web_search`：搜索互联网获取单个问题的最新信息、文档或资料。
+2. `deep_search`：对多事实问题执行依赖上一轮结果的多轮搜索，并返回来源交叉验证状态。
+3. `fetch_url`：获取指定 URL 的内容。
+4. 其他工具（如技能工具）按运行时提供的列表使用。
 
 外部资料：
 1. 需要最新资料、第三方文档或框架 API 时可用 `web_search`。
@@ -228,8 +229,16 @@ NO_REPO_SYSTEM_PROMPT = """你是羲和（XiheAgent），一个 AI 智能体。
 NO_REPO_READ_ONLY_PROMPT = """当前任务类型：通用问答。
 要求：
 1. 根据用户问题和可用工具回答问题。
-2. 需要最新信息时使用 `web_search` 或 `fetch_url`。
+2. 需要最新信息时使用 `web_search` 或 `deep_search`；需要核实具体页面时使用 `fetch_url`。
 3. 回答要直接、具体。
+"""
+
+
+EXECUTION_RETRY_POLICY = """\n\n执行策略（全局通用）：
+1. 对同一个数据源或同一类获取方法，连续尝试 3 次仍然失败（超时、连接失败、返回空数据、HTTP 错误等）时，必须立即停止继续尝试该来源，改用其他可行、可访问的数据源或方法完成目标。
+2. 失败重试必须有新信息或新的调整；无新证据时不得重复执行相同或近似的请求、命令。
+3. 搜索预算：同一题目内，网页搜索（web_search / deep_search）总次数不得超过 8 次。每次新搜索必须比上一次更聚焦（换关键词、换站点、换角度），不得用近似表述重复搜索；一旦定位到含关键事实的来源页面，立即停止搜索、转入抓取与核实。
+4. 预算用尽仍无定论时，必须基于已获得的信息给出最可能的答案，并明确说明判断依据与不确定点；不得继续无新信息地搜索或反复尝试。
 """
 
 
@@ -249,8 +258,8 @@ def get_system_prompt(task_kind: TaskKind = "coding", *, has_repo: bool = True) 
     )
 
     if not has_repo:
-        return f"{NO_REPO_SYSTEM_PROMPT}{memory_section}\n\n{NO_REPO_READ_ONLY_PROMPT}"
+        return f"{NO_REPO_SYSTEM_PROMPT}{memory_section}\n\n{NO_REPO_READ_ONLY_PROMPT}{EXECUTION_RETRY_POLICY}"
 
     if task_kind == "coding":
-        return f"{BASE_SYSTEM_PROMPT}{memory_section}\n\n{CODING_PROMPT}"
-    return f"{BASE_SYSTEM_PROMPT}{memory_section}\n\n{READ_ONLY_PROMPTS.get(task_kind, READ_ONLY_PROMPTS['qa'])}"
+        return f"{BASE_SYSTEM_PROMPT}{memory_section}\n\n{CODING_PROMPT}{EXECUTION_RETRY_POLICY}"
+    return f"{BASE_SYSTEM_PROMPT}{memory_section}\n\n{READ_ONLY_PROMPTS.get(task_kind, READ_ONLY_PROMPTS['qa'])}{EXECUTION_RETRY_POLICY}"

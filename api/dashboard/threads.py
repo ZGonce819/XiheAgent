@@ -199,6 +199,8 @@ async def dashboard_stream_new_message(body: DashboardThreadMessageRequest) -> S
         backend_type=requested_backend,
         project_name=body.project_name,
         local_work_dir=local_work_dir,
+        skip_plan_confirmation=body.skip_plan_confirmation,
+        task_kind=body.task_kind,
     )
 
 
@@ -255,6 +257,8 @@ async def dashboard_stream_existing_message(
             backend_type=requested_backend,
             project_name=body.project_name,
             local_work_dir=body.local_work_dir,
+            skip_plan_confirmation=body.skip_plan_confirmation,
+            task_kind=body.task_kind,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

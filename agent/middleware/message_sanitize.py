@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Awaitable, Callable
 
 from langchain.agents.middleware.types import (
@@ -32,11 +33,95 @@ from langchain.agents.middleware.types import (
     ModelRequest,
     ModelResponse,
 )
-from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, HumanMessage, ToolMessage
 
 from config.constants import NON_TEXT_TOOL_BLOCK_TYPES, TEXT_BLOCK_TYPES
 
 logger = logging.getLogger(__name__)
+
+# ── 上下文滚动压缩阈值 ─────────────────────────────────────────────
+# 长任务（单题几十轮工具调用）中，每轮模型请求都会重发全部历史消息。
+# 这里对"早期 + 超长"的工具结果做无损性截断（只作用于发送给模型的请求副本，
+# 不修改 checkpoint 保存的真实历史，也不删除消息，保持工具调用配对完整）：
+#   - 超过 MAX_TOOL_RESULT_CHARS 字符的工具结果才被压缩；
+#   - 保留前 TOOL_RESULT_HEAD 字符 + 明确截断标记，避免模型误以为读到完整内容；
+#   - 最后 KEEP_RECENT_MESSAGES 条消息保持完整，保证最近证据不被压缩。
+# 阈值按子 Agent（委派任务）实际规模收紧：单条 2500 字符即截断、早于窗口的
+# AI 过程文本一并截断，控制委派链路上每轮全量重发的 token 体积。
+MAX_TOOL_RESULT_CHARS = 2500
+TOOL_RESULT_HEAD = 700
+KEEP_RECENT_MESSAGES = 6
+_TOOL_TRUNCATION_MARK = "\n\n[... 该工具结果过长，已按上下文滚动压缩截断；需要完整内容时请针对性补查 ...]"
+
+
+def _message_text(message: AnyMessage) -> str:
+    """提取 ToolMessage 或 AIMessage 的纯文本内容。"""
+    if isinstance(message, ToolMessage):
+        return _tool_result_text(message)
+    if isinstance(message, AIMessage):
+        content = message.content
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict) and item.get("type") in ("text", "output_text"):
+                    parts.append(str(item.get("text") or item.get("content") or ""))
+            return "\n".join(parts)
+        return str(content)
+    return ""
+
+
+def _tool_result_text(message: AnyMessage) -> str:
+    """提取 ToolMessage 的纯文本内容。
+
+    Args:
+        message: 任意 LangChain 消息对象。
+
+    Returns:
+        纯文本内容；非 ToolMessage 或内容不可文本化时返回空字符串。
+    """
+    if not isinstance(message, ToolMessage):
+        return ""
+    if isinstance(message.content, str):
+        return message.content
+    if isinstance(message.content, list):
+        parts: list[str] = []
+        for item in message.content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and item.get("type") == "text":
+                parts.append(str(item.get("text") or ""))
+        return "\n".join(parts)
+    return str(message.content)
+
+
+def compress_messages_for_model(messages: list[AnyMessage]) -> list[AnyMessage]:
+    """对发送给模型的历史消息做滚动压缩。
+
+    只压缩「早期 + 超长」的消息文本（ToolMessage 的工具结果、AIMessage 的
+    过程文本）到前 ``TOOL_RESULT_HEAD`` 字符并追加截断标记。消息数量、顺序、
+    工具调用配对（AIMessage.tool_calls 为独立字段）全部保持不变。
+
+    Args:
+        messages: 清洗后的消息列表。
+
+    Returns:
+        压缩后的消息列表（未超长或属于最近窗口的消息原样保留）。
+    """
+    keep_from = max(0, len(messages) - KEEP_RECENT_MESSAGES)
+    compressed: list[AnyMessage] = []
+    for index, message in enumerate(messages):
+        if index < keep_from and isinstance(message, (ToolMessage, AIMessage)):
+            text = _message_text(message)
+            if len(text) > MAX_TOOL_RESULT_CHARS:
+                message = message.model_copy(
+                    update={"content": text[:TOOL_RESULT_HEAD] + _TOOL_TRUNCATION_MARK},
+                )
+        compressed.append(message)
+    return compressed
 
 
 def _text_from_content_block(block: dict[str, Any]) -> str:
@@ -246,6 +331,19 @@ def sanitize_message_for_model(message: AnyMessage) -> AnyMessage:
     if isinstance(message, AIMessage):
         return _sanitize_ai_message(message)
     if isinstance(message, BaseMessage):
+        if isinstance(message.content, list):
+            blocks = []
+            has_media = False
+            for item in message.content:
+                if isinstance(item, dict) and item.get("type") in {"image", "image_url", "file", "audio", "input_audio", "video"}:
+                    blocks.append(dict(item))
+                    has_media = True
+                else:
+                    text = item if isinstance(item, str) else _text_from_content_block(item) if isinstance(item, dict) else ""
+                    if text:
+                        blocks.append({"type": "text", "text": text})
+            if has_media:
+                return message.model_copy(update={"content": blocks})
         return message.model_copy(update={"content": sanitize_message_content(message.content)})
     return message
 
@@ -356,7 +454,33 @@ def sanitize_messages_for_model(messages: list[AnyMessage]) -> list[AnyMessage]:
         pending_tool_call_ids.clear()
         cleaned.append(message)
 
-    return cleaned
+    # Chat Completions providers commonly accept images only in user messages.
+    # Keep all tool results in their contiguous batch, then attach original media
+    # in a synthetic user message. Never alter the persisted ToolMessage.
+    outgoing = []
+    media = []
+    for message in cleaned:
+        if not isinstance(message, ToolMessage) and media:
+            outgoing.append(HumanMessage(content=media, additional_kwargs={"read_file_media_result": True}))
+            media = []
+        if isinstance(message, ToolMessage) and isinstance(message.content, list):
+            blocks = [b for b in message.content if isinstance(b, dict) and b.get("type") in {"image", "image_url", "file", "audio", "input_audio", "video"}]
+            if blocks:
+                path = message.additional_kwargs.get("read_file_path", message.name or "tool")
+                if os.getenv("XIHE_MAIN_VISION", "1").lower() in {"0", "false", "no"}:
+                    # 主模型无视觉能力（如 MiMo 通道）：直接发图片块会被模型服务端
+                    # 以 400 拒绝。改为文本提示，引导模型用 inspect_image（视觉模型）
+                    # 读图并转写，避免任务因多模态参数错误中断。
+                    media.extend([{"type": "text", "text": f"Original media from {path} is not viewable by this model; use inspect_image to read it."}])
+                else:
+                    media.extend([{"type": "text", "text": f"Original media from {path}:"}, *blocks])
+                text = sanitize_message_content(message.content)
+                outgoing.append(message.model_copy(update={"content": text or f"Original media from {path} is attached after the tool-result batch."}))
+                continue
+        outgoing.append(message)
+    if media:
+        outgoing.append(HumanMessage(content=media, additional_kwargs={"read_file_media_result": True}))
+    return outgoing
 
 
 def _message_changed(before: AnyMessage, after: AnyMessage) -> bool:
@@ -389,22 +513,23 @@ class MessageSanitizeMiddleware(AgentMiddleware):
     state_schema = AgentState
 
     def _clean_request(self, request: ModelRequest[Any]) -> ModelRequest[Any]:
-        """对 ModelRequest 中的消息执行兼容清洗。
+        """对 ModelRequest 中的消息执行兼容清洗 + 上下文滚动压缩。
 
-        同时清洗 ``request.messages`` 和 ``request.state["messages"]``，
-        并在有变化时输出诊断日志。
+        先做 provider 兼容清洗（``sanitize_messages_for_model``），再对清洗结果
+        做滚动压缩（``compress_messages_for_model``：早期超长工具结果截断）。
+        两者都只作用于发送给模型的请求副本，不修改 checkpoint 历史。
 
         Args:
             request: 即将发送给模型的请求对象。
 
         Returns:
-            清洗后的新 ModelRequest（原对象不被修改）。
+            清洗 + 压缩后的新 ModelRequest（原对象不被修改）。
         """
-        cleaned_messages = sanitize_messages_for_model(list(request.messages))
+        cleaned_messages = compress_messages_for_model(sanitize_messages_for_model(list(request.messages)))
         state = dict(request.state)
         state_messages = state.get("messages")
         if isinstance(state_messages, list):
-            state["messages"] = sanitize_messages_for_model(state_messages)
+            state["messages"] = compress_messages_for_model(sanitize_messages_for_model(state_messages))
 
         changed_count = sum(
             1

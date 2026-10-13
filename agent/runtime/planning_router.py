@@ -39,7 +39,7 @@ RuntimeEventSink = Callable[[str, dict[str, Any]], None]
 
 def run_plan_response_task(
     *,
-    repo_url: str,
+    repo_url: str | None,
     prompt: str,
     thread_id: str | None = None,
     previous_plan_message: dict[str, Any] | None = None,
@@ -83,7 +83,7 @@ def run_plan_response_task(
     logger.info("开始生成技术方案：thread_id=%s repo_url=%s", thread_id, repo_url)
     record_event(thread_id, "created", "任务已创建", status="completed")
     record_event(thread_id, "repo", "解析仓库", status="in_progress")
-    repo = parse_repo_url(repo_url)
+    repo = parse_repo_url(repo_url) if repo_url else None
     record_event(thread_id, "repo", "解析仓库", status="completed")
 
     _effective_backend = backend_type
@@ -105,13 +105,13 @@ def run_plan_response_task(
     )
     store.upsert_thread(
         thread_id=thread_id,
-        title=(revision_prompt or prompt)[:80] or f"{repo.owner}/{repo.repo}",
+        title=(revision_prompt or prompt)[:80] or "本地任务方案",
         # user_prompt 只保存本轮用户真实输入，用于 Dashboard user_message 展示。
         # plan_source_prompt 是方案生成/后续实施的完整需求，不能混用为前端展示文本。
         user_prompt=revision_prompt or prompt,
-        repo_url=repo.clone_url,
-        repo_owner=repo.owner,
-        repo_name=repo.repo,
+        repo_url=repo.clone_url if repo else "",
+        repo_owner=repo.owner if repo else "",
+        repo_name=repo.repo if repo else "",
         latest_run_status="running",
         backend_type=backend_type,
         project_name=project_name,
@@ -125,7 +125,7 @@ def run_plan_response_task(
         thread_id=thread_id,
         repo=repo,
         backend_type=_effective_backend,
-    )
+    ) if repo else None
     repository_available = repository_path is not None
     repository_agent_path = (
         str(repository_path) if _effective_backend == "sandbox" and repository_path else None
@@ -136,7 +136,7 @@ def run_plan_response_task(
     agent = build_agent_for_runtime(
         thread_id=thread_id,
         task_kind="planning",
-        repo_url=repo.clone_url if repository_available else None,
+        repo_url=repo.clone_url if repo and repository_available else None,
         model_id=model_id,
         backend_type=backend_type,
     )
@@ -150,7 +150,7 @@ def run_plan_response_task(
             thread_id=thread_id,
             run_id=run_id,
             content=build_plan_user_content(
-                repo_url=repo.clone_url,
+                repo_url=repo.clone_url if repo else "",
                 prompt=plan_source,
                 previous_plan=previous_plan_text,
                 revision_prompt=revision_prompt,
@@ -167,7 +167,7 @@ def run_plan_response_task(
                 run_id=run_id,
                 interrupt_id=str(result.get("interrupt_id") or ""),
                 approval=result.get("approval") or {},
-                repo_url=repo.clone_url,
+                repo_url=repo.clone_url if repo else "",
                 backend_type=backend_type or "local",
                 task_kind="planning",
                 model_id=model_id,

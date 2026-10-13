@@ -207,12 +207,12 @@ def get_builtin_model() -> dict[str, Any]:
     from config.env_config import get_env, require_env
 
     overrides = _load_builtin()
-    api_key = overrides.get("api_key") or require_env("DEEPSEEK_API_KEY")
+    api_key = overrides.get("api_key") or get_env("MAIN_API_KEY") or require_env("DEEPSEEK_API_KEY")
     return {
         "id": "__builtin__",
         "name": overrides.get("name") or get_env("MAIN_MODEL", "deepseek-v4-pro"),
         "model_name": get_env("MAIN_MODEL", "deepseek-v4-pro"),
-        "api_base": overrides.get("api_base") or require_env("DEEPSEEK_BASE_URL"),
+        "api_base": overrides.get("api_base") or get_env("MAIN_BASE_URL") or require_env("DEEPSEEK_BASE_URL"),
         "api_key": api_key,
         "api_key_masked": _mask_key(api_key),
         "max_tokens": overrides.get("max_tokens", DEEPSEEK_V4_MAX_TOKENS),
@@ -285,8 +285,8 @@ def get_builtin_override() -> dict[str, Any] | None:
 
     return {
         "model_name": get_env("MAIN_MODEL", "deepseek-v4-pro"),
-        "api_base": overrides.get("api_base") or require_env("DEEPSEEK_BASE_URL"),
-        "api_key": overrides.get("api_key") or require_env("DEEPSEEK_API_KEY"),
+        "api_base": overrides.get("api_base") or get_env("MAIN_BASE_URL") or require_env("DEEPSEEK_BASE_URL"),
+        "api_key": overrides.get("api_key") or get_env("MAIN_API_KEY") or require_env("DEEPSEEK_API_KEY"),
         "max_tokens": overrides.get("max_tokens", DEEPSEEK_V4_MAX_TOKENS),
         "temperature": overrides.get("temperature", 1.1),
     }

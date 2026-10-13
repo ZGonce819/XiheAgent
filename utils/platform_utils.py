@@ -71,7 +71,7 @@ def detect_platform(repo_url: str) -> str:
     Raises:
         UnsupportedPlatformError: 无法识别平台时抛出。
     """
-    parsed = urlparse(repo_url.strip())
+    parsed = urlparse((repo_url or "").strip())
     hostname = (parsed.hostname or "").lower()
 
     if hostname in _PLATFORM_HOSTS:
