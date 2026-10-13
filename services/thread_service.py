@@ -297,8 +297,52 @@ def _local_work_dirs(thread: dict[str, Any]) -> tuple[str, str] | None:
         return None
 
 
+def _certified_final_answer(thread: dict[str, Any]) -> str | None:
+    """Verify the persisted final-answer certificate for a completed thread."""
+    if status_for_frontend(thread.get("latest_run_status")) != "finished":
+        return None
+    for event in reversed(thread.get("run_events") or []):
+        if not str(event.get("id", "")).split(":", 1)[-1].startswith("final-answer:"):
+            continue
+        try:
+            certified = json.loads(event.get("detail") or "{}")
+            if not isinstance(certified, dict):
+                continue
+            text = certified.get("text")
+            if isinstance(text, str) and hashlib.sha256(text.encode()).hexdigest() == certified.get("sha256"):
+                return text
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
+def thread_status_payload(thread: dict[str, Any]) -> dict[str, Any]:
+    """Polling DTO: no checkpoint, message, saved-view or version reads."""
+    from config.approval_runtime import get_pending_approval, public_approval
+
+    pending = get_pending_approval(str(thread["thread_id"]))
+    # Keep the existing public field allowlist, including claimed records only
+    # for status consumers that must wait rather than resubmit an approval.
+    approval = None
+    if pending is not None:
+        approval = public_approval({**pending, "claimed": False})
+        approval["claimed"] = bool(pending.get("claimed"))
+    events = thread.get("run_events") or []
+    fingerprint = hashlib.sha256(json.dumps(
+        [len(events), events[-128:]], sort_keys=True, ensure_ascii=False, default=str,
+    ).encode()).hexdigest()
+    return {
+        "id": thread["thread_id"],
+        "status": status_for_frontend(thread.get("latest_run_status")),
+        "updatedAt": iso_to_millis(thread.get("updated_at")),
+        "pendingApproval": approval,
+        "activityFingerprint": fingerprint,
+        "finalAnswer": _certified_final_answer(thread),
+    }
+
+
 def thread_payload(
-    thread: dict[str, Any], *, include_versions: bool = False
+    thread: dict[str, Any], *, include_versions: bool = False, include_messages: bool = True
 ) -> dict[str, Any]:
     """组装完整的 thread DTO，包含 messages、run_events、PR、状态等全部字段。
 
@@ -346,7 +390,7 @@ def thread_payload(
         ),
         "createdAt": iso_to_millis(thread.get("created_at")),
         "updatedAt": iso_to_millis(thread.get("updated_at")),
-        "messages": message_payload(thread),
+        **({"messages": message_payload(thread)} if include_messages else {}),
         "runEvents": run_events,
         "pr": pr_payload(thread),
         "latestPlan": None,
@@ -355,19 +399,7 @@ def thread_payload(
     }
     # The live graph's certified answer is authoritative. A checkpoint read
     # can return a parent snapshot after approval resume; do not grade that draft.
-    payload["finalAnswer"] = None
-    if payload["status"] == "finished":
-        for event in reversed(run_events):
-            if not str(event.get("id", "")).split(":", 1)[-1].startswith("final-answer:"):
-                continue
-            try:
-                certified = json.loads(event.get("detail") or "{}")
-                text = certified.get("text")
-                if isinstance(text, str) and hashlib.sha256(text.encode()).hexdigest() == certified.get("sha256"):
-                    payload["finalAnswer"] = text
-                    break
-            except (ValueError, TypeError):
-                continue
+    payload["finalAnswer"] = _certified_final_answer(thread)
     try:
         from config.approval_runtime import get_pending_approval, public_approval
 
@@ -376,7 +408,7 @@ def thread_payload(
         )
     except Exception:
         payload["pendingApproval"] = None
-    if include_versions:
+    if include_versions and include_messages:
         try:
             from agent.graph.graph import get_store
 
@@ -408,6 +440,4 @@ def thread_meta_payload(thread: dict[str, Any]) -> dict[str, Any]:
         去除 messages 后的 thread DTO 字典。
     """
 
-    payload = thread_payload(thread, include_versions=True)
-    payload.pop("messages", None)
-    return payload
+    return thread_payload(thread, include_messages=False)

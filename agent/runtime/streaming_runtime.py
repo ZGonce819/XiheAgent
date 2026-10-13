@@ -24,6 +24,7 @@ import logging
 import queue
 import re
 import threading
+import time
 from uuid import uuid4
 from collections.abc import Callable, Iterable
 from typing import Any
@@ -713,8 +714,64 @@ def _record_subagent(thread_id: str, run_id: str, subagent: Any, index: int) -> 
 
 STREAM_STALL_SECONDS = 300  # 主流程事件流超过该秒数无任何事件即判定挂起（180s 对 Excel/代码类读文件题偏短，调回 300s）
 # 注意：必须小于调用方静默检测（1200s），让软中断收尾先于调用方放弃执行
-REPAIR_STALL_SECONDS = 600   # 修复轮看门狗（放宽，让工具层 timeout 自己处理）
-REPAIR_MAX_SECONDS = 120    # 修复轮总时长上限（原 240s）
+REPAIR_STALL_SECONDS = 120
+REPAIR_MAX_SECONDS = 300
+
+
+def _recovery_limits(task_kind: str | None) -> AgentRunLimits:
+    limits = AgentRunLimits.from_env(task_kind)
+    return AgentRunLimits(
+        max_seconds=REPAIR_MAX_SECONDS,
+        max_tool_calls=min(30, limits.max_tool_calls),
+        task_kind=task_kind or "default",
+    )
+
+
+_execution_lock = threading.Lock()
+_execution_owners: dict[str, object] = {}
+
+
+class _StreamExecution:
+    """Own a thread across the caller and all raw pump cleanup."""
+
+    def __init__(self, thread_id: str):
+        self.thread_id = thread_id
+        self.pending = 1  # The caller retains ownership across repair sequencing.
+        self.streams: list[_WatchdogStream] = []
+        with _execution_lock:
+            if thread_id in _execution_owners:
+                raise RuntimeError(f"Stream execution is still active for thread {thread_id}")
+            _execution_owners[thread_id] = self
+
+    def wrap(self, raw: Any, **kwargs: Any) -> Any:
+        try:
+            stream = _watchdog_stream(raw, **kwargs)
+        except BaseException:
+            # Even a wrapper-construction failure must clean up the raw stream.
+            stream = _WatchdogStream(raw)
+            self._track(stream)
+            raise
+        self._track(stream)
+        return stream
+
+    def _track(self, stream: _WatchdogStream) -> None:
+        with _execution_lock:
+            self.pending += 1
+        stream._on_cleanup = self.release
+        self.streams.append(stream)
+
+    def release(self) -> None:
+        with _execution_lock:
+            self.pending -= 1
+            if self.pending == 0:
+                del _execution_owners[self.thread_id]
+
+    def finish(self) -> None:
+        try:
+            for stream in self.streams:
+                stream.stop_and_wait()
+        finally:
+            self.release()
 
 
 class _WatchdogStream:
@@ -731,52 +788,116 @@ class _WatchdogStream:
     AttributeError。这里通过 ``output`` property 转发到底层原始 stream，
     保持对调用方透明。
 
-    后台线程在超时中断后会留在原地（无法安全终止阻塞中的 socket 读），
-    以 daemon 方式运行随 serve 进程退出；该场景为罕见故障，不阻塞正常路径。
+    阻塞中的底层读取无法安全强杀；恢复前必须确认后台迭代已退出。
     """
 
-    def __init__(self, stream: Iterable[Any], idle_limit: float = STREAM_STALL_SECONDS):
+    def __init__(self, stream: Iterable[Any], idle_limit: float = STREAM_STALL_SECONDS,
+                 max_seconds: float | None = None):
         self._stream = stream
         self._idle_limit = idle_limit
+        self._max_seconds = max_seconds
+        self._pump_thread = None
+        self._stopped = threading.Event()
+        self._on_cleanup: Callable[[], None] | None = None
+
+    def _cleanup(self, iterator: Any = None) -> None:
+        try:
+            # GraphRunStream.abort closes its graph iterator; closing only
+            # the raw-event cursor does not. Ordinary generators use close.
+            abort = getattr(self._stream, "abort", None)
+            close = abort if callable(abort) else getattr(self._stream, "close", None)
+            try:
+                if callable(close):
+                    close()
+            finally:
+                if iterator is not None and iterator is not self._stream:
+                    iterator_close = getattr(iterator, "close", None)
+                    if callable(iterator_close):
+                        iterator_close()
+        except BaseException:
+            logger.exception("Raw event stream cleanup failed")
+        finally:
+            if self._on_cleanup is not None:
+                self._on_cleanup()
+
+    def stop_and_wait(self, timeout: float = 1.0) -> bool:
+        self._stopped.set()
+        if self._pump_thread is None:
+            # Construction/recording may fail before iteration starts.
+            worker = threading.Thread(target=self._cleanup, daemon=True, name="stream-watchdog-cleanup")
+            worker.start()
+            self._pump_thread = worker
+        self._pump_thread.join(timeout)
+        return not self._pump_thread.is_alive()
 
     @property
     def output(self) -> Any:
         # 转发 langgraph stream_events 返回对象的最终结果属性。
         return self._stream.output
 
+    @property
+    def interrupts(self) -> Any:
+        return getattr(self._stream, "interrupts", ())
+
     def __iter__(self) -> Any:
         q: "queue.Queue[Any]" = queue.Queue(maxsize=8)
-        done = threading.Event()
+        stopped = self._stopped
+        finished = object()
+        started = time.monotonic()
+
+        def _enqueue(item: Any) -> None:
+            while not stopped.is_set():
+                try:
+                    q.put(item, timeout=0.1)
+                    return
+                except queue.Full:
+                    continue
 
         def _pump() -> None:
+            iterator = None
             try:
-                for ev in self._stream:
-                    q.put(ev)
-            except BaseException as exc:  # noqa: BLE001 - 必须把底层流异常传给主线程
-                try:
-                    q.put(exc, timeout=5)
-                except Exception:  # noqa: BLE001
-                    pass
+                iterator = iter(self._stream)
+                for ev in iterator:
+                    if stopped.is_set():
+                        break
+                    _enqueue(ev)
+            except BaseException as exc:  # noqa: BLE001
+                _enqueue(exc)
             finally:
-                done.set()
+                self._cleanup(iterator)
+                _enqueue(finished)
 
-        threading.Thread(target=_pump, daemon=True, name="stream-watchdog-pump").start()
-        while True:
-            try:
-                item = q.get(timeout=self._idle_limit)
-            except queue.Empty as exc:
-                raise AgentRunLimitExceeded(
-                    f"事件流超过 {int(self._idle_limit)} 秒无任何事件（流式挂起），主动中断本轮"
-                ) from exc
-            if isinstance(item, BaseException):
-                raise item
-            yield item
-            if done.is_set() and q.empty():
-                return
+        worker = threading.Thread(target=_pump, daemon=True, name="stream-watchdog-pump")
+        worker.start()
+        self._pump_thread = worker
+        try:
+            while True:
+                wait = self._idle_limit
+                if self._max_seconds is not None and self._max_seconds > 0:
+                    remaining = self._max_seconds - (time.monotonic() - started)
+                    if remaining <= 0:
+                        raise AgentRunLimitExceeded(f"事件流运行已超过 {int(self._max_seconds)} 秒保护上限")
+                    wait = min(wait, remaining)
+                try:
+                    item = q.get(timeout=wait)
+                except queue.Empty as exc:
+                    if self._max_seconds and time.monotonic() - started >= self._max_seconds:
+                        raise AgentRunLimitExceeded(f"事件流运行已超过 {int(self._max_seconds)} 秒保护上限") from exc
+                    raise AgentRunLimitExceeded(
+                        f"事件流超过 {int(self._idle_limit)} 秒无任何事件（流式挂起），主动中断本轮"
+                    ) from exc
+                if item is finished:
+                    return
+                if isinstance(item, BaseException):
+                    raise item
+                yield item
+        finally:
+            stopped.set()
 
 
-def _watchdog_stream(stream: Iterable[Any], idle_limit: float = STREAM_STALL_SECONDS) -> _WatchdogStream:
-    return _WatchdogStream(stream, idle_limit=idle_limit)
+def _watchdog_stream(stream: Iterable[Any], idle_limit: float = STREAM_STALL_SECONDS,
+                     max_seconds: float | None = None) -> _WatchdogStream:
+    return _WatchdogStream(stream, idle_limit=idle_limit, max_seconds=max_seconds)
 
 
 def _consume_raw_event_stream(
@@ -1089,6 +1210,24 @@ def _run_agent_with_event_stream(
         AgentRunCancelledError: 用户在这一轮中途点了「停止」。
     """
 
+    execution = _StreamExecution(thread_id)
+    try:
+        return _run_owned_event_stream(
+            agent=agent, thread_id=thread_id, run_id=run_id, content=content,
+            task_kind=task_kind, event_sink=event_sink, checkpoint_id=checkpoint_id,
+            resume_decisions=resume_decisions, repair_used=repair_used,
+            max_repairs=max_repairs, execution=execution,
+        )
+    finally:
+        execution.finish()
+
+
+def _run_owned_event_stream(
+    *, agent: Any, thread_id: str, run_id: str, content: str,
+    task_kind: str | None, event_sink: StreamEventSink | None,
+    checkpoint_id: str | None, resume_decisions: list[dict[str, Any]] | None,
+    repair_used: int, max_repairs: int, execution: _StreamExecution,
+) -> dict[str, Any]:
     configurable = {"thread_id": thread_id}
     if checkpoint_id:
         configurable["checkpoint_id"] = checkpoint_id
@@ -1099,14 +1238,14 @@ def _run_agent_with_event_stream(
 
         graph_input = Command(resume={"decisions": resume_decisions})
     run_config = {"configurable": configurable}
+    max_seconds = AgentRunLimits.from_env(task_kind).max_seconds
     stream = agent.stream_events(
         graph_input,
         version="v3",
         config=run_config,
     )
-    # 流式挂起看门狗：langgraph/模型流同步迭代阻塞时调用方无法感知，
-    # 包装后事件间隔超过 STREAM_STALL_SECONDS 即主动中断，走软中断收尾。
-    stream = _watchdog_stream(stream)
+    # 流式挂起看门狗：同时限制单轮总时长，避免底层模型持续产出事件绕过 wall-clock guard。
+    stream = execution.wrap(stream, max_seconds=max_seconds)
     record_event(thread_id, "model", "调用大模型", kind="other", status="in_progress")
     # raw protocol events 是当前版本里唯一能拿到 token/chunk 的通道。
     # 这里同时解析 text-delta 和 write_todos 的 tool_call_chunk，保证正文和任务计划都能流式更新。
@@ -1127,31 +1266,33 @@ def _run_agent_with_event_stream(
             status="error",
             detail=str(exc),
         )
-        # 软中断自修复：不直接作废本轮，而是把"超时"作为一条用户指令注入，
-        # 用同一 checkpoint 恢复运行，让模型基于已有证据自行收尾给出最终答案。
-        # 只允许一次修复轮；修复轮仍挂起则从 checkpoint 抽最后一条 assistant 兜底。
+        if not stream.stop_and_wait():
+            record_event(
+                thread_id, "agent:stream-active", "原事件流尚未退出，停止自动恢复",
+                kind="other", status="error", detail=str(exc),
+            )
+            raise
         if repair_used < max_repairs:
-            # F: 主动丢弃旧 stream 引用，帮助 GC 回收底层卡死的 HTTP/SSE 连接，
-            # 避免修复轮复用同一个半死的 TCP 连接继续挂起。
             stream = None
             repair_msg = (
-                "你上一轮运行已超过运行保护上限被强制中断。现在禁止调用任何工具，"
-                "不要发起任何搜索/文件读取/代码执行；直接基于当前已有消息和证据，"
-                "用一句话给出最终答案。如果证据不足，给出最可能的答案并标注不确定性。"
+                "上一轮触发运行保护，当前进入有界恢复阶段。保留原始任务及输出格式要求。"
+                "先检查已有证据；证据充分时直接提交最终答案，仍须通过独立校验。"
+                "证据不足时只补查具体缺口，允许读取指定附件或核对必要的来源与计算。"
+                "不要重复失败的查询，不得猜测附件内容或将中间进度当作最终答案。"
+                "无法补齐证据时明确说明缺口，不得声称已完成验证。"
             )
             try:
                 repair_stream = agent.stream_events(
-                    {"messages": [{"role": "user", "content": repair_msg}]},
+                    {"messages": [{"role": "system", "content": repair_msg}]},
                     version="v3",
                     config=run_config,
                 )
                 # 修复轮看门狗与时间预算同步调短，避免在脏连接上干等。
-                repair_stream = _watchdog_stream(repair_stream, idle_limit=REPAIR_STALL_SECONDS)
-                repair_limits = AgentRunLimits(
+                repair_stream = execution.wrap(
+                    repair_stream, idle_limit=REPAIR_STALL_SECONDS,
                     max_seconds=REPAIR_MAX_SECONDS,
-                    max_tool_calls=5,
-                    task_kind=task_kind or "default",
                 )
+                repair_limits = _recovery_limits(task_kind)
                 tool_call_index, subagent_index, saw_assistant_text = _consume_raw_event_stream(
                     stream=repair_stream,
                     thread_id=thread_id,
@@ -1171,49 +1312,15 @@ def _run_agent_with_event_stream(
                     detail=str(exc),
                 )
             except AgentRunLimitExceeded as repair_exc:
-                # C: 修复轮也挂起。不再硬失败——从 checkpoint 抽最后一条 assistant
-                # 中间输出作为降级最终答案返回，整题至少有个结果，不会被判成 error。
+                # 修复轮仍挂起时不能把 checkpoint 中的中间文本冒充最终答案。
                 record_event(
                     thread_id,
                     "agent:run-limit",
-                    "修复轮仍挂起，从 checkpoint 抽取最后一条 assistant 输出作为降级答案",
+                    "修复轮仍挂起，未生成可验证的最终答案",
                     kind="other",
-                    status="warning",
+                    status="error",
                     detail=str(repair_exc),
                 )
-                fallback_msgs: list[Any] = []
-                try:
-                    snapshot = agent.get_state(run_config)
-                    snap_values = getattr(snapshot, "values", None) or {}
-                    hist = snap_values.get("messages", []) if isinstance(snap_values, dict) else []
-                    from utils.message_utils import extract_final_assistant_text
-                    fallback_text = ""
-                    for m in reversed(hist):
-                        mtype = getattr(m, "type", None) or (m.get("role") if isinstance(m, dict) else None)
-                        if mtype in ("ai", "assistant"):
-                            fallback_text = extract_final_assistant_text([m]) or ""
-                            if fallback_text:
-                                break
-                    if fallback_text:
-                        fallback_msgs = [{"role": "assistant", "type": "ai", "content": fallback_text}]
-                except Exception:
-                    fallback_msgs = []
-                if fallback_msgs:
-                    record_event(
-                        thread_id,
-                        f"final-answer:{run_id}",
-                        "已校验最终答案（降级：checkpoint 抽取）",
-                        kind="other",
-                        status="completed",
-                        detail=json.dumps({"fallback": True}, ensure_ascii=False),
-                    )
-                    return {
-                        "messages": fallback_msgs,
-                        "raw_output": {"messages": hist, "_fallback_from_checkpoint": True},
-                        "interrupted": False,
-                    }
-                # 连 checkpoint 都抽不出 assistant 文本，才硬失败
-                record_event(thread_id, "model", "调用大模型", kind="other", status="error", detail=str(repair_exc))
                 raise
         else:
             record_event(thread_id, "model", "调用大模型", kind="other", status="error", detail=str(exc))

@@ -32,6 +32,7 @@ dependencies = [
     # HTTP & Utilities
     "python-multipart>=0.0.6",
     "Pillow>=10.4.0",  # Image evidence resizing and colour separation
+    "openpyxl>=3.1.0",  # Read workbook attachments as tables
     "httpx>=0.26.0",  # For async HTTP requests (SSRF-safe)
     "python-dotenv>=1.0.0",  # Environment variable loading
     

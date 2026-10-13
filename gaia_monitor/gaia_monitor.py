@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 BASE = r"D:\Bemyself\Python\xihe"
 JSON_PATH = os.path.join(BASE, "gaia_mimo_delegation_v4_retry_20261007.json")
-LOG_RETRY = os.path.join(BASE, "logs", "gaia_retry_rotation_20261007.log")
+LOG_RETRY = os.path.join(BASE, "logs", "ordered_evaluate.log")
 # serve 的 app 日志（httpx/agent 中间件）统一落 backend.log；旧 serve 曾把 stderr
 # 重定向进 gaia_api_rotation_20261007.err，新 serve 不再写该文件，故改读 backend.log。
 LOG_API = os.path.join(BASE, "logs", "backend.log")
@@ -109,13 +109,20 @@ def read_json():
 
 
 def thread_detail(thread_full):
-    """从 API 查线程实时状态（createdAt/updatedAt/messages/status）+ 最近消息摘要，失败返回 None。"""
+    """轮询轻量状态；仅终态读取消息摘要，失败返回 None。"""
     try:
         import urllib.request
         url = "http://127.0.0.1:2026/api/v1/threads/%s" % thread_full
-        with urllib.request.urlopen(url, timeout=6) as resp:
+        with urllib.request.urlopen(url + "/status", timeout=6) as resp:
             t = json.load(resp)
-        msgs = t.get("messages") or []
+        detail = {}
+        if t.get("status") in {"finished", "error", "failed", "cancelled"}:
+            try:
+                with urllib.request.urlopen(url, timeout=6) as resp:
+                    detail = json.load(resp)
+            except Exception:
+                pass  # Preserve status even if terminal history times out.
+        msgs = detail.get("messages") or []
         recent = []
         for m in msgs[-6:]:
             texts = []
@@ -133,11 +140,13 @@ def thread_detail(thread_full):
                 "full": body[:30000],  # 弹窗查看完整用；30k 上限防面板轮询传输过载
             })
         return {
-            "created_at_ms": t.get("createdAt"),
+            "created_at_ms": detail.get("createdAt"),
             "updated_at_ms": t.get("updatedAt"),
             "status": t.get("status"),
-            "messages_count": len(msgs),
-            "model": t.get("model"),
+            "activity_fingerprint": t.get("activityFingerprint"),
+            "pending_approval": t.get("pendingApproval"),
+            "messages_count": len(msgs) if detail else None,
+            "model": detail.get("model"),
             "recent_messages": recent,
         }
     except Exception:
@@ -211,8 +220,8 @@ def update_timers(running):
                     if td2.get("status") == "running":
                         cur = r2.get("task_id")
                         break
-            active = bool(eval_ok and cur and tid == cur)
-            queued = bool(eval_ok and cur and tid != cur)
+            active = bool(eval_ok and api_status == "running")
+            queued = bool(eval_ok and not active and api_status in {"idle", "interrupted"})
 
             # 兜底：API 90s 没刷新 → 强制 inactive。但 thread status=running 时
             # serve 明确认为它还在跑（可能模型正在长推理/工具调用，SSE 不推 chunk），

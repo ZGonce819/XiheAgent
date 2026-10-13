@@ -48,10 +48,18 @@ logger = logging.getLogger(__name__)
 #   - 最后 KEEP_RECENT_MESSAGES 条消息保持完整，保证最近证据不被压缩。
 # 阈值按子 Agent（委派任务）实际规模收紧：单条 2500 字符即截断、早于窗口的
 # AI 过程文本一并截断，控制委派链路上每轮全量重发的 token 体积。
-MAX_TOOL_RESULT_CHARS = 2500
-TOOL_RESULT_HEAD = 700
+MAX_TOOL_RESULT_CHARS = 1200
+TOOL_RESULT_HEAD = 500
 KEEP_RECENT_MESSAGES = 6
 _TOOL_TRUNCATION_MARK = "\n\n[... 该工具结果过长，已按上下文滚动压缩截断；需要完整内容时请针对性补查 ...]"
+# 成本修复（2026-10-13）：
+# 1) 窗口内（最近 KEEP_RECENT_MESSAGES 条）单条超过 RECENT_TOOL_RESULT_CHARS 也压缩——
+#    长任务里最近轮次的工具结果往往最大，原逻辑“窗口内全量保留”会让它们全量重发；
+# 2) 增加总上下文预算硬上限：超预算时从最早的窗口外消息开始二次截断到 _TOOL_HEAD_MIN。
+#    0 表示关闭该兜底。60000 字符 ≈ 约 2 万 token 的文本体积，正常轮次不触发。
+RECENT_TOOL_RESULT_CHARS = 4000
+_TOOL_HEAD_MIN = 300
+MAX_TOTAL_CONTEXT_CHARS = 60000
 
 
 def _message_text(message: AnyMessage) -> str:
@@ -101,9 +109,12 @@ def _tool_result_text(message: AnyMessage) -> str:
 def compress_messages_for_model(messages: list[AnyMessage]) -> list[AnyMessage]:
     """对发送给模型的历史消息做滚动压缩。
 
-    只压缩「早期 + 超长」的消息文本（ToolMessage 的工具结果、AIMessage 的
-    过程文本）到前 ``TOOL_RESULT_HEAD`` 字符并追加截断标记。消息数量、顺序、
-    工具调用配对（AIMessage.tool_calls 为独立字段）全部保持不变。
+    窗口外消息单条超过 ``MAX_TOOL_RESULT_CHARS`` 即截断到 ``TOOL_RESULT_HEAD``；
+    窗口内（最近 ``KEEP_RECENT_MESSAGES`` 条）单条超过 ``RECENT_TOOL_RESULT_CHARS``
+    也截断（保留最近证据开头，但挡住真正巨大的结果）。之后再执行总上下文预算
+    兜底（``_enforce_total_budget``），从最早的窗口外消息开始二次截断，给单次
+    请求的文本体积一个硬上限。消息数量、顺序、工具调用配对（AIMessage.tool_calls
+    为独立字段）全部保持不变。
 
     Args:
         messages: 清洗后的消息列表。
@@ -114,14 +125,45 @@ def compress_messages_for_model(messages: list[AnyMessage]) -> list[AnyMessage]:
     keep_from = max(0, len(messages) - KEEP_RECENT_MESSAGES)
     compressed: list[AnyMessage] = []
     for index, message in enumerate(messages):
-        if index < keep_from and isinstance(message, (ToolMessage, AIMessage)):
+        if isinstance(message, (ToolMessage, AIMessage)):
             text = _message_text(message)
-            if len(text) > MAX_TOOL_RESULT_CHARS:
+            # 窗口外按收紧阈值压；窗口内只压真正巨大的结果（保留最近证据的开头）。
+            threshold = MAX_TOOL_RESULT_CHARS if index < keep_from else RECENT_TOOL_RESULT_CHARS
+            if len(text) > threshold:
                 message = message.model_copy(
                     update={"content": text[:TOOL_RESULT_HEAD] + _TOOL_TRUNCATION_MARK},
                 )
         compressed.append(message)
+    if MAX_TOTAL_CONTEXT_CHARS > 0:
+        _enforce_total_budget(compressed, keep_from)
     return compressed
+
+
+def _enforce_total_budget(messages: list[AnyMessage], keep_from: int) -> None:
+    """总上下文预算兜底：对最早的窗口外消息做二次截断（原地替换列表元素）。
+
+    只修改 ToolMessage/AIMessage 的 content 文本，消息数量、顺序与
+    tool_calls/tool_call_id 配对保持不变；最近窗口（``keep_from`` 起）优先保留完整。
+
+    Args:
+        messages: 压缩后的消息列表（将被原地修改）。
+        keep_from: 最近窗口起点索引，早于该索引的消息才参与二次截断。
+    """
+    total = sum(len(_message_text(m)) for m in messages if isinstance(m, (ToolMessage, AIMessage)))
+    if total <= MAX_TOTAL_CONTEXT_CHARS:
+        return
+    order = [i for i, m in enumerate(messages)
+             if i < keep_from and isinstance(m, (ToolMessage, AIMessage))]
+    for i in order:
+        if total <= MAX_TOTAL_CONTEXT_CHARS:
+            break
+        m = messages[i]
+        text = _message_text(m)
+        if len(text) <= _TOOL_HEAD_MIN:
+            continue
+        new_content = text[:_TOOL_HEAD_MIN] + _TOOL_TRUNCATION_MARK
+        total -= len(text) - len(new_content)
+        messages[i] = m.model_copy(update={"content": new_content})
 
 
 def _text_from_content_block(block: dict[str, Any]) -> str:

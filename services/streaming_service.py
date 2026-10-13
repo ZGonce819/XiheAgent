@@ -347,7 +347,7 @@ def build_streaming_response(
             )
 
         if use_redis:
-            ensure_consumer_group(thread_id)
+            await asyncio.to_thread(ensure_consumer_group, thread_id)
 
         thread = threading.Thread(
             target=worker,
@@ -387,7 +387,7 @@ def build_streaming_response(
                         yield ": keep-alive\n\n"
         finally:
             if use_redis:
-                cleanup_stream(thread_id)
+                await asyncio.to_thread(cleanup_stream, thread_id)
 
     return StreamingResponse(
         event_iter(),

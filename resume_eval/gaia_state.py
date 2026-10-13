@@ -46,8 +46,12 @@ def validate_record(record: dict) -> dict:
         error = final_answer_error(str(record.get("answer") or ""))
         if error:
             record.update(final_status="error", error=f"invalid_final_answer: {error}")
-    if record.get("final_status") != "finished" or record.get("error"):
+    validation_failed = any(marker in str(record.get("error") or "") for marker in (
+        "最终答案校验失败", "最终答案校验器不可用", "invalid_final_answer", "缺少有效校验凭证",
+    ))
+    if record.get("final_status") != "finished" or validation_failed:
         record["normalized_match"] = False
+    record["execution_succeeded"] = record.get("final_status") == "finished" and not record.get("error")
     return record
 
 
@@ -127,10 +131,8 @@ def write_checkpoint(path: Path, snapshot: dict | None = None, updates: dict | N
             row = dict(source)
             row.update(recovered.get(row.get("thread_id"), {}))
             row = validate_record(row)
-            row["normalized_match"] = bool(
-                row.get("final_status") == "finished" and not row.get("error")
-                and normalized_match(row.get("answer"), row.get("expected"))
-            )
+            row["normalized_match"] = normalized_match(row.get("answer"), row.get("expected"))
+            row = validate_record(row)
             _tid = str(row.get("task_id") or "")
             _adj = manual_adj.get(_tid)
             if _adj and "normalized_match" in _adj:

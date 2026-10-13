@@ -40,6 +40,7 @@ from deepagents.backends.protocol import (
     WriteResult,
 )
 from deepagents.backends.sandbox import BaseSandbox
+from deepagents.backends.utils import slice_read_response
 
 from .command_policy import evaluate_command
 from .permissions import normalize_safe_command
@@ -95,8 +96,13 @@ PROJECT_SET_DIR_NAME = ".project-set"
 # 匹配命令中的 Windows 绝对路径（如 D:\xxx）
 _DRIVE_PATH_RE = re.compile(r"(?<![A-Za-z0-9])([A-Za-z]:[\\/][^\s\"';&|<>]*)")
 # 匹配命令中的虚拟路径（如 /projects/my-repo），用于自动转换为真实路径
+_VIRTUAL_ROOT_PATTERN = r"(?:skills-global|skills-set|projects|skills|policies|reviews|runtimes|tmp|logs)"
 _VIRTUAL_PATH_RE = re.compile(
-    r"(?<![A-Za-z0-9])/(skills-global|skills-set|projects|skills|policies|reviews|runtimes|tmp|logs)(/[^\s\"';&|<>]*)?"
+    # Consume existing quotes together with the path, including spaces. Keep
+    # Python string delimiters intact inside commands such as python -c "...".
+    rf"(?P<quote>[\"'])(?P<quoted>/{_VIRTUAL_ROOT_PATTERN}(?:/[^\"'\r\n]*)?)(?P=quote)"
+    rf"|(?<![A-Za-z0-9_./\\-])(?P<unquoted>/{_VIRTUAL_ROOT_PATTERN}"
+    r"(?:/[^\s\"';&|<>(){},\[\]]*)?)(?=$|[\s\"';&|<>(){},\[\]])"
 )
 _RELATIVE_PROJECTS_PATH_RE = re.compile(
     r"(?<![A-Za-z0-9_./\\-])projects[\\/](?=[^\s\"';&|<>]+)"
@@ -443,9 +449,8 @@ class LocalShellBackend(BaseSandbox):
     def read(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
         """读取文件内容（支持偏移和行数限制）。
 
-        默认先按 UTF-8 解码，失败后回退到 Latin-1。
-        这个回退策略保证模型在遇到非 UTF-8 文件时仍能看到内容，
-        避免因为一次编码异常中断整个 Agent 任务。
+        XLSX 工作簿先解析为带工作表名、行号的 TSV 表格；公式显示为表达式，
+        不执行或声称计算公式。普通文本按 UTF-8 解码，失败后回退到 Latin-1。
 
         Args:
             file_path: 虚拟路径。
@@ -461,6 +466,22 @@ class LocalShellBackend(BaseSandbox):
                 return ReadResult(error=f"文件不存在：{file_path}")
             if resolved.is_dir():
                 return ReadResult(error=f"当前路径是目录，不能读取为文件：{file_path}")
+            if resolved.suffix.lower() in {".xlsx", ".xlsm"}:
+                try:
+                    text = self._read_workbook(resolved)
+                except Exception as exc:
+                    logger.warning("工作簿读取失败：%s: %s", file_path, _mask_token(str(exc)))
+                    return ReadResult(error=f"工作簿读取失败：{file_path}: {_mask_token(str(exc))}")
+                stat = resolved.stat()
+                return slice_read_response(
+                    {
+                        "content": text,
+                        "encoding": "utf-8",
+                        "created_at": datetime.fromtimestamp(stat.st_ctime, UTC).isoformat(),
+                        "modified_at": datetime.fromtimestamp(stat.st_mtime, UTC).isoformat(),
+                    },
+                    offset, limit,
+                )
             raw = resolved.read_bytes()
             # DeepAgents expects complete base64 for media. Never decode binary
             # images/PDFs as Latin-1 or apply text line pagination to their bytes.
@@ -491,6 +512,51 @@ class LocalShellBackend(BaseSandbox):
             )
         except PermissionError as exc:
             return ReadResult(error=str(exc))
+
+    @staticmethod
+    def _read_workbook(path: Path) -> str:
+        """Render workbook cells deterministically without interpreting formulas.
+
+        TSV preserves column positions, including empty cells. JSON escaping for
+        embedded control characters keeps one worksheet row on one output line.
+        """
+        from openpyxl import load_workbook
+        from openpyxl.utils import get_column_letter
+
+        workbook = load_workbook(path, read_only=True, data_only=False)
+        try:
+            lines = ["Workbook tables (TSV; formulas are expressions, not calculated values)"]
+            for sheet in workbook.worksheets:
+                lines.append(f"Sheet: {json.dumps(sheet.title, ensure_ascii=False)}")
+                # Some exporters write incorrect dimension metadata. Scan actual
+                # XML rows rather than silently omitting cells outside that range.
+                sheet.reset_dimensions()
+                rows = []
+                width = 0
+                for row_number, values in enumerate(sheet.iter_rows(values_only=True), 1):
+                    cells = []
+                    for value in values:
+                        if value is None:
+                            cell = ""
+                        elif hasattr(value, "isoformat"):
+                            cell = value.isoformat()
+                        else:
+                            cell = str(value)
+                        if any(char in cell for char in "\t\r\n"):
+                            cell = json.dumps(cell, ensure_ascii=False)
+                        cells.append(cell)
+                    if any(value is not None for value in values):
+                        width = max(width, len(cells))
+                        rows.append((row_number, cells))
+                if not rows:
+                    lines.append("(empty sheet)")
+                    continue
+                lines.append("Row\t" + "\t".join(get_column_letter(i) for i in range(1, width + 1)))
+                for row_number, cells in rows:
+                    lines.append(str(row_number) + "\t" + "\t".join(cells + [""] * (width - len(cells))))
+            return "\n".join(lines)
+        finally:
+            workbook.close()
 
     def write(self, file_path: str, content: str) -> WriteResult:
         """新建文件。如果文件已存在则报错（修改请用 edit）。
@@ -1354,7 +1420,41 @@ class LocalShellBackend(BaseSandbox):
             return "echo %USERPROFILE%"
         if prepared.startswith("test -d "):
             return "echo ok"
+        if os.name == "nt":
+            prepared = self._prepare_multiline_python(prepared)
         return self._prepare_git_command(prepared)
+
+    @staticmethod
+    def _prepare_multiline_python(command: str) -> str:
+        """Keep literal newlines out of cmd /c while preserving Python blocks.
+
+        Encode only the -c argument, after path mapping and the original command's
+        policy checks. Shell operators outside that argument remain visible to
+        cmd; indentation, comments and percent signs inside it reach Python intact.
+        """
+        match = re.fullmatch(
+            r'(?P<cd>\s*cd\s+(?:/d\s+)?(?:"[^"\r\n]*"|[^&|<>\r\n]+)\s*&&)?'
+            r'(?P<prefix>\s*python(?:\.exe)?\s+(?:-[uB]\s+)*-c\s+)'
+            r'(?:"(?P<double>(?:\\.|[^"\\])*)"|\'(?P<single>[^\']*)\')'
+            r'(?P<suffix>[ \t]*(?:(?:&&|\|\||[|<>]).*)?)',
+            command, flags=re.DOTALL | re.IGNORECASE,
+        )
+        if match is None:
+            return command
+        code = match.group("double")
+        if code is None:
+            code = match.group("single")
+        else:
+            code = code.replace('\\"', '"')
+        if "\n" not in code and "\r" not in code:
+            return command
+        encoded = base64.b64encode(code.encode("utf-8")).decode("ascii")
+        # UTF-8 mode also makes captured Unicode output match execute's decoder.
+        prefix = match.group("prefix").replace("-c", "-X utf8 -c")
+        return (
+            f'{match.group("cd") or ""}{prefix}"import base64; exec(compile(base64.b64decode(\'{encoded}\'), '
+            f'\'<string>\', \'exec\'))"{match.group("suffix")}'
+        )
 
     def _normalize_command_for_projects_cwd(self, command: str) -> str:
         """修正默认在 /projects 目录执行时容易产生的重复相对路径。
@@ -1436,23 +1536,12 @@ class LocalShellBackend(BaseSandbox):
         Returns:
             替换后的带引号真实路径字符串。
         """
-        roots = self._local_virtual_roots() if self.local_folder_mode else {
-            "projects": self.projects_dir,
-            "skills": self.skills_dir,
-            "skills-global": self.global_skills_dir,
-            "skills-set": self.project_set_skills_dir,
-            "policies": self.policies_dir,
-            "reviews": self.reviews_dir,
-            "runtimes": self.runtimes_dir,
-            "tmp": self.tmp_dir,
-            "logs": self.logs_dir,
-        }
-        root = roots[match.group(1)]
-        suffix = (match.group(2) or "").lstrip("/")
-        path = (root / Path(*suffix.split("/"))).resolve() if suffix else root
-        if not self._is_under_root(path) and not self._is_under_global(path):
-            raise PermissionError(f"virtual path escapes workspace: {match.group(0)}")
-        return f'"{path}"'
+        virtual_path = match.group("quoted") or match.group("unquoted")
+        path = self._resolve_virtual_path(virtual_path)
+        # Forward slashes work on Windows and do not become Python string escapes
+        # (e.g. \t or \b). Reuse existing quotes instead of nesting new quotes.
+        quote = match.group("quote") or '"'
+        return f"{quote}{path.as_posix()}{quote}"
 
     def _execution_env(self) -> dict[str, str]:
         """构造子进程环境变量：注入 venv、Git 安全配置、Gitee 认证信息。

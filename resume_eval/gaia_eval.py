@@ -98,6 +98,8 @@ def normalized_match(answer: object, expected: object) -> bool:
 def extract_answer(thread: dict) -> str:
     if isinstance(thread.get("finalAnswer"), str):
         return thread["finalAnswer"].strip()
+    if thread.get("status") != "finished":
+        return ""
     messages = thread.get("messages", [])
     if not messages or messages[-1].get("author") != "agent":
         return ""
@@ -136,11 +138,10 @@ _TEMPORARY_ERROR_PATTERNS = (
     r"Read timed out",
     r"Too Many Requests",
     r"thread_silent_hang",
-    r"sse_error",
-    r"approval_sse_error",
-    r"approval_error",
-    r"stream_error",
-    r"worker:",
+    r"事件流超过 \d+ 秒无任何事件",
+    r"sse_incomplete",
+    r"peer closed connection",
+    r"connection.*(?:reset|closed|refused)",
     r"Max retries exceeded",
     r"429",
     r"500",
@@ -252,6 +253,7 @@ def run_task(
         if resume_used else f"{base_url}/api/v1/threads/stream-message"
     )
     started = time.perf_counter()
+    started_at_utc = datetime.now(timezone.utc).isoformat()
     events: list[dict] = []
     thread_id = resume_thread_id if resume_used else None
     error = None
@@ -343,14 +345,34 @@ def run_task(
         # 阈值（1200s）必须大于 serve 侧事件流看门狗（600s）+ 软中断收尾（240s），
         # 让 serve 先完成软中断收尾出答案，而不是被评测侧抢先放弃。
         SILENT_HANG_S = 1200
-        last_activity_at = None
+        last_activity_at = time.monotonic()
+        last_activity_signature = None
         while True:
             try:
-                detail = requests.get(f"{base_url}/api/v1/threads/{thread_id}", timeout=30)
+                detail = requests.get(f"{base_url}/api/v1/threads/{thread_id}/status", timeout=30)
                 detail.raise_for_status()
                 thread = detail.json()
                 failures = 0
                 pending = thread.get("pendingApproval")
+                if thread.get("status") in {"error", "failed", "cancelled"}:
+                    error = error or f"thread_terminal: {thread['status']}"
+                    break
+                # Check every waiting path, including approval recovery and
+                # snapshots refreshed after backoff. Observations are not activity.
+                run_events = thread.get("runEvents") or []
+                signature = (thread.get("status"), thread.get("updatedAt"),
+                             (pending or {}).get("id"), (pending or {}).get("claimed"),
+                             thread.get("activityFingerprint"), len(run_events), json.dumps(
+                    run_events[-128:], sort_keys=True, ensure_ascii=False, default=str,
+                ))
+                now = time.monotonic()
+                if signature != last_activity_signature:
+                    last_activity_signature = signature
+                    last_activity_at = now
+                elif now - last_activity_at > SILENT_HANG_S:
+                    error = (f"thread_silent_hang: 线程超过 {SILENT_HANG_S} 秒无更新"
+                             "（线程时间及工具事件均未变化），判定上游挂起")
+                    break
                 if (auto_approve and pending and not pending.get("claimed")
                         and thread.get("status") not in {"running", "finished"}):
                     # Scope approval strictly to this worker's own thread. Reuse the
@@ -368,31 +390,45 @@ def run_task(
                         break
                     if count:
                         time.sleep(min(300, 30 * 2 ** (count - 1)))
-                    approval_attempts[approval_id] = count + 1
+                        # Backoff may outlive the interrupt. Re-read before voting
+                        # rather than acting on a stale pendingApproval snapshot.
+                        detail = requests.get(f"{base_url}/api/v1/threads/{thread_id}/status", timeout=30)
+                        detail.raise_for_status()
+                        fresh = detail.json()
+                        if fresh.get("status") in {"error", "failed", "cancelled"}:
+                            thread = fresh
+                            error = error or f"thread_terminal: {fresh['status']}"
+                            break
+                        fresh_pending = fresh.get("pendingApproval") or {}
+                        if (fresh.get("status") in {"running", "finished"}
+                                or fresh_pending.get("claimed")
+                                or fresh_pending.get("id") != approval_id
+                                or fresh_pending.get("threadId") != thread_id):
+                            time.sleep(3)
+                            continue
+                        pending = fresh_pending
                     try:
-                        recover(base_url, pending, prompt)
-                        # Approval streams can end at another approval. Fetch fresh
-                        # state and handle the next ID before recording the answer.
-                        error = None
-                        stream_error = None
+                        recovery_status = recover(base_url, pending, prompt)
+                        # Accepted/running recovery is still in progress, not a
+                        # successful execution. Only completion clears failures.
+                        if recovery_status not in {"running", "claimed"}:
+                            error = None
+                            stream_error = None
                     except Exception as exc:
+                        approval_attempts[approval_id] = count + 1
                         message = f"{type(exc).__name__}: {exc}"
                         approval_errors.append(message)
                         error = f"approval_error: {message}"
                         emit(event="recovery_error", thread_id=thread_id, error=message)
+                    else:
+                        time.sleep(3)
+                    continue
+                if (auto_approve and pending and pending.get("claimed")
+                        and thread.get("status") not in {"running", "finished"}):
+                    time.sleep(3)
                     continue
                 if thread.get("status") != "running" or stream_error:
                     break
-                # 静默挂死检测：updatedAt 停止前进超过阈值 → 放弃本题
-                updated = thread.get("updatedAt")
-                if updated:
-                    if last_activity_at is None or updated > last_activity_at:
-                        last_activity_at = updated
-                    elif time.time() * 1000 - last_activity_at > SILENT_HANG_S * 1000:
-                        error = (f"thread_silent_hang: 线程超过 {SILENT_HANG_S} 秒无更新"
-                                 f"（updatedAt 静止于 {last_activity_at}），判定上游挂起")
-                        break
-                # No task wall-clock limit: only failed status requests are bounded.
                 time.sleep(3)
             except requests.RequestException as exc:
                 failures += 1
@@ -405,6 +441,14 @@ def run_task(
         if thread.get("status") == "finished" and not stream_error:
             error = None  # A transport interruption recovered from persisted state.
 
+    if (thread_id and thread.get("status") == "finished"
+            and not isinstance(thread.get("finalAnswer"), str) and "messages" not in thread):
+        try:
+            detail = requests.get(f"{base_url}/api/v1/threads/{thread_id}", timeout=30)
+            detail.raise_for_status()
+            thread = detail.json()
+        except requests.RequestException as exc:
+            error = error or f"thread_fetch: {type(exc).__name__}: {exc}"
     answer = extract_answer(thread)
     expected = str(row.get("Final answer") or "")
     result = validate_record({
@@ -430,18 +474,14 @@ def run_task(
     })
     if error and result.get("final_status") in {None, "running", "finished", "error"}:
         if answer:
-            # 模型已提交最终答案（可能被 validator 否决）：算跑完，命中与否看 match。
-            # 保留 error 字段用于追溯否决原因，但状态不降级为 error。
-            # 线程状态为 error 但确有答案（软中断收尾/修复轮写回）同样按跑完处理。
+            # 仅显式最终答案或已完成线程可提取答案，运行错误独立保留。
             result["final_status"] = "finished"
-            # 瞬时技术错误（网络/读超时/连接断开等）时答案由模型正常产出，应正常评分；
-            # 仅非瞬时错误（秒败/中断/绕圈等）答案可能不可信，强制保持 miss。
-            if not _is_temporary_error(error):
-                result["normalized_match"] = False
         else:
             result["final_status"] = "error"
             result["normalized_match"] = False
-    return result
+    result["started_at_utc"] = started_at_utc
+    result["completed_at_utc"] = datetime.now(timezone.utc).isoformat()
+    return validate_record(result)
 
 
 _MANUAL_ADJUDICATIONS = Path(__file__).with_name("manual_adjudications.json")
@@ -477,7 +517,7 @@ def main() -> None:
     parser.add_argument("--auto-approve", action=argparse.BooleanOptionalAction, default=True,
                         help="在评测进程内自动表决并恢复本题审批（默认开启）")
     parser.add_argument("--approval-max-retries", type=int, default=3,
-                        help="同一审批 ID 的最大尝试次数（默认 3）")
+                        help="同一审批 ID 的最大失败恢复次数（默认 3）")
     parser.add_argument("--retry-from", type=Path)
     parser.add_argument("--retry-status", action="append", default=[])
     parser.add_argument("--resume-from", type=Path, help="从已有结果文件续跑，跳过其中已完成的 task_id")

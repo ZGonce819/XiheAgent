@@ -50,37 +50,6 @@ def _cheat_block(commands) -> str | None:
     return None
 
 
-def recover(url: str, pending: dict, instruction: str):
-    commands = _pending_commands(pending)
-    block = _cheat_block(commands)
-    if block:
-        decision = "reject"
-        emit(event="vote", thread_id=pending["threadId"], approval_id=pending["id"],
-             action=decision, outcome={"commands": list(commands), "approve": 0,
-                                       "reject": 1, "decision": decision, "reason": block})
-        with requests.post(
-            f"{url}/api/v1/threads/{pending['threadId']}/approval",
-            json={"decision": decision, "approval_id": pending["id"]},
-            stream=True, timeout=(20, 120),
-        ) as response:
-            response.raise_for_status()
-            done = False
-            errors = []
-            for event, data in iter_sse(response):
-                if event == "error":
-                    errors.append(str(data.get("message") or data.get("detail") or data))
-                if event == "done":
-                    done = True
-                    break
-            if errors:
-                raise RuntimeError("approval_sse_error: " + "; ".join(errors))
-            if not done:
-                raise RuntimeError("审批恢复流提前结束，未确认恢复结果")
-        emit(event="resumed", thread_id=pending["threadId"], status="resumed")
-        return
-    outcome = vote_on_approval(pending, instruction=instruction)
-
-
 def read_json(path: Path, default):
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -92,14 +61,49 @@ def emit(**record):
     print(json.dumps({"time": datetime.now(UTC).isoformat(), **record}, ensure_ascii=True), flush=True)
 
 
+def _recovery_state(url: str, pending: dict) -> str:
+    """Read this thread's current state before retrying an exact approval."""
+    response = requests.get(f"{url}/api/v1/threads/{pending['threadId']}/status", timeout=20)
+    response.raise_for_status()
+    thread = response.json()
+    status = thread.get("status")
+    if status in {"error", "failed", "cancelled"}:
+        raise RuntimeError("审批恢复后服务端任务失败")
+    if status in {"running", "finished"}:
+        return status
+    current = thread.get("pendingApproval")
+    if current and current.get("threadId") == pending["threadId"]:
+        if current.get("id") != pending["id"]:
+            return "changed"
+        return "claimed" if current.get("claimed") else "pending"
+    raise RuntimeError("无法确认当前线程的待审批操作，未重复提交")
+
+
 def recover(url: str, pending: dict, instruction: str):
+    state = _recovery_state(url, pending)
+    if state != "pending":
+        return state
     commands = _pending_commands(pending)
     block = _cheat_block(commands)
     if block:
         decision = "reject"
-        emit(event="vote", thread_id=pending["threadId"], approval_id=pending["id"],
-             action=decision, outcome={"commands": list(commands), "approve": 0,
-                                       "reject": 1, "decision": decision, "reason": block})
+        outcome_state = {"commands": list(commands), "approve": 0, "reject": 1,
+                         "decision": decision, "reason": block}
+    else:
+        outcome = vote_on_approval(pending, instruction=instruction)
+        if not outcome.decided:
+            raise RuntimeError("审批评审未形成决定，稍后重试")
+        decision = "approve" if outcome.approved else "reject"
+        outcome_state = outcome.as_state_dict()
+    emit(event="vote", thread_id=pending["threadId"], approval_id=pending["id"],
+         action=decision, outcome=outcome_state)
+    # Voting can take minutes. Do not submit a stale decision after another
+    # worker has claimed this approval or resumed the thread.
+    state = _recovery_state(url, pending)
+    if state != "pending":
+        return state
+    errors = []
+    try:
         with requests.post(
             f"{url}/api/v1/threads/{pending['threadId']}/approval",
             json={"decision": decision, "approval_id": pending["id"]},
@@ -107,7 +111,6 @@ def recover(url: str, pending: dict, instruction: str):
         ) as response:
             response.raise_for_status()
             done = False
-            errors = []
             for event, data in iter_sse(response):
                 if event == "error":
                     errors.append(str(data.get("message") or data.get("detail") or data))
@@ -118,38 +121,20 @@ def recover(url: str, pending: dict, instruction: str):
                 raise RuntimeError("approval_sse_error: " + "; ".join(errors))
             if not done:
                 raise RuntimeError("审批恢复流提前结束，未确认恢复结果")
-        emit(event="resumed", thread_id=pending["threadId"], status="resumed")
-        return
-    outcome = vote_on_approval(pending, instruction=instruction)
-    if not outcome.decided:
-        raise RuntimeError("审批评审未形成决定，稍后重试")
-    decision = "approve" if outcome.decided and outcome.approved else "reject"
-    emit(event="vote", thread_id=pending["threadId"], approval_id=pending["id"],
-         action=decision, outcome=outcome.as_state_dict())
-    with requests.post(
-        f"{url}/api/v1/threads/{pending['threadId']}/approval",
-        json={"decision": decision, "approval_id": pending["id"]},
-        stream=True, timeout=(20, 120),
-    ) as response:
-        response.raise_for_status()
-        done = False
-        errors = []
-        for event, data in iter_sse(response):
-            if event == "error":
-                errors.append(str(data.get("message") or data.get("detail") or data))
-            if event == "done":
-                done = True
-                break
-        if errors:
-            raise RuntimeError("approval_sse_error: " + "; ".join(errors))
-        if not done:
-            raise RuntimeError("审批恢复流提前结束，未确认恢复结果")
-    response = requests.get(f"{url}/api/v1/threads/{pending['threadId']}", timeout=20)
-    response.raise_for_status()
-    status = response.json().get("status")
-    if status == "error":
-        raise RuntimeError("审批恢复后服务端任务失败")
-    emit(event="resumed", thread_id=pending["threadId"], status=status)
+    except requests.RequestException:
+        # A read timeout does not cancel the API worker. Confirm acceptance
+        # before allowing the caller to retry; never POST again here.
+        state = _recovery_state(url, pending)
+        if errors or state == "pending":
+            raise
+        emit(event="recovery_pending", thread_id=pending["threadId"], status=state)
+        return state
+    state = _recovery_state(url, pending)
+    if state == "pending":
+        raise RuntimeError("审批恢复流结束但审批仍未恢复")
+    emit(event="resumed" if state in {"finished", "changed"} else "recovery_pending",
+         thread_id=pending["threadId"], status=state)
+    return state
 
 
 class RecoveryAttempts:
@@ -224,14 +209,21 @@ def main():
                 if tid in futures or not attempts.eligible(pending.get("id")):
                     continue
                 try:
-                    response = requests.get(f"{args.url}/api/v1/threads/{tid}", timeout=10)
+                    response = requests.get(f"{args.url}/api/v1/threads/{tid}/status", timeout=10)
                     response.raise_for_status()
                     thread = response.json()
                     if thread.get("status") in {"running", "finished"}:
                         continue
-                    if pending.get("claimed"):
+                    current = thread.get("pendingApproval")
+                    if not current or current.get("id") != pending.get("id") or current.get("threadId") != tid:
+                        continue
+                    if current.get("claimed"):
                         emit(event="needs_attention", thread_id=tid, reason="审批仍被占用，未重复执行")
                         continue
+                    # Read the question only when an exact approval needs review.
+                    response = requests.get(f"{args.url}/api/v1/threads/{tid}", timeout=10)
+                    response.raise_for_status()
+                    thread = response.json()
                     instruction = "\n".join(
                         str(chunk.get("text") or "")
                         for message in thread.get("messages", []) if message.get("author") == "user"
@@ -251,9 +243,13 @@ def main():
                 if tid in recovered and recovered[tid].get("final_status") == "finished":
                     continue
                 try:
-                    response = requests.get(f"{args.url}/api/v1/threads/{tid}", timeout=10)
+                    response = requests.get(f"{args.url}/api/v1/threads/{tid}/status", timeout=10)
                     response.raise_for_status()
                     thread = response.json()
+                    if thread.get("status") in {"finished", "error"} and not isinstance(thread.get("finalAnswer"), str):
+                        response = requests.get(f"{args.url}/api/v1/threads/{tid}", timeout=10)
+                        response.raise_for_status()
+                        thread = response.json()
                     if thread.get("status") == "finished":
                         recovered[tid] = {"answer": extract_answer(thread), "final_status": "finished", "error": None}
                         changed = True

@@ -33,6 +33,7 @@ from services.thread_service import (
     conversation_snapshot,
     fetch_visible_messages,
     thread_payload,
+    thread_status_payload,
 )
 from utils.platform_utils import normalize_repo_url
 from utils.redis_utils import cleanup_stream
@@ -102,6 +103,15 @@ def dashboard_thread_detail(thread_id: str) -> dict[str, Any]:
     return thread_payload(task, include_versions=True)
 
 
+@router.get("/{thread_id}/status")
+def dashboard_thread_status(thread_id: str) -> dict[str, Any]:
+    """返回轮询所需状态，不读取 checkpoint 或会话版本。"""
+    task = get_task(thread_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="thread not found")
+    return thread_status_payload(task)
+
+
 @router.get("/{thread_id}/approval")
 def dashboard_pending_approval(thread_id: str) -> dict[str, Any] | None:
     """返回指定会话的待审批操作信息。"""
@@ -123,9 +133,9 @@ async def dashboard_explain_approval(
     Returns:
         包含 ``explanation`` 字段的字典。
     """
-    if get_task(thread_id) is None:
+    if await asyncio.to_thread(get_task, thread_id) is None:
         raise HTTPException(status_code=404, detail="thread not found")
-    pending = get_pending_approval(thread_id)
+    pending = await asyncio.to_thread(get_pending_approval, thread_id)
     if pending is None:
         raise HTTPException(status_code=409, detail="当前会话没有待审批的操作")
     approval_id = str(body.get("approval_id") or "")
@@ -150,6 +160,10 @@ async def dashboard_decide_approval(
     thread_id: str, body: dict[str, Any]
 ) -> StreamingResponse:
     """对命令审批做出同意或拒绝决定，并返回流式响应。"""
+    return await asyncio.to_thread(_prepare_approval_response, thread_id, body)
+
+
+def _prepare_approval_response(thread_id: str, body: dict[str, Any]) -> StreamingResponse:
     task = get_task(thread_id)
     pending = get_pending_approval(thread_id)
     if task is None:
@@ -175,6 +189,10 @@ async def dashboard_decide_approval(
 @router.post("/stream-message")
 async def dashboard_stream_new_message(body: DashboardThreadMessageRequest) -> StreamingResponse:
     """创建新会话并开始流式对话。"""
+    return await asyncio.to_thread(_prepare_new_message, body)
+
+
+def _prepare_new_message(body: DashboardThreadMessageRequest) -> StreamingResponse:
     repo_url = normalize_repo_url(body.repo)
     requested_backend = body.backend_type or ("sandbox" if get_settings().use_sandbox else "local")
     if requested_backend == "sandbox" and not get_settings().use_sandbox:
@@ -210,6 +228,12 @@ async def dashboard_stream_existing_message(
     body: DashboardThreadMessageRequest,
 ) -> StreamingResponse:
     """向已有会话追加对话轮次。"""
+    return await asyncio.to_thread(_prepare_existing_message, thread_id, body)
+
+
+def _prepare_existing_message(
+    thread_id: str, body: DashboardThreadMessageRequest,
+) -> StreamingResponse:
     task = get_task(thread_id)
     requested_backend = body.backend_type or ("sandbox" if get_settings().use_sandbox else "local")
     if requested_backend == "sandbox" and not get_settings().use_sandbox:
