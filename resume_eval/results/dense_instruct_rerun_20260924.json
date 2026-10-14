@@ -1,0 +1,92 @@
+{
+  "source_text": "README.md",
+  "source_note": "Post-training project documentation; check overlap before claiming held-out PPL.",
+  "model_name": "Xihe-106M",
+  "model_tokenizer": "D:\\Bemyself\\Python\\MOE\\model",
+  "text_tokens": 4096,
+  "window": 256,
+  "prompt_tokens": 128,
+  "new_tokens": 64,
+  "warmups": 2,
+  "repeats": 10,
+  "device": "cuda",
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "torch": "2.11.0+cu128",
+  "python": "3.11.9",
+  "roles": {
+    "Instruct": {
+      "checkpoint": "D:\\Bemyself\\Python\\MOE\\out\\Xihe-106M-Instruct.pth",
+      "ppl": {
+        "scored_tokens": 4095,
+        "mean_nll": 5.1007676866319445,
+        "ppl": 164.14787307041453
+      },
+      "timing": {
+        "ttft_seconds_median": 0.01108974999988277,
+        "decode_tokens_per_second_median": 75.29640344541447,
+        "runs": [
+          {
+            "ttft_seconds": 0.01111480000145093,
+            "decode_seconds": 0.8959279999999126,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 70.31815056567731
+          },
+          {
+            "ttft_seconds": 0.010932400000456255,
+            "decode_seconds": 0.8310230999995838,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 75.8101670098359
+          },
+          {
+            "ttft_seconds": 0.011064699998314609,
+            "decode_seconds": 0.8287269000011293,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 76.02021848200432
+          },
+          {
+            "ttft_seconds": 0.011023999999451917,
+            "decode_seconds": 0.8525773000001209,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 73.89359299149892
+          },
+          {
+            "ttft_seconds": 0.026563999999780208,
+            "decode_seconds": 0.9183207000005496,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 68.60348459962005
+          },
+          {
+            "ttft_seconds": 0.01127940000151284,
+            "decode_seconds": 0.830394199998409,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 75.86758192689774
+          },
+          {
+            "ttft_seconds": 0.011031300000468036,
+            "decode_seconds": 0.8303160999985266,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 75.87471807437167
+          },
+          {
+            "ttft_seconds": 0.010941799999272916,
+            "decode_seconds": 0.834867800000211,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 75.4610490427156
+          },
+          {
+            "ttft_seconds": 0.017310400000496884,
+            "decode_seconds": 0.8510511000004044,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 74.02610724546395
+          },
+          {
+            "ttft_seconds": 0.011393900000257418,
+            "decode_seconds": 0.838526900000943,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 75.13175784811334
+          }
+        ]
+      }
+    }
+  }
+}

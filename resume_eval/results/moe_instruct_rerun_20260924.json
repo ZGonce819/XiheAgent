@@ -1,0 +1,92 @@
+{
+  "source_text": "README.md",
+  "source_note": "Post-training project documentation; check overlap before claiming held-out PPL.",
+  "model_name": "Xihe-147M-MoE",
+  "model_tokenizer": "D:\\Bemyself\\Python\\MOE\\model",
+  "text_tokens": 4096,
+  "window": 256,
+  "prompt_tokens": 128,
+  "new_tokens": 64,
+  "warmups": 2,
+  "repeats": 10,
+  "device": "cuda",
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "torch": "2.11.0+cu128",
+  "python": "3.11.9",
+  "roles": {
+    "Instruct": {
+      "checkpoint": "D:\\Bemyself\\Python\\MOE\\out\\Xihe-147M-MoE-Instruct.pth",
+      "ppl": {
+        "scored_tokens": 4095,
+        "mean_nll": 4.742627400269002,
+        "ppl": 114.73526146152093
+      },
+      "timing": {
+        "ttft_seconds_median": 0.024015450000661076,
+        "decode_tokens_per_second_median": 67.32001146976333,
+        "runs": [
+          {
+            "ttft_seconds": 0.023180500000307802,
+            "decode_seconds": 0.934176299999308,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 67.4390904586711
+          },
+          {
+            "ttft_seconds": 0.023628099999768892,
+            "decode_seconds": 0.9354767999993783,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 67.34533662410641
+          },
+          {
+            "ttft_seconds": 0.023983400000361144,
+            "decode_seconds": 0.9665946999994048,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 65.17726612823223
+          },
+          {
+            "ttft_seconds": 0.023791599998730817,
+            "decode_seconds": 0.9338657000007515,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 67.46152043056009
+          },
+          {
+            "ttft_seconds": 0.02404750000096101,
+            "decode_seconds": 0.9350689999992028,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 67.37470710723349
+          },
+          {
+            "ttft_seconds": 0.023809099999198224,
+            "decode_seconds": 0.9335982000011427,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 67.48084989872827
+          },
+          {
+            "ttft_seconds": 0.024293500000567292,
+            "decode_seconds": 0.9663241999987804,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 65.19551098904438
+          },
+          {
+            "ttft_seconds": 0.02494990000013786,
+            "decode_seconds": 0.9361809000001813,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 67.29468631542024
+          },
+          {
+            "ttft_seconds": 0.025211500000295928,
+            "decode_seconds": 0.9873057999993762,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 63.81001711935634
+          },
+          {
+            "ttft_seconds": 0.03255080000053567,
+            "decode_seconds": 0.9693435999997746,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 64.99243405539032
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,166 @@
+{
+  "source_text": "D:\\Bemyself\\Python\\xihe\\README.md",
+  "source_note": "Post-training project documentation; check overlap before claiming held-out PPL.",
+  "model_name": "Xihe-147M-MoE",
+  "model_tokenizer": "D:\\Bemyself\\Python\\MOE\\model",
+  "text_tokens": 4096,
+  "window": 256,
+  "prompt_tokens": 128,
+  "new_tokens": 64,
+  "warmups": 2,
+  "repeats": 10,
+  "device": "cuda",
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "torch": "2.11.0+cu128",
+  "python": "3.11.9",
+  "roles": {
+    "Base": {
+      "checkpoint": "D:\\Bemyself\\Python\\MOE\\out\\Xihe-147M-MoE-Base.pth",
+      "ppl": {
+        "scored_tokens": 4095,
+        "mean_nll": 7.8061894865117525,
+        "ppl": 2455.7548966642285
+      },
+      "timing": {
+        "ttft_seconds_median": 0.029618399999890244,
+        "decode_tokens_per_second_median": 57.72589834717299,
+        "runs": [
+          {
+            "ttft_seconds": 0.030121100000542356,
+            "decode_seconds": 1.1285268999999971,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 55.82498742387103
+          },
+          {
+            "ttft_seconds": 0.03031609999925422,
+            "decode_seconds": 1.0940508999992744,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 57.58415810456514
+          },
+          {
+            "ttft_seconds": 0.030198500000551576,
+            "decode_seconds": 1.0868064000005688,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 57.968006077225
+          },
+          {
+            "ttft_seconds": 0.027428700001109974,
+            "decode_seconds": 1.1275233999986085,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 55.874671869406654
+          },
+          {
+            "ttft_seconds": 0.02594859999953769,
+            "decode_seconds": 1.0383885000010196,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 60.67093385562161
+          },
+          {
+            "ttft_seconds": 0.031007099998532794,
+            "decode_seconds": 1.1240353000011964,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 56.048061835720766
+          },
+          {
+            "ttft_seconds": 0.02353229999971518,
+            "decode_seconds": 1.0651644000008673,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 59.14579946527381
+          },
+          {
+            "ttft_seconds": 0.023696800000834628,
+            "decode_seconds": 1.0765532000004896,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 58.52009914602581
+          },
+          {
+            "ttft_seconds": 0.02911569999923813,
+            "decode_seconds": 1.0932754000004934,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 57.625004641988255
+          },
+          {
+            "ttft_seconds": 0.03081700000075216,
+            "decode_seconds": 1.089460399998643,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 57.82679205235773
+          }
+        ]
+      }
+    },
+    "Instruct": {
+      "checkpoint": "D:\\Bemyself\\Python\\MOE\\out\\Xihe-147M-MoE-Instruct.pth",
+      "ppl": {
+        "scored_tokens": 4095,
+        "mean_nll": 4.742627400269002,
+        "ppl": 114.73526146152093
+      },
+      "timing": {
+        "ttft_seconds_median": 0.028624050000871648,
+        "decode_tokens_per_second_median": 56.92495217875569,
+        "runs": [
+          {
+            "ttft_seconds": 0.029634499998792307,
+            "decode_seconds": 1.142437600001358,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 55.1452438189404
+          },
+          {
+            "ttft_seconds": 0.0254653000010876,
+            "decode_seconds": 1.1002347999983613,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 57.260504757797
+          },
+          {
+            "ttft_seconds": 0.028008300001602038,
+            "decode_seconds": 1.2454598999993323,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 50.58372413277519
+          },
+          {
+            "ttft_seconds": 0.023330399999395013,
+            "decode_seconds": 1.070915000000241,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 58.828198316379755
+          },
+          {
+            "ttft_seconds": 0.023484999999709544,
+            "decode_seconds": 1.1090184999993653,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 56.806987439827246
+          },
+          {
+            "ttft_seconds": 0.06327050000072632,
+            "decode_seconds": 1.1044315999988612,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 57.04291691768414
+          },
+          {
+            "ttft_seconds": 0.029670600000827108,
+            "decode_seconds": 1.1649541999995563,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 54.07937925802061
+          },
+          {
+            "ttft_seconds": 0.029509300000427174,
+            "decode_seconds": 1.1739495000001625,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 53.665000070268164
+          },
+          {
+            "ttft_seconds": 0.02923980000014126,
+            "decode_seconds": 1.0906254999990779,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 57.76501649746248
+          },
+          {
+            "ttft_seconds": 0.027784899999460322,
+            "decode_seconds": 1.0443678999999975,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 60.323569883754715
+          }
+        ]
+      }
+    }
+  }
+}

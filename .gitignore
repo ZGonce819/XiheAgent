@@ -25,7 +25,6 @@ htmlcov/
 
 # Virtual environments
 .venv/
-.eval-venv/
 venv/
 ENV/
 env/
@@ -86,9 +85,6 @@ npm-debug.log*
 # Misc
 # ===========================
 .cache/
-.temp/
-temp/
-tmp/
 *.bak
 *.tmp
 
@@ -97,12 +93,3 @@ tmp/
 # ===========================
 # 运行时数据：自动化任务定义、循环状态、待审批命令、模型配置覆盖
 data/
-# 测试跑完留下的临时工作目录
-.pytest_tmp/
-.pytest_tmp*/
-# 界面走查与设计评审产物（截图、脚本）
-.artifacts/
-.impeccable/
-# Agent 的工作记录，随本机走，不进仓库
-.workbuddy/
-.workbuddy-ai/

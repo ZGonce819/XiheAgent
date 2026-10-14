@@ -1,0 +1,78 @@
+{
+  "source_text": "D:\\Bemyself\\Python\\MOE\\博客-LLM全流程训练实战教程.md",
+  "source_note": "Post-training project documentation; check overlap before claiming held-out PPL.",
+  "model_name": "Xihe-106M",
+  "model_tokenizer": "D:\\Bemyself\\Python\\MOE\\model",
+  "text_tokens": 4096,
+  "window": 256,
+  "prompt_tokens": 128,
+  "new_tokens": 16,
+  "warmups": 0,
+  "repeats": 1,
+  "device": "cuda",
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "torch": "2.11.0+cu128",
+  "python": "3.11.9",
+  "roles": {
+    "Base": {
+      "checkpoint": "D:\\Bemyself\\Python\\MOE\\out\\Xihe-106M-Base.pth",
+      "ppl": {
+        "scored_tokens": 4095,
+        "mean_nll": 8.0542480170654,
+        "ppl": 3147.1357015688277
+      },
+      "timing": {
+        "ttft_seconds_median": 0.022955300000830903,
+        "decode_tokens_per_second_median": 53.53196786390676,
+        "runs": [
+          {
+            "ttft_seconds": 0.022955300000830903,
+            "decode_seconds": 0.28020639999886043,
+            "decode_tokens": 15,
+            "decode_tokens_per_second": 53.53196786390676
+          }
+        ]
+      }
+    },
+    "Instruct": {
+      "checkpoint": "D:\\Bemyself\\Python\\MOE\\out\\Xihe-106M-Instruct.pth",
+      "ppl": {
+        "scored_tokens": 4095,
+        "mean_nll": 5.395492341317537,
+        "ppl": 220.41063765085246
+      },
+      "timing": {
+        "ttft_seconds_median": 0.013370600001508137,
+        "decode_tokens_per_second_median": 64.33402914163962,
+        "runs": [
+          {
+            "ttft_seconds": 0.013370600001508137,
+            "decode_seconds": 0.23315809999985504,
+            "decode_tokens": 15,
+            "decode_tokens_per_second": 64.33402914163962
+          }
+        ]
+      }
+    },
+    "Distill": {
+      "checkpoint": "D:\\Bemyself\\Python\\MOE\\out\\Xihe-106M-Distill.pth",
+      "ppl": {
+        "scored_tokens": 4095,
+        "mean_nll": 5.270116591307998,
+        "ppl": 194.43863097820127
+      },
+      "timing": {
+        "ttft_seconds_median": 0.013093699999444652,
+        "decode_tokens_per_second_median": 55.87089502565617,
+        "runs": [
+          {
+            "ttft_seconds": 0.013093699999444652,
+            "decode_seconds": 0.2684761000000435,
+            "decode_tokens": 15,
+            "decode_tokens_per_second": 55.87089502565617
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "7dd30055-0198-452e-8c25-f73dbe27dcb8": {
+    "normalized_match": true,
+    "reason": "模型计算正确（1.45642 Å），题目要求四舍五入到皮米输出 1.46，官方期望 1.456 未按题四舍五入；题目精度要求与官方答案不一致，用户裁决按命中计。"
+  },
+  "46719c30-f4c3-4cad-be07-d5cb21eee6bb": {
+    "normalized_match": true,
+    "reason": "题目要求输出论文标题；真实标题为 'Mapping human-oriented information to software agents for online systems usage'（OpenAlex 精确命中，Pietro Murano 2001，带连字符）。GAIA 期望答案 'Human Oriented' 漏了连字符，与真实标题不一致；模型还原真实标题（Human-Oriented）内容正确，出题瑕疵按命中计。"
+  },
+  "08cae58d-4084-4616-b6dd-dd6534e4825b": {
+    "normalized_match": true,
+    "reason": "题目要求不调整拆股（without adjusting for stock split）；名义口径首次破 $50 为 1983（1983-06-07 最高价 63.245，1980/1981/1982 最高价 36.12/34.755/34.895 均 <50，反证成立；1984-1986 回落，1987 再次突破）。官方 gold 2018 为 Google Finance 拆股调整口径，与题干矛盾；GAIA-Verified errata 修正 1987 亦遗漏 1983 年数据。模型答案 1983 事实正确，按命中计。"
+  },
+  "7d4a7d1d-cac6-44a8-96e8-ea9584a70825": {
+    "normalized_match": true,
+    "reason": "题目问 Girls Who Code 女性计算机科学家比例 37%→24%（13%）花了多少年，期望 22；模型答案 '22 years' 数值正确（37%→24% 对应 1995→2017 共 22 年），仅多带单位 'years'，判分未去单位导致未命中；用户裁决按命中计。"
+  }
+}

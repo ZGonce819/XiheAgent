@@ -1,0 +1,240 @@
+{
+  "source_text": "D:\\Bemyself\\Python\\xihe\\README.md",
+  "source_note": "Post-training project documentation; check overlap before claiming held-out PPL.",
+  "model_name": "Xihe-106M",
+  "model_tokenizer": "D:\\Bemyself\\Python\\MOE\\model",
+  "text_tokens": 4096,
+  "window": 256,
+  "prompt_tokens": 128,
+  "new_tokens": 64,
+  "warmups": 2,
+  "repeats": 10,
+  "device": "cpu",
+  "gpu": null,
+  "torch": "2.14.0+cpu",
+  "python": "3.11.9",
+  "roles": {
+    "Base": {
+      "checkpoint": "D:\\Bemyself\\Python\\MOE\\out\\Xihe-106M-Base.pth",
+      "ppl": {
+        "scored_tokens": 4095,
+        "mean_nll": 7.591920823317308,
+        "ppl": 1982.1171563654862
+      },
+      "timing": {
+        "ttft_seconds_median": 0.07952560000012454,
+        "decode_tokens_per_second_median": 33.70419313620276,
+        "runs": [
+          {
+            "ttft_seconds": 0.0709169000001566,
+            "decode_seconds": 1.8815238000006502,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 33.483498853417764
+          },
+          {
+            "ttft_seconds": 0.07705340000029537,
+            "decode_seconds": 1.881012699999701,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 33.49259683361522
+          },
+          {
+            "ttft_seconds": 0.07758759999887843,
+            "decode_seconds": 1.8614498000006279,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 33.844587159953896
+          },
+          {
+            "ttft_seconds": 0.07690340000044671,
+            "decode_seconds": 1.8672843999993347,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 33.7388348555916
+          },
+          {
+            "ttft_seconds": 0.08100459999877785,
+            "decode_seconds": 1.861212700001488,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 33.848898623972225
+          },
+          {
+            "ttft_seconds": 0.0787756999998237,
+            "decode_seconds": 1.8711268000006385,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 33.669551416813924
+          },
+          {
+            "ttft_seconds": 0.08027550000042538,
+            "decode_seconds": 1.9005981999998767,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 33.14745852121931
+          },
+          {
+            "ttft_seconds": 0.0874880999999732,
+            "decode_seconds": 1.862961400000131,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 33.81712578693019
+          },
+          {
+            "ttft_seconds": 0.0815031000001909,
+            "decode_seconds": 1.8660899999995308,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 33.760429561283665
+          },
+          {
+            "ttft_seconds": 0.08289179999883345,
+            "decode_seconds": 1.8732755000000907,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 33.6309314887196
+          }
+        ]
+      }
+    },
+    "Instruct": {
+      "checkpoint": "D:\\Bemyself\\Python\\MOE\\out\\Xihe-106M-Instruct.pth",
+      "ppl": {
+        "scored_tokens": 4095,
+        "mean_nll": 5.100768372252747,
+        "ppl": 164.14798561364964
+      },
+      "timing": {
+        "ttft_seconds_median": 0.07930539999961184,
+        "decode_tokens_per_second_median": 33.0858163544013,
+        "runs": [
+          {
+            "ttft_seconds": 0.07929439999861643,
+            "decode_seconds": 1.8823742000004131,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 33.46837201656619
+          },
+          {
+            "ttft_seconds": 0.07956259999991744,
+            "decode_seconds": 1.889342000000397,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 33.34494231324279
+          },
+          {
+            "ttft_seconds": 0.07848860000012792,
+            "decode_seconds": 1.9258221000000049,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 32.7133020230684
+          },
+          {
+            "ttft_seconds": 0.07931640000060725,
+            "decode_seconds": 1.9047511000007944,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 33.075187618987975
+          },
+          {
+            "ttft_seconds": 0.07592040000054112,
+            "decode_seconds": 1.9279870000009396,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 32.67656887726385
+          },
+          {
+            "ttft_seconds": 0.08391839999967488,
+            "decode_seconds": 1.922884300000078,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 32.763281701347005
+          },
+          {
+            "ttft_seconds": 0.08317749999878288,
+            "decode_seconds": 1.8793521000006876,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 33.5221909720786
+          },
+          {
+            "ttft_seconds": 0.08004430000073626,
+            "decode_seconds": 1.9021620999992592,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 33.120205685953124
+          },
+          {
+            "ttft_seconds": 0.07906150000053458,
+            "decode_seconds": 1.903527700000268,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 33.09644508981463
+          },
+          {
+            "ttft_seconds": 0.07720320000044012,
+            "decode_seconds": 1.9354853999993793,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 32.54997428553075
+          }
+        ]
+      }
+    },
+    "Distill": {
+      "checkpoint": "D:\\Bemyself\\Python\\MOE\\out\\Xihe-106M-Distill.pth",
+      "ppl": {
+        "scored_tokens": 4095,
+        "mean_nll": 4.871356968769078,
+        "ppl": 130.49787834907298
+      },
+      "timing": {
+        "ttft_seconds_median": 0.07719949999955134,
+        "decode_tokens_per_second_median": 33.112399368316815,
+        "runs": [
+          {
+            "ttft_seconds": 0.08433230000082403,
+            "decode_seconds": 1.9297911999983626,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 32.646018906114534
+          },
+          {
+            "ttft_seconds": 0.07754319999912695,
+            "decode_seconds": 1.9063283000014053,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 33.04782287497571
+          },
+          {
+            "ttft_seconds": 0.07685579999997572,
+            "decode_seconds": 1.9125024999993911,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 32.94113341029361
+          },
+          {
+            "ttft_seconds": 0.07769489999918733,
+            "decode_seconds": 1.884637000001021,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 33.42818802770288
+          },
+          {
+            "ttft_seconds": 0.08106629999929282,
+            "decode_seconds": 1.9036895999997796,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 33.09363039016828
+          },
+          {
+            "ttft_seconds": 0.07803229999990435,
+            "decode_seconds": 1.8960425999994186,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 33.22710154298185
+          },
+          {
+            "ttft_seconds": 0.07609820000106993,
+            "decode_seconds": 1.8850172999991628,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 33.421443930529435
+          },
+          {
+            "ttft_seconds": 0.07373619999998482,
+            "decode_seconds": 1.910075699999652,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 32.98298596229012
+          },
+          {
+            "ttft_seconds": 0.07071070000165491,
+            "decode_seconds": 1.9015326999997342,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 33.13116834646536
+          },
+          {
+            "ttft_seconds": 0.07016049999947427,
+            "decode_seconds": 1.8818159000002197,
+            "decode_tokens": 63,
+            "decode_tokens_per_second": 33.478301464023474
+          }
+        ]
+      }
+    }
+  }
+}
